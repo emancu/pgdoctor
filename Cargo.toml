@@ -1,0 +1,13 @@
+[package]
+name = "pgdoctor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.40", features = ["full"] }
+tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+anyhow = "1.0"
+async-trait = "0.1"
