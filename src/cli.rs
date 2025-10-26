@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "pgdoctor")]
@@ -7,9 +7,24 @@ use clap::Parser;
 #[command(about = "PostgreSQL database health checker", long_about = None)]
 pub struct Cli {
     /// PostgreSQL connection string (e.g., "postgresql://user:password@localhost/dbname")
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub connection: String,
 
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Run configured database checks
+    Run(RunArgs),
+    /// Perform a detailed table bloat analysis
+    #[command(name = "check-bloat")]
+    CheckBloat,
+}
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
     /// Include only these check IDs (comma-separated, e.g., "pg_version,table_sizes")
     #[arg(long, value_delimiter = ',')]
     pub include: Option<Vec<String>>,
@@ -23,7 +38,7 @@ pub struct Cli {
     pub categories: Option<Vec<String>>,
 }
 
-impl Cli {
+impl RunArgs {
     pub fn should_run_check(&self, check_id: &str, category: &str) -> bool {
         // If include is specified, only run checks that are included
         if let Some(include) = &self.include {
