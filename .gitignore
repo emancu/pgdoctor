@@ -1,1 +1,15 @@
-target/
+# Binaries
+pgdoctor
+*.exe
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+
+# OS
+.DS_Store
+
+# Test
+coverage.out

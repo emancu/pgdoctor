@@ -1,0 +1,11 @@
+# vi: ft=toml
+[sqlfluff:rules:capitalisation.keywords]
+# Keywords
+capitalisation_policy = upper
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 2
+
+[sqlfluff:layout:type:comma]
+line_position = leading
