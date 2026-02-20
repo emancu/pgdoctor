@@ -300,8 +300,9 @@ Report severity is automatically the maximum across all findings.
 1. Create `checks/mycheck/` with `query.sql`, `README.md`, `check.go`, `check_test.go`
 2. Add `"checks/mycheck"` to `sqlc.yaml` queries list
 3. Run `sqlc generate`
-4. Run `go generate ./...`
+4. Run `go generate ./...` (this regenerates both `checks.go` and the `docs/` landing page)
 5. Verify: `go build -o pgdoctor ./cmd/pgdoctor && ./pgdoctor list`
+6. Commit the updated `docs/` directory (CI will verify it's up to date)
 
 ### Modifying Existing Check
 

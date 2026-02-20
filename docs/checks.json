@@ -1,0 +1,166 @@
+{
+  "checks": [
+    {
+      "id": "cache-efficiency",
+      "name": "Cache Efficiency",
+      "category": "performance",
+      "description": "Analyzes database-wide buffer cache hit ratio"
+    },
+    {
+      "id": "connection-efficiency",
+      "name": "Connection Efficiency",
+      "category": "configs",
+      "description": "Analyzes PostgreSQL 14+ session statistics for connection pool efficiency"
+    },
+    {
+      "id": "connection-health",
+      "name": "Connection Health",
+      "category": "configs",
+      "description": "Monitors connection pool saturation, idle ratios, and stuck transactions"
+    },
+    {
+      "id": "dev-indexes",
+      "name": "Temporary Dev Indexes",
+      "category": "indexes",
+      "description": "Identifies temporary development indexes that should be promoted or dropped"
+    },
+    {
+      "id": "duplicate-indexes",
+      "name": "Duplicate Indexes",
+      "category": "indexes",
+      "description": "Identifies exact and prefix duplicate indexes wasting disk space"
+    },
+    {
+      "id": "freeze-age",
+      "name": "Transaction ID Freeze Age",
+      "category": "vacuum",
+      "description": "Monitors transaction ID age to prevent wraparound issues"
+    },
+    {
+      "id": "index-bloat",
+      "name": "Index Bloat",
+      "category": "indexes",
+      "description": "Estimates B-tree index bloat to identify indexes needing maintenance"
+    },
+    {
+      "id": "index-usage",
+      "name": "Index Usage",
+      "category": "indexes",
+      "description": "Identifies unused and inefficient indexes based on usage statistics"
+    },
+    {
+      "id": "invalid-indexes",
+      "name": "Invalid Indexes",
+      "category": "indexes",
+      "description": "Identifies indexes in invalid state that need rebuilding"
+    },
+    {
+      "id": "partitioning",
+      "name": "Table Partitioning",
+      "category": "schema",
+      "description": "Validates large and transient tables are properly partitioned"
+    },
+    {
+      "id": "partition-usage",
+      "name": "Partition Key Usage",
+      "category": "performance",
+      "description": "Detects queries on partitioned tables that don't use partition keys"
+    },
+    {
+      "id": "pg-version",
+      "name": "PostgreSQL Version",
+      "category": "configs",
+      "description": "Checks if PostgreSQL version is supported and up to date"
+    },
+    {
+      "id": "pk-types",
+      "name": "Primary Key Type Validation",
+      "category": "schema",
+      "description": "Validates primary keys use bigint or UUID for sufficient growth capacity"
+    },
+    {
+      "id": "replication-lag",
+      "name": "Replication Lag",
+      "category": "performance",
+      "description": "Monitors active replication streams for lag issues"
+    },
+    {
+      "id": "replication-slots",
+      "name": "Replication Slots",
+      "category": "configs",
+      "description": "Validates replication slot configuration and health status"
+    },
+    {
+      "id": "sequence-health",
+      "name": "Sequence Health",
+      "category": "schema",
+      "description": "Identifies sequences approaching exhaustion and integer columns needing bigint migration"
+    },
+    {
+      "id": "session-settings",
+      "name": "PostgreSQL Session Configs",
+      "category": "configs",
+      "description": "Validates role-level timeout and logging configurations"
+    },
+    {
+      "id": "statistics-freshness",
+      "name": "Statistics Freshness",
+      "category": "configs",
+      "description": "Validates PostgreSQL statistics are mature enough for usage-based analysis"
+    },
+    {
+      "id": "table-activity",
+      "name": "Table Activity",
+      "category": "performance",
+      "description": "Analyzes table write activity to identify high-churn tables and HOT update efficiency issues"
+    },
+    {
+      "id": "table-bloat",
+      "name": "Table Bloat",
+      "category": "vacuum",
+      "description": "Identifies tables with high dead tuple percentages indicating vacuum issues"
+    },
+    {
+      "id": "table-seq-scans",
+      "name": "Table Sequential Scans",
+      "category": "performance",
+      "description": "Identifies tables with excessive sequential scans that may benefit from indexes"
+    },
+    {
+      "id": "table-vacuum-health",
+      "name": "Table Vacuum Health",
+      "category": "vacuum",
+      "description": "Monitors per-table autovacuum configuration and activity"
+    },
+    {
+      "id": "temp-usage",
+      "name": "Temporary File Usage",
+      "category": "configs",
+      "description": "Monitors temporary file creation indicating work_mem exhaustion"
+    },
+    {
+      "id": "toast-storage",
+      "name": "TOAST Storage Analysis",
+      "category": "schema",
+      "description": "Analyzes TOAST storage usage for large value storage optimization"
+    },
+    {
+      "id": "uuid-defaults",
+      "name": "UUID Default Value Analysis",
+      "category": "performance",
+      "description": "Detects UUID columns using random UUIDs (v4) as defaults which cause B-tree index bloat"
+    },
+    {
+      "id": "uuid-types",
+      "name": "UUID Type Validation",
+      "category": "schema",
+      "description": "Validates UUID columns use native uuid type instead of varchar/text"
+    },
+    {
+      "id": "vacuum-settings",
+      "name": "PostgreSQL Vacuum \u0026 Maintenance Configs",
+      "category": "vacuum",
+      "description": "Validates autovacuum, maintenance memory, and vacuum cost settings"
+    }
+  ]
+}
