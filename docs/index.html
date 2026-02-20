@@ -324,6 +324,17 @@
     .check-card-badge.cat-performance { background: rgba(76,175,80,0.12); color: #4CAF50; }
     .check-card-badge.cat-configs { background: rgba(51,103,145,0.15); color: var(--pg-blue-light); }
 
+    .share-link-btn {
+      flex-shrink: 0; background: none; border: none; color: var(--text-dim);
+      cursor: pointer; padding: 4px; border-radius: 4px;
+      transition: color 0.2s, background 0.2s; display: flex; align-items: center;
+      opacity: 0; transition: opacity 0.2s, color 0.2s;
+    }
+    .check-card-header:hover .share-link-btn,
+    .check-card.open .share-link-btn { opacity: 1; }
+    .share-link-btn:hover { color: var(--pg-blue-light); background: rgba(255,255,255,0.06); }
+    .share-link-btn.copied { color: var(--accent); opacity: 1; }
+
     .check-card-content {
       display: none; padding: 0 20px 20px; border-top: 1px solid var(--border);
     }
@@ -801,7 +812,37 @@
       .then(function(data) {
         checksData = data.checks;
         buildPage(checksData);
+        openCheckFromHash();
       });
+
+    // === Deep-link: open check from URL hash ===
+    function openCheckFromHash() {
+      var hash = location.hash.replace('#', '');
+      if (!hash) return;
+      var card = document.querySelector('.check-card[data-check-id="' + CSS.escape(hash) + '"]');
+      if (!card) return;
+
+      // Ensure the card's category group is visible
+      var group = card.closest('.category-group');
+      if (group && group.style.display === 'none') {
+        // Reset filter to "All"
+        var allTab = document.querySelector('.category-tab');
+        if (allTab) filterChecks('all', allTab);
+      }
+
+      // Open the card and load README
+      if (!card.classList.contains('open')) {
+        var header = card.querySelector('.check-card-header');
+        toggleCheck(header);
+      }
+
+      // Scroll to card after a brief delay for DOM rendering
+      setTimeout(function() {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+
+    window.addEventListener('hashchange', openCheckFromHash);
 
     function buildPage(checks) {
       // Group checks by category
@@ -875,10 +916,12 @@
     function buildCheckCard(c) {
       var card = document.createElement('div');
       card.className = 'check-card';
+      card.id = c.id;
       card.setAttribute('data-category', c.category);
       card.setAttribute('data-check-id', c.id);
 
       var chevronSvg = '<svg class="check-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
+      var linkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
 
       var header = document.createElement('div');
       header.className = 'check-card-header';
@@ -889,11 +932,26 @@
         chevronSvg +
         '<span class="check-card-id">' + escapeHtml(c.id) + '</span>' +
         '<span class="check-card-info"><span class="check-card-name">' + escapeHtml(c.description) + '</span></span>' +
-        '<span class="check-card-badge cat-' + escapeHtml(c.category) + '">' + escapeHtml(c.category) + '</span>';
+        '<span class="check-card-badge cat-' + escapeHtml(c.category) + '">' + escapeHtml(c.category) + '</span>' +
+        '<button class="share-link-btn" aria-label="Copy link to ' + escapeHtml(c.id) + '" title="Copy link">' + linkSvg + '</button>';
 
-      header.onclick = function() { toggleCheck(header); };
+      header.onclick = function(e) {
+        if (e.target.closest('.share-link-btn')) return;
+        toggleCheck(header);
+      };
       header.onkeydown = function(e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCheck(header); }
+      };
+
+      // Share link button handler
+      header.querySelector('.share-link-btn').onclick = function(e) {
+        e.stopPropagation();
+        var url = location.origin + location.pathname + '#' + c.id;
+        navigator.clipboard.writeText(url).then(function() {
+          var btn = e.currentTarget;
+          btn.classList.add('copied');
+          setTimeout(function() { btn.classList.remove('copied'); }, 1500);
+        });
       };
 
       var content = document.createElement('div');
@@ -947,11 +1005,19 @@
       card.classList.toggle('open');
       header.setAttribute('aria-expanded', !isOpen);
 
+      var checkId = card.getAttribute('data-check-id');
+
       if (!isOpen) {
+        // Opening: load README and update URL hash
         var content = card.querySelector('.check-card-content');
         if (content.getAttribute('data-loaded') === 'false') {
-          var checkId = card.getAttribute('data-check-id');
           loadReadme(checkId, content);
+        }
+        history.replaceState(null, '', '#' + checkId);
+      } else {
+        // Closing: clear hash only if it matches this check
+        if (location.hash === '#' + checkId) {
+          history.replaceState(null, '', location.pathname);
         }
       }
     }
