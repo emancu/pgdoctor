@@ -1,10 +1,12 @@
-<p align="center">
-  <img src="logo.png" alt="pgdoctor logo" width="200" />
-</p>
-
 # pgdoctor
 
-A command-line tool and Go library for running health checks against PostgreSQL databases. It identifies misconfigurations, performance issues, and areas for optimization through 27 read-only checks that are safe to run against production.
+<img src="logo.png" alt="pgdoctor logo" width="180" align="left" />
+
+A command-line tool and Go library for running health checks against PostgreSQL databases.
+It identifies misconfigurations, performance issues, and areas for optimization through
+read-only checks that are safe to run against production.
+
+<br clear="left" />
 
 ## Installation
 
@@ -29,6 +31,12 @@ go build -o pgdoctor ./cmd/pgdoctor
 ## Quick Start
 
 ```bash
+# List all available checks
+pgdoctor list
+
+# Get detailed documentation for a check
+pgdoctor explain index-bloat
+
 # Run all checks
 pgdoctor run "postgres://user:pass@localhost:5432/mydb"
 
@@ -39,20 +47,8 @@ pgdoctor run
 # Run only specific checks
 pgdoctor run "postgres://..." --only connection-health,indexes
 
-# Triage preset (incident-relevant checks only)
-pgdoctor run "postgres://..." --preset triage
-
-# Show details for failures and warnings
-pgdoctor run "postgres://..." --detail brief
-
-# JSON output for CI/CD integration
-pgdoctor run "postgres://..." --output json
-
-# List all available checks
-pgdoctor list
-
-# Get detailed documentation for a check
-pgdoctor explain index-bloat
+# Explore all the flags
+pgdoctor run "postgres://..." --help
 ```
 
 ## Commands
@@ -219,14 +215,7 @@ All SQL queries are read-only and use PostgreSQL system catalogs (`pg_stat_*`, `
 
 ## Contributing
 
-Contributions are welcome! To add a new check:
-
-1. Create a new directory under `checks/`
-2. Implement `check.go` with `Metadata()` and `New()` functions
-3. Write the SQL query in `query.sql`
-4. Add tests in `check_test.go`
-5. Document the check in `README.md`
-6. Run `go generate ./...` to register the check
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add checks and work with the codebase. For a detailed architecture and conventions reference, see [AGENTS.md](AGENTS.md).
 
 ## License
 
