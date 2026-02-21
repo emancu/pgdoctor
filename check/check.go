@@ -20,6 +20,19 @@ const (
 	SeverityFail
 )
 
+func (s Severity) String() string {
+	switch s {
+	case SeverityOK:
+		return "ok"
+	case SeverityWarn:
+		return "warn"
+	case SeverityFail:
+		return "fail"
+	default:
+		return "unknown"
+	}
+}
+
 type Category string
 
 const (
@@ -31,19 +44,19 @@ const (
 )
 
 type Checker interface {
-	Metadata() CheckMetadata
+	Metadata() Metadata
 	Check(context.Context) (*Report, error)
 }
 
-// CheckPackage holds references to a check's exported functions.
+// Package holds references to a check's exported functions.
 // This allows the generator to create a simple list that consumers
 // can use to either get metadata or instantiate checkers.
-type CheckPackage struct {
-	Metadata func() CheckMetadata
-	New      func(db.DBTX) Checker
+type Package struct {
+	Metadata func() Metadata
+	New      func(DBTX) Checker
 }
 
-type CheckMetadata struct {
+type Metadata struct {
 	CheckID     string
 	Name        string
 	Category    Category
@@ -55,14 +68,14 @@ type CheckMetadata struct {
 // Report holds check-level metadata and all subcheck findings for a single check.
 // The check's overall severity is the maximum severity across all findings.
 type Report struct {
-	CheckMetadata // Embedded, promotes CheckID, Name, Category, Description, SQL
-	Severity      Severity
-	Results       []Finding
+	Metadata // Embedded, promotes CheckID, Name, Category, Description, SQL
+	Severity Severity
+	Results  []Finding
 }
 
-func NewReport(metadata CheckMetadata) *Report {
+func NewReport(metadata Metadata) *Report {
 	return &Report{
-		CheckMetadata: metadata,
+		Metadata: metadata,
 		Severity:      SeverityOK, // Start at OK, will be updated as results are added
 		Results:       []Finding{},
 	}

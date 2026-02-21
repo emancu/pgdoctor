@@ -6,7 +6,7 @@ pgdoctor is a PostgreSQL health-check CLI and Go library. This guide helps AI ag
 
 ```
 pgdoctor/
-├── check/              # Core types (CheckMetadata, Report, Finding, Severity, Checker interface)
+├── check/              # Core types (Metadata, Report, Finding, Severity, Checker interface)
 ├── db/                 # Generated database code (shared by ALL checks via sqlc)
 ├── checks/             # Individual health checks (self-contained)
 │   └── {checkname}/    # Each check is a package with:
@@ -30,13 +30,13 @@ Every check implements `check.Checker`:
 
 ```go
 type Checker interface {
-    Metadata() CheckMetadata
+    Metadata() Metadata
     Check(context.Context) (*Report, error)
 }
 ```
 
 Each check package exports:
-- `Metadata()` function returning `check.CheckMetadata`
+- `Metadata()` function returning `check.Metadata`
 - `New(queryer)` constructor returning `check.Checker`
 
 ### Check Structure
@@ -82,8 +82,8 @@ type checker struct {
     queryer MyQueryQueries
 }
 
-func Metadata() check.CheckMetadata {
-    return check.CheckMetadata{
+func Metadata() check.Metadata {
+    return check.Metadata{
         Category:    check.CategoryConfigs,
         CheckID:     "my-check",
         Name:        "My Check",
@@ -97,7 +97,7 @@ func New(queryer MyQueryQueries) check.Checker {
     return &checker{queryer: queryer}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
     return Metadata()
 }
 
@@ -131,11 +131,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 ### Report Structure (Field Promotion)
 
-Report embeds CheckMetadata for direct field access:
+Report embeds Metadata for direct field access:
 
 ```go
 type Report struct {
-    CheckMetadata // Embedded: CheckID, Name, Category, Description, SQL
+    Metadata // Embedded: CheckID, Name, Category, Description, SQL
     Severity      Severity
     Results       []Finding
 }
@@ -156,7 +156,7 @@ The public API in `pgdoctor.go` accepts an explicit check list, enabling consume
 pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
 
 // Get all built-in checks
-pgdoctor.AllChecks() []check.CheckPackage
+pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
@@ -317,7 +317,7 @@ Report severity is automatically the maximum across all findings.
 If a check doesn't appear in `list` or `explain`:
 
 1. Run `go generate ./...` to regenerate `checks.go`
-2. Verify `Metadata()` is exported and returns `check.CheckMetadata`
+2. Verify `Metadata()` is exported and returns `check.Metadata`
 3. Verify check directory is in `sqlc.yaml`
 4. Run `sqlc generate` after adding
 
@@ -325,8 +325,8 @@ If a check doesn't appear in `list` or `explain`:
 
 ### DO
 
-- Embed SQL with `//go:embed query.sql` and include in `CheckMetadata.SQL`
-- Embed README with `//go:embed README.md` and include in `CheckMetadata.Readme`
+- Embed SQL with `//go:embed query.sql` and include in `Metadata.SQL`
+- Embed README with `//go:embed README.md` and include in `Metadata.Readme`
 - Use `check.NewReport(Metadata())` to create reports
 - Access check info via promoted fields: `report.CheckID`, `report.Name`
 - Report `SeverityOK` when no issues found

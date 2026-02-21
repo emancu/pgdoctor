@@ -32,8 +32,8 @@ type checker struct {
 	queries TableSeqScansQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "table-seq-scans",
 		Name:        "Table Sequential Scans",
@@ -49,7 +49,7 @@ func New(queries TableSeqScansQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

@@ -35,8 +35,8 @@ type checker struct {
 	queries IndexUsageQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryIndexes,
 		CheckID:     "index-usage",
 		Name:        "Index Usage",
@@ -52,7 +52,7 @@ func New(queries IndexUsageQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

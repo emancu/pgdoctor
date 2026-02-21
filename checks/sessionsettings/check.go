@@ -36,8 +36,8 @@ type checker struct {
 	queryer SessionSettingsQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "session-settings",
 		Name:        "PostgreSQL Session Configs",
@@ -53,7 +53,7 @@ func New(queryer SessionSettingsQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

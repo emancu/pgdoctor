@@ -24,8 +24,8 @@ type checker struct {
 	queries UUIDTypesQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategorySchema,
 		CheckID:     "uuid-types",
 		Name:        "UUID Type Validation",
@@ -41,7 +41,7 @@ func New(queries UUIDTypesQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

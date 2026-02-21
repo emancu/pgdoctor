@@ -37,8 +37,8 @@ import (
 
 // AllChecks returns all available check packages.
 // Consumers call .Metadata() for check information or .New(conn) to instantiate checkers.
-func AllChecks() []check.CheckPackage {
-	return []check.CheckPackage{
+func AllChecks() []check.Package {
+	return []check.Package{
 		{
 			Metadata: cacheefficiency.Metadata,
 			New: func(conn db.DBTX) check.Checker {

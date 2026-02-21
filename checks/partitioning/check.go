@@ -38,8 +38,8 @@ const (
 	highDeleteRatio  = 0.20 // >20% deletes relative to inserts
 )
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategorySchema,
 		CheckID:     "partitioning",
 		Name:        "Table Partitioning",
@@ -55,7 +55,7 @@ func New(queries PartitioningQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

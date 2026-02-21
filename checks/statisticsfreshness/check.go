@@ -29,8 +29,8 @@ type checker struct {
 	queries StatisticsFreshnessQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "statistics-freshness",
 		Name:        "Statistics Freshness",
@@ -46,7 +46,7 @@ func New(queries StatisticsFreshnessQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

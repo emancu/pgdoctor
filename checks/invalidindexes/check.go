@@ -25,8 +25,8 @@ type checker struct {
 	queries InvalidIndexesQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryIndexes,
 		CheckID:     "invalid-indexes",
 		Name:        "Invalid Indexes",
@@ -42,7 +42,7 @@ func New(queries InvalidIndexesQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

@@ -24,8 +24,8 @@ type checker struct {
 	versioner VersionQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "pg-version",
 		Name:        "PostgreSQL Version",
@@ -41,7 +41,7 @@ func New(versioner VersionQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

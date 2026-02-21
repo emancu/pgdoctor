@@ -29,8 +29,8 @@ type checker struct {
 	queries DuplicateIndexesQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryIndexes,
 		CheckID:     "duplicate-indexes",
 		Name:        "Duplicate Indexes",
@@ -46,7 +46,7 @@ func New(queries DuplicateIndexesQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

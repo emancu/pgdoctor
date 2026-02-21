@@ -42,8 +42,8 @@ type checker struct {
 	queries ReplicationLagQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "replication-lag",
 		Name:        "Replication Lag",
@@ -59,7 +59,7 @@ func New(queries ReplicationLagQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

@@ -25,8 +25,8 @@ type checker struct {
 	queries TempUsageQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "temp-usage",
 		Name:        "Temporary File Usage",
@@ -42,7 +42,7 @@ func New(queries TempUsageQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

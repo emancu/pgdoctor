@@ -28,8 +28,8 @@ const (
 	usagePercentFail = 50.0 // FAIL: >=50% of capacity used (urgent migration needed)
 )
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategorySchema,
 		CheckID:     "pk-types",
 		Name:        "Primary Key Type Validation",
@@ -45,7 +45,7 @@ func New(queries PKTypesQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

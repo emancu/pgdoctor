@@ -76,7 +76,7 @@ func Test_CacheEfficiency(t *testing.T) {
 				BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityFail,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -131,7 +131,7 @@ func Test_CacheEfficiency_DetailsContent(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	result := results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity)
+	require.Equal(t, check.SeverityFail, result.Severity)
 
 	require.Contains(t, result.Details, "85.00%", "Details should contain cache ratio")
 	require.Contains(t, result.Details, "850000", "Details should contain blocks hit")
@@ -217,7 +217,7 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 		{
 			Name:             "just below 90% - FAIL",
 			CacheRatio:       89.9,
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityFail,
 		},
 	}
 

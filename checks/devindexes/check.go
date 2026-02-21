@@ -29,8 +29,8 @@ type checker struct {
 	queries DevIndexesQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryIndexes,
 		CheckID:     "dev-indexes",
 		Name:        "Temporary Dev Indexes",
@@ -46,7 +46,7 @@ func New(queries DevIndexesQueries) check.Checker {
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

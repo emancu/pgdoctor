@@ -182,7 +182,7 @@ func main() {
 pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
 
 // List all built-in checks
-pgdoctor.AllChecks() []check.CheckPackage
+pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
@@ -206,7 +206,7 @@ Checks implement the `check.Checker` interface:
 
 ```go
 type Checker interface {
-    Metadata() CheckMetadata
+    Metadata() Metadata
     Check(context.Context) (*Report, error)
 }
 ```
