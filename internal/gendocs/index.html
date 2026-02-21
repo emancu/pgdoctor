@@ -1,746 +1,1681 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>pgdoctor - PostgreSQL Health Checks</title>
-  <meta name="description" content="A command-line tool and Go library for running health checks against PostgreSQL databases. 27 read-only, production-safe checks across 5 categories.">
-  <meta name="theme-color" content="#336791">
-  <meta property="og:title" content="pgdoctor - PostgreSQL Health Checks">
-  <meta property="og:description" content="A command-line tool and Go library for running health checks against PostgreSQL databases.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://emancu.github.io/pgdoctor">
-  <meta property="og:image" content="https://raw.githubusercontent.com/emancu/pgdoctor/master/logo.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    /* ===== RESET & BASE ===== */
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pgdoctor - PostgreSQL Health Checks</title>
+    <meta
+      name="description"
+      content="A command-line tool and Go library for running health checks against PostgreSQL databases. 27 read-only, production-safe checks across 5 categories."
+    />
+    <meta name="theme-color" content="#336791" />
+    <meta property="og:title" content="pgdoctor - PostgreSQL Health Checks" />
+    <meta
+      property="og:description"
+      content="A command-line tool and Go library for running health checks against PostgreSQL databases."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://emancu.github.io/pgdoctor" />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/emancu/pgdoctor/master/logo.png"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ===== RESET & BASE ===== */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-    :root {
-      --pg-blue: #336791;
-      --pg-blue-light: #4a8bc2;
-      --pg-blue-dark: #264d6e;
-      --accent: #4CAF50;
-      --accent-dim: #3d8b40;
-      --accent-glow: rgba(76, 175, 80, 0.15);
-      --bg: #0d1117;
-      --bg-surface: #161b22;
-      --bg-elevated: #1c2129;
-      --bg-card: #1a1f27;
-      --border: #30363d;
-      --border-light: #3d444d;
-      --text: #e6edf3;
-      --text-secondary: #8b949e;
-      --text-dim: #6e7681;
-      --danger: #f85149;
-      --warning: #d29922;
-      --radius: 8px;
-      --radius-lg: 12px;
-      --nav-height: 64px;
-    }
+      :root {
+        --pg-blue: #336791;
+        --pg-blue-light: #4a8bc2;
+        --pg-blue-dark: #264d6e;
+        --accent: #4caf50;
+        --accent-dim: #3d8b40;
+        --accent-glow: rgba(76, 175, 80, 0.15);
+        --bg: #0d1117;
+        --bg-surface: #161b22;
+        --bg-elevated: #1c2129;
+        --bg-card: #1a1f27;
+        --border: #30363d;
+        --border-light: #3d444d;
+        --text: #e6edf3;
+        --text-secondary: #8b949e;
+        --text-dim: #6e7681;
+        --danger: #f85149;
+        --warning: #d29922;
+        --radius: 8px;
+        --radius-lg: 12px;
+        --nav-height: 64px;
+      }
 
-    html {
-      scroll-behavior: smooth;
-      scroll-padding-top: calc(var(--nav-height) + 24px);
-    }
+      html {
+        scroll-behavior: smooth;
+        scroll-padding-top: calc(var(--nav-height) + 24px);
+      }
 
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Helvetica,
+          Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
 
-    code, pre, .mono {
-      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
-    }
+      code,
+      pre,
+      .mono {
+        font-family:
+          "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+      }
 
-    a {
-      color: var(--pg-blue-light);
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-    a:hover { color: var(--accent); }
-    a:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-      border-radius: 2px;
-    }
+      a {
+        color: var(--pg-blue-light);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+      a:hover {
+        color: var(--accent);
+      }
+      a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
 
-    img { max-width: 100%; height: auto; }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
 
-    /* ===== UTILITIES ===== */
-    .container {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
+      /* ===== UTILITIES ===== */
+      .container {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
 
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-    }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
 
-    /* ===== NAVIGATION ===== */
-    .nav {
-      position: fixed; top: 0; left: 0; right: 0;
-      height: var(--nav-height);
-      background: rgba(13, 17, 23, 0.85);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      z-index: 1000;
-      display: flex; align-items: center;
-    }
-    .nav .container {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
-    }
-    .nav-brand {
-      display: flex; align-items: center; gap: 10px;
-      font-weight: 700; font-size: 1.1rem; color: var(--text);
-    }
-    .nav-brand img { height: 36px; width: auto; }
-    .nav-links {
-      display: flex; align-items: center; gap: 8px; list-style: none;
-    }
-    .nav-links a {
-      display: block; padding: 6px 14px; font-size: 0.875rem; font-weight: 500;
-      color: var(--text-secondary); border-radius: 6px; transition: color 0.2s, background 0.2s;
-    }
-    .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.06); }
-    .nav-github {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 7px 16px; font-size: 0.85rem; font-weight: 600;
-      color: var(--text); background: var(--bg-surface);
-      border: 1px solid var(--border); border-radius: 6px;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .nav-github:hover { border-color: var(--border-light); background: var(--bg-elevated); color: var(--text); }
-    .nav-hamburger {
-      display: none; background: none; border: none;
-      color: var(--text); cursor: pointer; padding: 8px;
-    }
+      /* ===== NAVIGATION ===== */
+      .nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--nav-height);
+        background: rgba(13, 17, 23, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+      }
+      .nav .container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+      }
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--text);
+      }
+      .nav-brand img {
+        height: 36px;
+        width: auto;
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        list-style: none;
+      }
+      .nav-links a {
+        display: flex;
+        align-items: center;
+        padding: 6px 14px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        border-radius: 6px;
+        transition:
+          color 0.2s,
+          background 0.2s;
+      }
+      .nav-links a:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .nav-github {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 16px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text);
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        transition:
+          border-color 0.2s,
+          background 0.2s;
+      }
+      .nav-github:hover {
+        border-color: var(--border-light);
+        background: var(--bg-elevated);
+        color: var(--text);
+      }
+      .nav-hamburger {
+        display: none;
+        background: none;
+        border: none;
+        color: var(--text);
+        cursor: pointer;
+        padding: 8px;
+      }
 
-    /* ===== HERO ===== */
-    .hero {
-      padding: calc(var(--nav-height) + 72px) 0 64px;
-      text-align: center; position: relative; overflow: hidden;
-    }
-    .hero::before {
-      content: ''; position: absolute; top: var(--nav-height); left: 50%;
-      transform: translateX(-50%); width: 800px; height: 500px;
-      background: radial-gradient(ellipse, rgba(51,103,145,0.12) 0%, transparent 70%);
-      pointer-events: none;
-    }
-    .hero-logo {
-      width: 220px; height: auto; margin-bottom: 28px;
-      filter: drop-shadow(0 8px 32px rgba(51,103,145,0.25)); position: relative;
-    }
-    .hero h1 {
-      font-size: 3.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 12px;
-      background: linear-gradient(135deg, var(--text) 0%, var(--pg-blue-light) 100%);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-    }
-    .hero-tagline {
-      font-size: 1.2rem; color: var(--text-secondary);
-      max-width: 620px; margin: 0 auto 32px; line-height: 1.7;
-    }
-    .hero-install {
-      display: inline-flex; align-items: center; gap: 12px;
-      background: var(--bg-surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 14px 20px; margin-bottom: 28px;
-      font-size: 0.95rem; position: relative;
-    }
-    .hero-install code { color: var(--accent); font-size: 0.9rem; }
-    .hero-install .copy-btn {
-      background: none; border: none; color: var(--text-dim); cursor: pointer;
-      padding: 4px; border-radius: 4px; transition: color 0.2s, background 0.2s;
-      display: flex; align-items: center;
-    }
-    .hero-install .copy-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
-    .hero-actions {
-      display: flex; align-items: center; justify-content: center;
-      gap: 16px; margin-bottom: 40px; flex-wrap: wrap;
-    }
-    .btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 12px 24px; font-size: 0.95rem; font-weight: 600;
-      border-radius: var(--radius); border: 1px solid transparent;
-      cursor: pointer; transition: all 0.2s; text-decoration: none;
-    }
-    .btn-primary { background: var(--pg-blue); color: #fff; border-color: var(--pg-blue); }
-    .btn-primary:hover {
-      background: var(--pg-blue-light); border-color: var(--pg-blue-light); color: #fff;
-      transform: translateY(-1px); box-shadow: 0 4px 16px rgba(51,103,145,0.3);
-    }
-    .btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
-    .btn-outline:hover {
-      border-color: var(--border-light); background: var(--bg-surface); color: var(--text);
-      transform: translateY(-1px);
-    }
-    .hero-stats {
-      display: flex; align-items: center; justify-content: center; gap: 32px; flex-wrap: wrap;
-    }
-    .stat-badge {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.9rem; color: var(--text-secondary);
-    }
-    .stat-badge .stat-value { font-weight: 700; color: var(--text); font-size: 1.1rem; }
-    .stat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-    .stat-dot.blue { background: var(--pg-blue-light); }
-    .stat-dot.yellow { background: var(--warning); }
+      /* ===== HERO ===== */
+      .hero {
+        padding: calc(var(--nav-height) + 72px) 0 64px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .hero::before {
+        content: "";
+        position: absolute;
+        top: var(--nav-height);
+        left: 50%;
+        transform: translateX(-50%);
+        width: 800px;
+        height: 500px;
+        background: radial-gradient(
+          ellipse,
+          rgba(51, 103, 145, 0.12) 0%,
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+      .hero-logo {
+        width: 220px;
+        height: auto;
+        margin-bottom: 28px;
+        filter: drop-shadow(0 8px 32px rgba(51, 103, 145, 0.25));
+        position: relative;
+      }
+      .hero h1 {
+        font-size: 3.5rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 12px;
+        background: linear-gradient(
+          135deg,
+          var(--text) 0%,
+          var(--pg-blue-light) 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero-tagline {
+        font-size: 1.2rem;
+        color: var(--text-secondary);
+        max-width: 620px;
+        margin: 0 auto 32px;
+        line-height: 1.7;
+      }
+      .hero-install {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px 20px;
+        margin-bottom: 28px;
+        font-size: 0.95rem;
+        position: relative;
+      }
+      .hero-install code {
+        color: var(--accent);
+        font-size: 0.9rem;
+      }
+      .hero-install .copy-btn {
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition:
+          color 0.2s,
+          background 0.2s;
+        display: flex;
+        align-items: center;
+      }
+      .hero-install .copy-btn:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .hero-actions {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        margin-bottom: 40px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        border-radius: var(--radius);
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+      }
+      .btn-primary {
+        background: var(--pg-blue);
+        color: #fff;
+        border-color: var(--pg-blue);
+      }
+      .btn-primary:hover {
+        background: var(--pg-blue-light);
+        border-color: var(--pg-blue-light);
+        color: #fff;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 16px rgba(51, 103, 145, 0.3);
+      }
+      .btn-outline {
+        background: transparent;
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .btn-outline:hover {
+        border-color: var(--border-light);
+        background: var(--bg-surface);
+        color: var(--text);
+        transform: translateY(-1px);
+      }
+      .hero-stats {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+        flex-wrap: wrap;
+      }
+      .stat-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+      }
+      .stat-badge .stat-value {
+        font-weight: 700;
+        color: var(--text);
+        font-size: 1.1rem;
+      }
+      .stat-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+      }
+      .stat-dot.blue {
+        background: var(--pg-blue-light);
+      }
+      .stat-dot.yellow {
+        background: var(--warning);
+      }
 
-    /* ===== FEATURES BAR ===== */
-    .features-bar {
-      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-      background: var(--bg-surface); padding: 32px 0;
-    }
-    .features-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
-    .feature-item { text-align: center; padding: 8px; }
-    .feature-icon {
-      width: 44px; height: 44px; margin: 0 auto 12px; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
-    }
-    .feature-icon.green { background: rgba(76,175,80,0.12); color: var(--accent); }
-    .feature-icon.blue { background: rgba(51,103,145,0.15); color: var(--pg-blue-light); }
-    .feature-item h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 4px; }
-    .feature-item p { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5; }
+      /* ===== FEATURES BAR ===== */
+      .features-bar {
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        padding: 32px 0;
+      }
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+      }
+      .feature-item {
+        text-align: center;
+        padding: 8px;
+      }
+      .feature-icon {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 12px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+      }
+      .feature-icon.green {
+        background: rgba(76, 175, 80, 0.12);
+        color: var(--accent);
+      }
+      .feature-icon.blue {
+        background: rgba(51, 103, 145, 0.15);
+        color: var(--pg-blue-light);
+      }
+      .feature-item h3 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .feature-item p {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
 
-    /* ===== SECTIONS ===== */
-    .section { padding: 80px 0; }
-    .section-header { text-align: center; margin-bottom: 48px; }
-    .section-header h2 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 12px; }
-    .section-header p { font-size: 1.05rem; color: var(--text-secondary); max-width: 580px; margin: 0 auto; }
-    .section-divider {
-      width: 48px; height: 3px;
-      background: linear-gradient(90deg, var(--pg-blue), var(--accent));
-      border-radius: 2px; margin: 0 auto 16px;
-    }
+      /* ===== SECTIONS ===== */
+      .section {
+        padding: 80px 0;
+      }
+      .section-header {
+        text-align: center;
+        margin-bottom: 48px;
+      }
+      .section-header h2 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 12px;
+      }
+      .section-header p {
+        font-size: 1.05rem;
+        color: var(--text-secondary);
+        max-width: 580px;
+        margin: 0 auto;
+      }
+      .section-divider {
+        width: 48px;
+        height: 3px;
+        background: linear-gradient(90deg, var(--pg-blue), var(--accent));
+        border-radius: 2px;
+        margin: 0 auto 16px;
+      }
 
-    /* ===== QUICK START ===== */
-    .quickstart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-    .code-card {
-      background: var(--bg-surface); border: 1px solid var(--border);
-      border-radius: var(--radius-lg); overflow: hidden;
-    }
-    .code-card-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 16px; border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-    }
-    .code-card-title {
-      font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);
-      text-transform: uppercase; letter-spacing: 0.05em;
-    }
-    .code-card pre {
-      padding: 20px; overflow-x: auto; font-size: 0.85rem; line-height: 1.7; color: var(--text);
-    }
-    .code-card pre .comment { color: var(--text-dim); }
-    .code-card pre .cmd { color: var(--accent); }
-    .code-card pre .flag { color: var(--pg-blue-light); }
-    .code-card pre .string { color: #a5d6ff; }
-    .code-card pre .prompt { color: var(--text-dim); user-select: none; }
-    .code-card pre .kw { color: #ff7b72; }
+      /* ===== QUICK START ===== */
+      .quickstart-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+      .code-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+      .code-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .code-card-title {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .code-card pre {
+        padding: 20px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.7;
+        color: var(--text);
+      }
+      .code-card pre .comment {
+        color: var(--text-dim);
+      }
+      .code-card pre .cmd {
+        color: var(--accent);
+      }
+      .code-card pre .flag {
+        color: var(--pg-blue-light);
+      }
+      .code-card pre .string {
+        color: #a5d6ff;
+      }
+      .code-card pre .prompt {
+        color: var(--text-dim);
+        user-select: none;
+      }
+      .code-card pre .kw {
+        color: #ff7b72;
+      }
 
-    .copy-btn {
-      background: none; border: 1px solid var(--border); color: var(--text-dim);
-      cursor: pointer; padding: 5px 10px; border-radius: 5px;
-      font-size: 0.75rem; font-family: 'Inter', sans-serif; font-weight: 500;
-      transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px;
-    }
-    .copy-btn:hover { color: var(--text); border-color: var(--border-light); background: rgba(255,255,255,0.05); }
-    .copy-btn.copied { color: var(--accent); border-color: var(--accent); }
+      .copy-btn {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        cursor: pointer;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 0.75rem;
+        font-family: "Inter", sans-serif;
+        font-weight: 500;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .copy-btn:hover {
+        color: var(--text);
+        border-color: var(--border-light);
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .copy-btn.copied {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
 
-    /* ===== CHECKS REFERENCE ===== */
-    .checks-section { background: var(--bg); padding: 80px 0; }
-    .category-tabs {
-      display: flex; align-items: center; justify-content: center;
-      gap: 8px; margin-bottom: 40px; flex-wrap: wrap;
-    }
-    .category-tab {
-      padding: 8px 20px; font-size: 0.875rem; font-weight: 600;
-      color: var(--text-secondary); background: var(--bg-surface);
-      border: 1px solid var(--border); border-radius: 100px;
-      cursor: pointer; transition: all 0.2s; font-family: inherit;
-    }
-    .category-tab:hover { color: var(--text); border-color: var(--border-light); background: var(--bg-elevated); }
-    .category-tab.active { color: #fff; background: var(--pg-blue); border-color: var(--pg-blue); }
-    .category-tab .tab-count {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px;
-      font-size: 0.7rem; font-weight: 700; border-radius: 100px;
-      background: rgba(255,255,255,0.1);
-    }
-    .category-tab.active .tab-count { background: rgba(255,255,255,0.2); }
+      /* ===== CHECKS REFERENCE ===== */
+      .checks-section {
+        background: var(--bg);
+        padding: 80px 0;
+      }
+      .category-tabs {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 40px;
+        flex-wrap: wrap;
+      }
+      .category-tab {
+        padding: 8px 20px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 100px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: inherit;
+      }
+      .category-tab:hover {
+        color: var(--text);
+        border-color: var(--border-light);
+        background: var(--bg-elevated);
+      }
+      .category-tab.active {
+        color: #fff;
+        background: var(--pg-blue);
+        border-color: var(--pg-blue);
+      }
+      .category-tab .tab-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 6px;
+        margin-left: 6px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        border-radius: 100px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .category-tab.active .tab-count {
+        background: rgba(255, 255, 255, 0.2);
+      }
 
-    .checks-grid { display: grid; gap: 12px; }
-    .category-group { margin-bottom: 8px; }
-    .category-group-title {
-      font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--text-dim);
-      padding: 12px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 12px;
-    }
-    .check-card {
-      background: var(--bg-surface); border: 1px solid var(--border);
-      border-radius: var(--radius); transition: border-color 0.2s, box-shadow 0.2s;
-      overflow: hidden;
-    }
-    .check-card:hover { border-color: var(--border-light); }
-    .check-card-header {
-      display: flex; align-items: center; gap: 16px; padding: 16px 20px;
-      cursor: pointer; user-select: none; transition: background 0.2s;
-    }
-    .check-card-header:hover { background: rgba(255,255,255,0.02); }
-    .check-card-chevron {
-      flex-shrink: 0; width: 20px; height: 20px; color: var(--text-dim);
-      transition: transform 0.25s ease, color 0.2s;
-    }
-    .check-card.open .check-card-chevron { transform: rotate(90deg); color: var(--accent); }
-    .check-card-id {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.875rem;
-      font-weight: 600; color: var(--pg-blue-light); flex-shrink: 0; min-width: 180px;
-    }
-    .check-card-info { flex: 1; min-width: 0; }
-    .check-card-name {
-      font-size: 0.9rem; font-weight: 500; color: var(--text);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .check-card-badge {
-      flex-shrink: 0; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px;
-      background: rgba(51,103,145,0.15); color: var(--pg-blue-light);
-    }
-    .check-card-badge.cat-indexes { background: rgba(168,85,247,0.12); color: #c084fc; }
-    .check-card-badge.cat-vacuum { background: rgba(251,146,60,0.12); color: #fb923c; }
-    .check-card-badge.cat-schema { background: rgba(56,189,248,0.12); color: #38bdf8; }
-    .check-card-badge.cat-performance { background: rgba(76,175,80,0.12); color: #4CAF50; }
-    .check-card-badge.cat-configs { background: rgba(51,103,145,0.15); color: var(--pg-blue-light); }
+      .checks-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+      }
+      .category-group {
+        margin-bottom: 8px;
+        min-width: 0;
+      }
+      .category-group-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        padding: 12px 0 8px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+      .check-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        transition:
+          border-color 0.2s,
+          box-shadow 0.2s;
+        overflow: hidden;
+        min-width: 0;
+      }
+      .check-card:hover {
+        border-color: var(--border-light);
+      }
+      .check-card-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px 20px;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.2s;
+      }
+      .check-card-header:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .check-card-chevron {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        color: var(--text-dim);
+        transition:
+          transform 0.25s ease,
+          color 0.2s;
+        margin-top: 2px;
+      }
+      .check-card.open .check-card-chevron {
+        transform: rotate(90deg);
+        color: var(--accent);
+      }
+      .check-card-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .check-card-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 4px;
+      }
+      .check-card-id {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--pg-blue-light);
+      }
+      .check-card-badge {
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 9px;
+        border-radius: 100px;
+        background: rgba(51, 103, 145, 0.15);
+        color: var(--pg-blue-light);
+      }
+      .check-card-name {
+        font-size: 0.88rem;
+        font-weight: 400;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .check-card-badge.cat-indexes {
+        background: rgba(168, 85, 247, 0.12);
+        color: #c084fc;
+      }
+      .check-card-badge.cat-vacuum {
+        background: rgba(251, 146, 60, 0.12);
+        color: #fb923c;
+      }
+      .check-card-badge.cat-schema {
+        background: rgba(56, 189, 248, 0.12);
+        color: #38bdf8;
+      }
+      .check-card-badge.cat-performance {
+        background: rgba(76, 175, 80, 0.12);
+        color: #4caf50;
+      }
+      .check-card-badge.cat-configs {
+        background: rgba(51, 103, 145, 0.15);
+        color: var(--pg-blue-light);
+      }
 
-    .share-link-btn {
-      flex-shrink: 0; background: none; border: none; color: var(--text-dim);
-      cursor: pointer; padding: 4px; border-radius: 4px;
-      transition: color 0.2s, background 0.2s; display: flex; align-items: center;
-      opacity: 0; transition: opacity 0.2s, color 0.2s;
-    }
-    .check-card-header:hover .share-link-btn,
-    .check-card.open .share-link-btn { opacity: 1; }
-    .share-link-btn:hover { color: var(--pg-blue-light); background: rgba(255,255,255,0.06); }
-    .share-link-btn.copied { color: var(--accent); opacity: 1; }
+      .share-link-btn {
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition:
+          color 0.2s,
+          background 0.2s;
+        display: flex;
+        align-items: center;
+        opacity: 0;
+        transition:
+          opacity 0.2s,
+          color 0.2s;
+      }
+      .check-card-header:hover .share-link-btn,
+      .check-card.open .share-link-btn {
+        opacity: 1;
+      }
+      .share-link-btn:hover {
+        color: var(--pg-blue-light);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .share-link-btn.copied {
+        color: var(--accent);
+        opacity: 1;
+      }
 
-    .check-card-content {
-      display: none; padding: 0 20px 20px; border-top: 1px solid var(--border);
-    }
-    .check-card.open .check-card-content { display: block; }
-    .check-card-content .loading {
-      padding: 24px; text-align: center; color: var(--text-dim); font-size: 0.85rem;
-    }
+      .check-card-content {
+        display: none;
+        padding: 0 20px 20px;
+        border-top: 1px solid var(--border);
+        min-width: 0;
+        overflow-x: auto;
+      }
+      .check-card.open .check-card-content {
+        display: block;
+      }
+      .check-card-content .loading {
+        padding: 24px;
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 0.85rem;
+      }
 
-    .cli-bridge {
-      display: flex; align-items: center; justify-content: center; gap: 10px;
-      padding: 10px 20px; margin-bottom: 32px; font-size: 0.82rem;
-      color: var(--text-dim); background: rgba(51,103,145,0.06);
-      border: 1px solid rgba(51,103,145,0.15); border-radius: var(--radius);
-    }
-    .cli-bridge code {
-      font-size: 0.8rem; color: var(--pg-blue-light);
-      background: var(--bg); padding: 2px 8px; border-radius: 4px;
-    }
+      .cli-bridge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 10px 20px;
+        margin-bottom: 32px;
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        background: rgba(51, 103, 145, 0.06);
+        border: 1px solid rgba(51, 103, 145, 0.15);
+        border-radius: var(--radius);
+      }
+      .cli-bridge code {
+        font-size: 0.8rem;
+        color: var(--pg-blue-light);
+        background: var(--bg);
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
 
-    /* Rendered markdown inside check cards */
-    .check-card-content .readme-content {
-      margin-top: 16px; font-size: 0.9rem; line-height: 1.7; color: var(--text-secondary);
-    }
-    .readme-content h1, .readme-content h2, .readme-content h3 {
-      color: var(--text); margin: 1.2em 0 0.5em; font-weight: 600;
-    }
-    .readme-content h1 { font-size: 1.3rem; }
-    .readme-content h2 { font-size: 1.1rem; }
-    .readme-content h3 { font-size: 1rem; }
-    .readme-content p { margin: 0.6em 0; }
-    .readme-content ul, .readme-content ol { margin: 0.6em 0; padding-left: 1.5em; }
-    .readme-content li { margin: 0.3em 0; }
-    .readme-content code {
-      background: var(--bg); padding: 2px 6px; border-radius: 4px;
-      font-size: 0.85em; color: var(--accent);
-    }
-    .readme-content pre {
-      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 16px; overflow-x: auto; margin: 0.8em 0;
-    }
-    .readme-content pre code {
-      background: none; padding: 0; font-size: 0.82rem; color: var(--text);
-    }
-    .readme-content table {
-      width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 0.85rem;
-    }
-    .readme-content th, .readme-content td {
-      padding: 8px 12px; border: 1px solid var(--border); text-align: left;
-    }
-    .readme-content th { background: var(--bg); color: var(--text); font-weight: 600; }
-    .readme-content blockquote {
-      border-left: 3px solid var(--pg-blue); padding: 0.5em 1em; margin: 0.8em 0;
-      background: rgba(51,103,145,0.08); border-radius: 0 var(--radius) var(--radius) 0;
-    }
-    .readme-content a { color: var(--pg-blue-light); }
-    .readme-content a:hover { color: var(--accent); }
+      /* Rendered markdown inside check cards */
+      .check-card-content .readme-content {
+        margin-top: 16px;
+        font-size: 0.9rem;
+        line-height: 1.7;
+        color: var(--text-secondary);
+        overflow-wrap: break-word;
+        word-break: break-word;
+        overflow-x: auto;
+      }
+      .readme-content h1,
+      .readme-content h2,
+      .readme-content h3 {
+        color: var(--text);
+        margin: 1.2em 0 0.5em;
+        font-weight: 600;
+      }
+      .readme-content h1 {
+        font-size: 1.3rem;
+      }
+      .readme-content h2 {
+        font-size: 1.1rem;
+      }
+      .readme-content h3 {
+        font-size: 1rem;
+      }
+      .readme-content p {
+        margin: 0.6em 0;
+      }
+      .readme-content ul,
+      .readme-content ol {
+        margin: 0.6em 0;
+        padding-left: 1.5em;
+      }
+      .readme-content li {
+        margin: 0.3em 0;
+      }
+      .readme-content code {
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        color: var(--accent);
+      }
+      .readme-content pre {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+        overflow-x: auto;
+        margin: 0.8em 0;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+      .readme-content pre code {
+        background: none;
+        padding: 0;
+        font-size: 0.82rem;
+        color: var(--text);
+        white-space: pre;
+        word-break: normal;
+        overflow-wrap: normal;
+      }
+      .readme-content .table-wrap {
+        overflow-x: auto;
+        margin: 0.8em 0;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+      }
+      .readme-content table {
+        border-collapse: collapse;
+        font-size: 0.85rem;
+        min-width: 320px;
+        width: max-content;
+      }
+      .readme-content th,
+      .readme-content td {
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        text-align: left;
+      }
+      .readme-content th {
+        background: var(--bg);
+        color: var(--text);
+        font-weight: 600;
+      }
+      .readme-content blockquote {
+        border-left: 3px solid var(--pg-blue);
+        padding: 0.5em 1em;
+        margin: 0.8em 0;
+        background: rgba(51, 103, 145, 0.08);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        overflow-wrap: break-word;
+      }
+      .readme-content a {
+        color: var(--pg-blue-light);
+      }
+      .readme-content a:hover {
+        color: var(--accent);
+      }
 
-    /* ===== LIBRARY SECTION ===== */
-    .library-section { background: var(--bg-surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .library-grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: 48px; align-items: center; }
-    .library-info h3 { font-size: 1.5rem; font-weight: 700; margin-bottom: 16px; }
-    .library-info p { color: var(--text-secondary); margin-bottom: 16px; line-height: 1.7; }
-    .library-info .api-item {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;
-      color: var(--pg-blue-light); padding: 6px 0; border-bottom: 1px solid var(--border);
-    }
-    .library-info .api-item:last-child { border-bottom: none; }
-    .library-info .api-desc {
-      color: var(--text-dim); font-family: 'Inter', sans-serif; font-size: 0.8rem; margin-left: 8px;
-    }
-    .library-code {
-      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
-    }
-    .library-code .code-card-header { background: rgba(255,255,255,0.02); }
-    .library-code pre {
-      padding: 20px; font-size: 0.82rem; line-height: 1.7; overflow-x: auto;
-    }
-    .library-code pre .kw { color: #ff7b72; }
-    .library-code pre .str { color: #a5d6ff; }
-    .library-code pre .fn { color: #d2a8ff; }
-    .library-code pre .comment { color: var(--text-dim); }
-    .library-code pre .type { color: #79c0ff; }
-    .library-code pre .pkg { color: #ffa657; }
+      /* ===== LIBRARY SECTION ===== */
+      .library-section {
+        background: var(--bg-surface);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .library-grid {
+        display: grid;
+        grid-template-columns: 1fr 1.3fr;
+        gap: 48px;
+        align-items: center;
+      }
+      .library-info h3 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 16px;
+      }
+      .library-info p {
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+        line-height: 1.7;
+      }
+      .library-info .api-item {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.82rem;
+        color: var(--pg-blue-light);
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .library-info .api-item:last-child {
+        border-bottom: none;
+      }
+      .library-info .api-desc {
+        color: var(--text-dim);
+        font-family: "Inter", sans-serif;
+        font-size: 0.8rem;
+        margin-left: 8px;
+      }
+      .library-code {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+      .library-code .code-card-header {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .library-code pre {
+        padding: 20px;
+        font-size: 0.82rem;
+        line-height: 1.7;
+        overflow-x: auto;
+      }
+      .library-code pre .kw {
+        color: #ff7b72;
+      }
+      .library-code pre .str {
+        color: #a5d6ff;
+      }
+      .library-code pre .fn {
+        color: #d2a8ff;
+      }
+      .library-code pre .comment {
+        color: var(--text-dim);
+      }
+      .library-code pre .type {
+        color: #79c0ff;
+      }
+      .library-code pre .pkg {
+        color: #ffa657;
+      }
 
-    /* ===== FOOTER ===== */
-    .footer { padding: 48px 0 32px; text-align: center; border-top: 1px solid var(--border); }
-    .footer-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; }
-    .footer-brand img { height: 32px; width: auto; }
-    .footer-brand span { font-size: 1.1rem; font-weight: 700; }
-    .footer-links {
-      display: flex; align-items: center; justify-content: center;
-      gap: 24px; margin-bottom: 20px; flex-wrap: wrap;
-    }
-    .footer-links a { font-size: 0.875rem; color: var(--text-secondary); }
-    .footer-links a:hover { color: var(--text); }
-    .footer-meta { font-size: 0.8rem; color: var(--text-dim); line-height: 1.8; }
-    .footer-conference {
-      display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
-      padding: 8px 16px; background: rgba(76,175,80,0.08);
-      border: 1px solid rgba(76,175,80,0.2); border-radius: 100px;
-      font-size: 0.8rem; color: var(--accent); font-weight: 500;
-    }
+      /* ===== FOOTER ===== */
+      .footer {
+        padding: 48px 0 32px;
+        text-align: center;
+        border-top: 1px solid var(--border);
+      }
+      .footer-brand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      .footer-brand img {
+        height: 32px;
+        width: auto;
+      }
+      .footer-brand span {
+        font-size: 1.1rem;
+        font-weight: 700;
+      }
+      .footer-links {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      .footer-links a {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+      }
+      .footer-links a:hover {
+        color: var(--text);
+      }
+      .footer-meta {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        line-height: 1.8;
+      }
+      .footer-conference {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 12px;
+        padding: 8px 16px;
+        background: rgba(76, 175, 80, 0.08);
+        border: 1px solid rgba(76, 175, 80, 0.2);
+        border-radius: 100px;
+        font-size: 0.8rem;
+        color: var(--accent);
+        font-weight: 500;
+      }
 
-    /* ===== BACK TO TOP ===== */
-    .back-to-top {
-      position: fixed; bottom: 32px; right: 32px; width: 44px; height: 44px;
-      border-radius: 50%; background: var(--pg-blue); color: #fff; border: none;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      opacity: 0; visibility: hidden; transition: all 0.3s;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 900;
-    }
-    .back-to-top.visible { opacity: 1; visibility: visible; }
-    .back-to-top:hover { background: var(--pg-blue-light); transform: translateY(-2px); }
+      /* ===== BACK TO TOP ===== */
+      .back-to-top {
+        position: fixed;
+        bottom: 32px;
+        right: 32px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--pg-blue);
+        color: #fff;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        z-index: 900;
+      }
+      .back-to-top.visible {
+        opacity: 1;
+        visibility: visible;
+      }
+      .back-to-top:hover {
+        background: var(--pg-blue-light);
+        transform: translateY(-2px);
+      }
 
-    /* ===== PULSE ANIMATION ===== */
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .pulse { animation: pulse 2s ease-in-out infinite; }
+      /* ===== PULSE ANIMATION ===== */
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .pulse {
+        animation: pulse 2s ease-in-out infinite;
+      }
 
-    .heartbeat-line {
-      display: block; margin: 0 auto 32px; max-width: 280px; height: 32px; opacity: 0.4;
-    }
+      .heartbeat-line {
+        display: block;
+        margin: 0 auto 32px;
+        max-width: 280px;
+        height: 32px;
+        opacity: 0.4;
+      }
 
-    /* ===== MOBILE NAV ===== */
-    .mobile-nav {
-      display: none; position: fixed; top: var(--nav-height); left: 0; right: 0;
-      background: var(--bg-surface); border-bottom: 1px solid var(--border);
-      padding: 16px 24px; z-index: 999;
-    }
-    .mobile-nav.open { display: block; }
-    .mobile-nav a {
-      display: block; padding: 10px 0; font-size: 0.95rem;
-      color: var(--text-secondary); border-bottom: 1px solid var(--border);
-    }
-    .mobile-nav a:last-child { border-bottom: none; }
-    .mobile-nav a:hover { color: var(--text); }
+      /* ===== MOBILE NAV ===== */
+      .mobile-nav {
+        display: none;
+        position: fixed;
+        top: var(--nav-height);
+        left: 0;
+        right: 0;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 16px 24px;
+        z-index: 999;
+      }
+      .mobile-nav.open {
+        display: block;
+      }
+      .mobile-nav a {
+        display: block;
+        padding: 10px 0;
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+        border-bottom: 1px solid var(--border);
+      }
+      .mobile-nav a:last-child {
+        border-bottom: none;
+      }
+      .mobile-nav a:hover {
+        color: var(--text);
+      }
 
-    /* ===== RESPONSIVE ===== */
-    @media (max-width: 900px) {
-      .quickstart-grid { grid-template-columns: 1fr; }
-      .features-grid { grid-template-columns: repeat(2, 1fr); }
-      .library-grid { grid-template-columns: 1fr; }
-      .check-card-id { min-width: 140px; }
-    }
-    @media (max-width: 640px) {
-      .nav-links { display: none; }
-      .nav-hamburger { display: flex; }
-      .hero h1 { font-size: 2.4rem; }
-      .hero-tagline { font-size: 1rem; }
-      .hero-logo { width: 160px; }
-      .features-grid { grid-template-columns: 1fr 1fr; gap: 16px; }
-      .section { padding: 56px 0; }
-      .checks-section { padding: 56px 0; }
-      .check-card-header { padding: 12px 16px; gap: 10px; }
-      .check-card-id { min-width: auto; font-size: 0.8rem; }
-      .check-card-badge { display: none; }
-      .check-card-name { font-size: 0.85rem; }
-      .category-tab { padding: 6px 14px; font-size: 0.8rem; }
-      .hero-stats { gap: 20px; }
-      .hero-install { flex-direction: column; gap: 8px; }
-      .section-header h2 { font-size: 1.6rem; }
-    }
-  </style>
-</head>
-<body>
-
-  <!-- ===== NAVIGATION ===== -->
-  <nav class="nav" role="navigation" aria-label="Main navigation">
-    <div class="container">
-      <a href="#hero" class="nav-brand" aria-label="pgdoctor home">
-        <img src="logo.png" alt="" aria-hidden="true">
-        <span>pgdoctor</span>
-      </a>
-      <ul class="nav-links" role="list">
-        <li><a href="#features">Features</a></li>
-        <li><a href="#quickstart">Quick Start</a></li>
-        <li><a href="#checks">Checks</a></li>
-        <li><a href="#library">Library</a></li>
-        <li>
-          <a href="https://github.com/emancu/pgdoctor" class="nav-github" target="_blank" rel="noopener noreferrer">
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHub
-          </a>
-        </li>
-      </ul>
-      <button class="nav-hamburger" onclick="toggleMobileNav()" aria-label="Toggle navigation menu" aria-expanded="false">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      </button>
-    </div>
-  </nav>
-
-  <!-- Mobile Nav -->
-  <div class="mobile-nav" id="mobile-nav" role="navigation" aria-label="Mobile navigation">
-    <a href="#features" onclick="closeMobileNav()">Features</a>
-    <a href="#quickstart" onclick="closeMobileNav()">Quick Start</a>
-    <a href="#checks" onclick="closeMobileNav()">Checks</a>
-    <a href="#library" onclick="closeMobileNav()">Library</a>
-    <a href="https://github.com/emancu/pgdoctor" target="_blank" rel="noopener noreferrer">GitHub</a>
-  </div>
-
-  <!-- ===== HERO ===== -->
-  <section class="hero" id="hero">
-    <div class="container">
-      <img src="logo.png" alt="pgdoctor logo - a blue PostgreSQL elephant connected to a heart monitor" class="hero-logo">
-
-      <svg class="heartbeat-line" viewBox="0 0 280 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M0 16 H80 L95 4 L110 28 L125 4 L140 28 L155 16 H280" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-
-      <h1>pgdoctor</h1>
-      <p class="hero-tagline">A command-line tool and Go library for running health checks against PostgreSQL databases.</p>
-
-      <div class="hero-install">
-        <code id="install-cmd">go install github.com/emancu/pgdoctor/cmd/pgdoctor@latest</code>
-        <button class="copy-btn" onclick="copyText('install-cmd', this)" aria-label="Copy install command">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-          <span>Copy</span>
+      /* ===== RESPONSIVE ===== */
+      @media (max-width: 900px) {
+        .quickstart-grid {
+          grid-template-columns: 1fr;
+        }
+        .features-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .library-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 640px) {
+        .nav-links {
+          display: none;
+        }
+        .nav-hamburger {
+          display: flex;
+        }
+        .hero h1 {
+          font-size: 2.4rem;
+        }
+        .hero-tagline {
+          font-size: 1rem;
+        }
+        .hero-logo {
+          width: 160px;
+        }
+        .features-grid {
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+        }
+        .section {
+          padding: 56px 0;
+        }
+        .checks-section {
+          padding: 56px 0;
+        }
+        .check-card-header {
+          padding: 12px 16px;
+          gap: 10px;
+        }
+        .check-card-id {
+          font-size: 0.8rem;
+        }
+        .check-card-name {
+          font-size: 0.82rem;
+        }
+        .check-card-content {
+          padding: 0 14px 16px;
+        }
+        .category-tab {
+          padding: 6px 14px;
+          font-size: 0.8rem;
+        }
+        .hero-stats {
+          gap: 20px;
+        }
+        .hero-install {
+          max-width: 100%;
+          width: 100%;
+        }
+        .hero-install code {
+          min-width: 0;
+          overflow-x: auto;
+          white-space: nowrap;
+          -webkit-overflow-scrolling: touch;
+        }
+        .hero-install .copy-btn {
+          flex-shrink: 0;
+        }
+        .section-header h2 {
+          font-size: 1.6rem;
+        }
+        .readme-content pre {
+          padding: 12px;
+          font-size: 0.78rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ===== NAVIGATION ===== -->
+    <nav class="nav" role="navigation" aria-label="Main navigation">
+      <div class="container">
+        <a href="#hero" class="nav-brand" aria-label="pgdoctor home">
+          <img src="logo.png" alt="" aria-hidden="true" />
+          <span>pgdoctor</span>
+        </a>
+        <ul class="nav-links" role="list">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#quickstart">Quick Start</a></li>
+          <li><a href="#checks">Checks</a></li>
+          <li><a href="#library">Library</a></li>
+          <li>
+            <a
+              href="https://github.com/emancu/pgdoctor"
+              class="nav-github"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                />
+              </svg>
+              GitHub
+            </a>
+          </li>
+        </ul>
+        <button
+          class="nav-hamburger"
+          onclick="toggleMobileNav()"
+          aria-label="Toggle navigation menu"
+          aria-expanded="false"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
         </button>
       </div>
+    </nav>
 
-      <div class="hero-actions">
-        <a href="https://github.com/emancu/pgdoctor" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          View on GitHub
-        </a>
-        <a href="#checks" class="btn btn-outline">
-          Browse Checks
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-        </a>
-      </div>
-
-      <div class="hero-stats" id="hero-stats">
-        <div class="stat-badge">
-          <span class="stat-dot"></span>
-          <span class="stat-value" id="stat-checks">--</span> checks
-        </div>
-        <div class="stat-badge">
-          <span class="stat-dot blue"></span>
-          <span class="stat-value" id="stat-categories">--</span> categories
-        </div>
-        <div class="stat-badge">
-          <span class="stat-dot yellow"></span>
-          <span class="stat-value">100%</span> read-only
-        </div>
-      </div>
+    <!-- Mobile Nav -->
+    <div
+      class="mobile-nav"
+      id="mobile-nav"
+      role="navigation"
+      aria-label="Mobile navigation"
+    >
+      <a href="#features" onclick="closeMobileNav()">Features</a>
+      <a href="#quickstart" onclick="closeMobileNav()">Quick Start</a>
+      <a href="#checks" onclick="closeMobileNav()">Checks</a>
+      <a href="#library" onclick="closeMobileNav()">Library</a>
+      <a
+        href="https://github.com/emancu/pgdoctor"
+        target="_blank"
+        rel="noopener noreferrer"
+        >GitHub</a
+      >
     </div>
-  </section>
 
-  <!-- ===== FEATURES BAR ===== -->
-  <section class="features-bar" id="features">
-    <div class="container">
-      <div class="features-grid">
-        <div class="feature-item">
-          <div class="feature-icon green" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          </div>
-          <h3>Read-only &amp; Production Safe</h3>
-          <p>Queries only system catalogs. No data modified, ever.</p>
+    <!-- ===== HERO ===== -->
+    <section class="hero" id="hero">
+      <div class="container">
+        <img
+          src="logo.png"
+          alt="pgdoctor logo - a blue PostgreSQL elephant connected to a heart monitor"
+          class="hero-logo"
+        />
+
+        <svg
+          class="heartbeat-line"
+          viewBox="0 0 280 32"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <path
+            d="M0 16 H80 L95 4 L110 28 L125 4 L140 28 L155 16 H280"
+            stroke="#4CAF50"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+
+        <h1>pgdoctor</h1>
+        <p class="hero-tagline">
+          A command-line tool and Go library for running health checks against
+          PostgreSQL databases.
+        </p>
+
+        <div class="hero-install">
+          <code id="install-cmd"
+            >go install github.com/emancu/pgdoctor/cmd/pgdoctor@latest</code
+          >
+          <button
+            class="copy-btn"
+            onclick="copyText('install-cmd', this)"
+            aria-label="Copy install command"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+            <span>Copy</span>
+          </button>
         </div>
-        <div class="feature-item">
-          <div class="feature-icon blue" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          </div>
-          <h3 id="feature-check-count">Built-in Checks</h3>
-          <p>Configs, indexes, vacuum, schema, and performance.</p>
+
+        <div class="hero-actions">
+          <a
+            href="https://github.com/emancu/pgdoctor"
+            class="btn btn-primary"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+              />
+            </svg>
+            View on GitHub
+          </a>
+          <a href="#checks" class="btn btn-outline">
+            Browse Checks
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <polyline points="19 12 12 19 5 12" />
+            </svg>
+          </a>
         </div>
-        <div class="feature-item">
-          <div class="feature-icon blue" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+
+        <div class="hero-stats" id="hero-stats">
+          <div class="stat-badge">
+            <span class="stat-dot"></span>
+            <span class="stat-value" id="stat-checks">--</span> checks
           </div>
-          <h3>CLI + Go Library</h3>
-          <p>Use standalone or embed in your own Go tools.</p>
-        </div>
-        <div class="feature-item">
-          <div class="feature-icon green" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <div class="stat-badge">
+            <span class="stat-dot blue"></span>
+            <span class="stat-value" id="stat-categories">--</span> categories
           </div>
-          <h3>JSON Output</h3>
-          <p>Machine-readable output for CI/CD pipelines.</p>
+          <div class="stat-badge">
+            <span class="stat-dot yellow"></span>
+            <span class="stat-value">100%</span> read-only
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ===== QUICK START ===== -->
-  <section class="section" id="quickstart">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-divider"></div>
-        <h2>Quick Start</h2>
-        <p>Get your PostgreSQL health report in seconds.</p>
-      </div>
-
-      <div class="quickstart-grid">
-        <div class="code-card">
-          <div class="code-card-header">
-            <span class="code-card-title">Run all checks</span>
-            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy code">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copy
-            </button>
+    <!-- ===== FEATURES BAR ===== -->
+    <section class="features-bar" id="features">
+      <div class="container">
+        <div class="features-grid">
+          <div class="feature-item">
+            <div class="feature-icon green" aria-hidden="true">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <h3>Read-only &amp; Production Safe</h3>
+            <p>Queries only system catalogs. No data modified, ever.</p>
           </div>
-          <pre><code><span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="string">"postgres://user:pass@localhost:5432/mydb"</span>
+          <div class="feature-item">
+            <div class="feature-icon blue" aria-hidden="true">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            </div>
+            <h3 id="feature-check-count">Built-in Checks</h3>
+            <p>Configs, indexes, vacuum, schema, and performance.</p>
+          </div>
+          <div class="feature-item">
+            <div class="feature-icon blue" aria-hidden="true">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </div>
+            <h3>CLI + Go Library</h3>
+            <p>Use standalone or embed in your own Go tools.</p>
+          </div>
+          <div class="feature-item">
+            <div class="feature-icon green" aria-hidden="true">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"
+                />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+            </div>
+            <h3>JSON Output</h3>
+            <p>Machine-readable output for CI/CD pipelines.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== QUICK START ===== -->
+    <section class="section" id="quickstart">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-divider"></div>
+          <h2>Quick Start</h2>
+          <p>Get your PostgreSQL health report in seconds.</p>
+        </div>
+
+        <div class="quickstart-grid">
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="code-card-title">Run all checks</span>
+              <button
+                class="copy-btn"
+                onclick="copyCode(this)"
+                aria-label="Copy code"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="string">"postgres://user:pass@localhost:5432/mydb"</span>
 
 <span class="comment"># Or use an environment variable</span>
 <span class="prompt">$ </span><span class="kw">export</span> PGDOCTOR_DSN=<span class="string">"postgres://..."</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> run</code></pre>
-        </div>
-
-        <div class="code-card">
-          <div class="code-card-header">
-            <span class="code-card-title">Filter checks</span>
-            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy code">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copy
-            </button>
           </div>
-          <pre><code><span class="comment"># Run only specific checks or categories</span>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="code-card-title">Filter checks</span>
+              <button
+                class="copy-btn"
+                onclick="copyCode(this)"
+                aria-label="Copy code"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment"># Run only specific checks or categories</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="flag">--only</span> connection-health,indexes
 
 <span class="comment"># Skip certain checks</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="flag">--ignore</span> index-bloat,vacuum</code></pre>
-        </div>
-
-        <div class="code-card">
-          <div class="code-card-header">
-            <span class="code-card-title">Explore checks</span>
-            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy code">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copy
-            </button>
           </div>
-          <pre><code><span class="comment"># List all available checks</span>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="code-card-title">Explore checks</span>
+              <button
+                class="copy-btn"
+                onclick="copyCode(this)"
+                aria-label="Copy code"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment"># List all available checks</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> list
 
 <span class="comment"># Read detailed docs for a check</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> explain index-bloat</code></pre>
-        </div>
-
-        <div class="code-card">
-          <div class="code-card-header">
-            <span class="code-card-title">Output options</span>
-            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy code">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copy
-            </button>
           </div>
-          <pre><code><span class="comment"># JSON output for CI/CD</span>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span class="code-card-title">Output options</span>
+              <button
+                class="copy-btn"
+                onclick="copyCode(this)"
+                aria-label="Copy code"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment"># JSON output for CI/CD</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="flag">--output</span> json
 
 <span class="comment"># Verbose details, hide passing</span>
 <span class="prompt">$ </span><span class="cmd">pgdoctor</span> run <span class="flag">--detail</span> verbose <span class="flag">--hide-passing</span></code></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===== CHECKS REFERENCE ===== -->
-  <section class="checks-section" id="checks">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-divider"></div>
-        <h2>Checks Reference</h2>
-        <p id="checks-subtitle">Production-safe checks organized across categories. Click any check to expand its documentation.</p>
-      </div>
-
-      <!-- Category Filter Tabs (built dynamically) -->
-      <div class="category-tabs" role="tablist" aria-label="Filter checks by category" id="category-tabs"></div>
-
-      <!-- CLI bridge hint (single instance, not per-card) -->
-      <div class="cli-bridge" role="note">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        <span>All documentation below is available offline via <code>pgdoctor explain &lt;check-id&gt;</code></span>
-      </div>
-
-      <!-- Checks Grid (built dynamically from checks.json) -->
-      <div class="checks-grid" id="checks-grid"></div>
-    </div>
-  </section>
-
-  <!-- ===== LIBRARY API ===== -->
-  <section class="section library-section" id="library">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-divider"></div>
-        <h2>Go Library</h2>
-        <p>Embed pgdoctor checks directly in your Go applications.</p>
-      </div>
-
-      <div class="library-grid">
-        <div class="library-info">
-          <h3>Simple, composable API</h3>
-          <p>Import as a Go module and run checks programmatically. Filter, extend with custom checks, and process results however you need.</p>
-          <div class="api-item">pgdoctor.Run(ctx, conn, checks, only, ignored) <span class="api-desc">Execute checks</span></div>
-          <div class="api-item">pgdoctor.AllChecks() <span class="api-desc">Built-in check set</span></div>
-          <div class="api-item">pgdoctor.ValidateFilters(checks, filters) <span class="api-desc">Validate filters</span></div>
-        </div>
-
-        <div class="library-code">
-          <div class="code-card-header">
-            <span class="code-card-title">main.go</span>
-            <button class="copy-btn" onclick="copyCode(this)" aria-label="Copy code">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copy
-            </button>
           </div>
-          <pre><code><span class="kw">package</span> <span class="pkg">main</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== CHECKS REFERENCE ===== -->
+    <section class="checks-section" id="checks">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-divider"></div>
+          <h2>Checks Reference</h2>
+          <p id="checks-subtitle">
+            Production-safe checks organized across categories. Click any check
+            to expand its documentation.
+          </p>
+        </div>
+
+        <!-- Category Filter Tabs (built dynamically) -->
+        <div
+          class="category-tabs"
+          role="tablist"
+          aria-label="Filter checks by category"
+          id="category-tabs"
+        ></div>
+
+        <!-- CLI bridge hint (single instance, not per-card) -->
+        <div class="cli-bridge" role="note">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          <span
+            >All documentation below is available offline via
+            <code>pgdoctor explain &lt;check-id&gt;</code></span
+          >
+        </div>
+
+        <!-- Checks Grid (built dynamically from checks.json) -->
+        <div class="checks-grid" id="checks-grid"></div>
+      </div>
+    </section>
+
+    <!-- ===== LIBRARY API ===== -->
+    <section class="section library-section" id="library">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-divider"></div>
+          <h2>Go Library</h2>
+          <p>Embed pgdoctor checks directly in your Go applications.</p>
+        </div>
+
+        <div class="library-grid">
+          <div class="library-info">
+            <h3>Simple, composable API</h3>
+            <p>
+              Import as a Go module and run checks programmatically. Filter,
+              extend with custom checks, and process results however you need.
+            </p>
+            <div class="api-item">
+              pgdoctor.Run(ctx, conn, checks, only, ignored)
+              <span class="api-desc">Execute checks</span>
+            </div>
+            <div class="api-item">
+              pgdoctor.AllChecks()
+              <span class="api-desc">Built-in check set</span>
+            </div>
+            <div class="api-item">
+              pgdoctor.ValidateFilters(checks, filters)
+              <span class="api-desc">Validate filters</span>
+            </div>
+          </div>
+
+          <div class="library-code">
+            <div class="code-card-header">
+              <span class="code-card-title">main.go</span>
+              <button
+                class="copy-btn"
+                onclick="copyCode(this)"
+                aria-label="Copy code"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="kw">package</span> <span class="pkg">main</span>
 
 <span class="kw">import</span> (
     <span class="str">"context"</span>
@@ -766,336 +1701,460 @@
         fmt.<span class="fn">Printf</span>(<span class="str">"[%s] %s\n"</span>, report.CheckID, report.Name)
     }
 }</code></pre>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ===== FOOTER ===== -->
-  <footer class="footer">
-    <div class="container">
-      <div class="footer-brand">
-        <img src="logo.png" alt="" aria-hidden="true">
-        <span>pgdoctor</span>
+    <!-- ===== FOOTER ===== -->
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-brand">
+          <img src="logo.png" alt="" aria-hidden="true" />
+          <span>pgdoctor</span>
+        </div>
+
+        <div class="footer-links">
+          <a
+            href="https://github.com/emancu/pgdoctor"
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/emancu/pgdoctor/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Releases</a
+          >
+          <a
+            href="https://github.com/emancu/pgdoctor/blob/master/CONTRIBUTING.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Contributing</a
+          >
+          <a
+            href="https://github.com/emancu/pgdoctor/blob/master/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            >MIT License</a
+          >
+        </div>
+
+        <div class="footer-meta">
+          Built by
+          <a
+            href="https://github.com/emancu"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Emiliano Mancuso</a
+          >
+          @
+          <a
+            href="https://www.fresha.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Fresha</a
+          >
+        </div>
       </div>
+    </footer>
 
-      <div class="footer-links">
-        <a href="https://github.com/emancu/pgdoctor" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://github.com/emancu/pgdoctor/releases" target="_blank" rel="noopener noreferrer">Releases</a>
-        <a href="https://github.com/emancu/pgdoctor/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">Contributing</a>
-        <a href="https://github.com/emancu/pgdoctor/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
-      </div>
+    <!-- ===== BACK TO TOP ===== -->
+    <button
+      class="back-to-top"
+      id="back-to-top"
+      onclick="window.scrollTo({ top: 0, behavior: 'smooth' })"
+      aria-label="Back to top"
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <line x1="12" y1="19" x2="12" y2="5" />
+        <polyline points="5 12 12 5 19 12" />
+      </svg>
+    </button>
 
-      <div class="footer-meta">
-        Built by <a href="https://github.com/emancu" target="_blank" rel="noopener noreferrer">Emiliano Mancuso</a> @ <a href="https://www.fresha.com" target="_blank" rel="noopener noreferrer">Fresha</a>
-      </div>
-    </div>
-  </footer>
+    <!-- marked.js for rendering README markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- ===== BACK TO TOP ===== -->
-  <button class="back-to-top" id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-  </button>
+    <script>
+      // === State ===
+      var checksData = null;
+      var readmeCache = {};
+      var categoryOrder = [
+        "configs",
+        "indexes",
+        "vacuum",
+        "schema",
+        "performance",
+      ];
 
-  <!-- marked.js for rendering README markdown -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
-  <script>
-    // === State ===
-    var checksData = null;
-    var readmeCache = {};
-    var categoryOrder = ['configs', 'indexes', 'vacuum', 'schema', 'performance'];
-
-    // === Load checks.json and build the page ===
-    fetch('checks.json')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        checksData = data.checks;
-        buildPage(checksData);
-        openCheckFromHash();
-      });
-
-    // === Deep-link: open check from URL hash ===
-    function openCheckFromHash() {
-      var hash = location.hash.replace('#', '');
-      if (!hash) return;
-      var card = document.querySelector('.check-card[data-check-id="' + CSS.escape(hash) + '"]');
-      if (!card) return;
-
-      // Ensure the card's category group is visible
-      var group = card.closest('.category-group');
-      if (group && group.style.display === 'none') {
-        // Reset filter to "All"
-        var allTab = document.querySelector('.category-tab');
-        if (allTab) filterChecks('all', allTab);
-      }
-
-      // Open the card and load README
-      if (!card.classList.contains('open')) {
-        var header = card.querySelector('.check-card-header');
-        toggleCheck(header);
-      }
-
-      // Scroll to card after a brief delay for DOM rendering
-      setTimeout(function() {
-        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    }
-
-    window.addEventListener('hashchange', openCheckFromHash);
-
-    function buildPage(checks) {
-      // Group checks by category
-      var groups = {};
-      var categoryCounts = {};
-
-      checks.forEach(function(c) {
-        if (!groups[c.category]) {
-          groups[c.category] = [];
-          categoryCounts[c.category] = 0;
-        }
-        groups[c.category].push(c);
-        categoryCounts[c.category]++;
-      });
-
-      // Update stats
-      var categories = Object.keys(groups);
-      document.getElementById('stat-checks').textContent = checks.length;
-      document.getElementById('stat-categories').textContent = categories.length;
-      document.getElementById('feature-check-count').textContent = checks.length + ' Built-in Checks';
-      document.getElementById('checks-subtitle').textContent =
-        checks.length + ' production-safe checks organized across ' + categories.length + ' categories. Click any check to expand its documentation.';
-
-      // Build category tabs
-      var tabsEl = document.getElementById('category-tabs');
-      tabsEl.innerHTML = '';
-
-      var allTab = document.createElement('button');
-      allTab.className = 'category-tab active';
-      allTab.setAttribute('role', 'tab');
-      allTab.setAttribute('aria-selected', 'true');
-      allTab.innerHTML = 'All<span class="tab-count">' + checks.length + '</span>';
-      allTab.onclick = function() { filterChecks('all', allTab); };
-      tabsEl.appendChild(allTab);
-
-      categoryOrder.forEach(function(cat) {
-        if (!categoryCounts[cat]) return;
-        var tab = document.createElement('button');
-        tab.className = 'category-tab';
-        tab.setAttribute('role', 'tab');
-        tab.setAttribute('aria-selected', 'false');
-        tab.innerHTML = cat + '<span class="tab-count">' + categoryCounts[cat] + '</span>';
-        tab.onclick = function() { filterChecks(cat, tab); };
-        tabsEl.appendChild(tab);
-      });
-
-      // Build checks grid
-      var gridEl = document.getElementById('checks-grid');
-      gridEl.innerHTML = '';
-
-      categoryOrder.forEach(function(cat) {
-        if (!groups[cat]) return;
-
-        var groupDiv = document.createElement('div');
-        groupDiv.className = 'category-group';
-        groupDiv.setAttribute('data-category', cat);
-
-        var titleDiv = document.createElement('div');
-        titleDiv.className = 'category-group-title';
-        titleDiv.innerHTML = cat + ' &mdash; ' + groups[cat].length + ' checks';
-        groupDiv.appendChild(titleDiv);
-
-        groups[cat].forEach(function(c) {
-          groupDiv.appendChild(buildCheckCard(c));
-        });
-
-        gridEl.appendChild(groupDiv);
-      });
-    }
-
-    function buildCheckCard(c) {
-      var card = document.createElement('div');
-      card.className = 'check-card';
-      card.id = c.id;
-      card.setAttribute('data-category', c.category);
-      card.setAttribute('data-check-id', c.id);
-
-      var chevronSvg = '<svg class="check-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
-      var linkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
-
-      var header = document.createElement('div');
-      header.className = 'check-card-header';
-      header.setAttribute('role', 'button');
-      header.setAttribute('aria-expanded', 'false');
-      header.setAttribute('tabindex', '0');
-      header.innerHTML =
-        chevronSvg +
-        '<span class="check-card-id">' + escapeHtml(c.id) + '</span>' +
-        '<span class="check-card-info"><span class="check-card-name">' + escapeHtml(c.description) + '</span></span>' +
-        '<span class="check-card-badge cat-' + escapeHtml(c.category) + '">' + escapeHtml(c.category) + '</span>' +
-        '<button class="share-link-btn" aria-label="Copy link to ' + escapeHtml(c.id) + '" title="Copy link">' + linkSvg + '</button>';
-
-      header.onclick = function(e) {
-        if (e.target.closest('.share-link-btn')) return;
-        toggleCheck(header);
-      };
-      header.onkeydown = function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCheck(header); }
-      };
-
-      // Share link button handler
-      header.querySelector('.share-link-btn').onclick = function(e) {
-        e.stopPropagation();
-        var url = location.origin + location.pathname + '#' + c.id;
-        navigator.clipboard.writeText(url).then(function() {
-          var btn = e.currentTarget;
-          btn.classList.add('copied');
-          setTimeout(function() { btn.classList.remove('copied'); }, 1500);
-        });
-      };
-
-      var content = document.createElement('div');
-      content.className = 'check-card-content';
-
-      content.innerHTML = '<div class="loading">Loading documentation...</div>';
-      content.setAttribute('data-loaded', 'false');
-
-      card.appendChild(header);
-      card.appendChild(content);
-      return card;
-    }
-
-    function escapeHtml(str) {
-      var div = document.createElement('div');
-      div.appendChild(document.createTextNode(str));
-      return div.innerHTML;
-    }
-
-    // === Copy to clipboard ===
-    function copyText(elementId, btn) {
-      var text = document.getElementById(elementId).textContent;
-      navigator.clipboard.writeText(text).then(function() {
-        var span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          btn.classList.add('copied');
-          setTimeout(function() { span.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
-        }
-      });
-    }
-
-    function copyCode(btn) {
-      var pre = btn.closest('.code-card, .library-code').querySelector('pre');
-      if (!pre) return;
-      var text = pre.textContent.replace(/^\$ /gm, '');
-      navigator.clipboard.writeText(text).then(function() {
-        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
-        btn.classList.add('copied');
-        setTimeout(function() {
-          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
-          btn.classList.remove('copied');
-        }, 2000);
-      });
-    }
-
-    // === Toggle check card (fetch README on first open) ===
-    function toggleCheck(header) {
-      var card = header.closest('.check-card');
-      var isOpen = card.classList.contains('open');
-      card.classList.toggle('open');
-      header.setAttribute('aria-expanded', !isOpen);
-
-      var checkId = card.getAttribute('data-check-id');
-
-      if (!isOpen) {
-        // Opening: load README and update URL hash
-        var content = card.querySelector('.check-card-content');
-        if (content.getAttribute('data-loaded') === 'false') {
-          loadReadme(checkId, content);
-        }
-        history.replaceState(null, '', '#' + checkId);
-      } else {
-        // Closing: clear hash only if it matches this check
-        if (location.hash === '#' + checkId) {
-          history.replaceState(null, '', location.pathname);
-        }
-      }
-    }
-
-    function loadReadme(checkId, contentEl) {
-      if (readmeCache[checkId]) {
-        renderReadme(readmeCache[checkId], contentEl);
-        return;
-      }
-
-      fetch('checks/' + checkId + '.md')
-        .then(function(r) {
-          if (!r.ok) throw new Error('Not found');
-          return r.text();
+      // === Load checks.json and build the page ===
+      fetch("checks.json")
+        .then(function (r) {
+          return r.json();
         })
-        .then(function(md) {
-          readmeCache[checkId] = md;
-          renderReadme(md, contentEl);
-        })
-        .catch(function() {
-          var loading = contentEl.querySelector('.loading');
-          if (loading) loading.textContent = 'Documentation not available.';
+        .then(function (data) {
+          checksData = data.checks;
+          buildPage(checksData);
+          openCheckFromHash();
         });
-    }
 
-    function renderReadme(md, contentEl) {
-      var loading = contentEl.querySelector('.loading');
-      if (loading) {
-        var readmeDiv = document.createElement('div');
-        readmeDiv.className = 'readme-content';
-        readmeDiv.innerHTML = marked.parse(md);
-        loading.replaceWith(readmeDiv);
+      // === Deep-link: open check from URL hash ===
+      function openCheckFromHash() {
+        var hash = location.hash.replace("#", "");
+        if (!hash) return;
+        var card = document.querySelector(
+          '.check-card[data-check-id="' + CSS.escape(hash) + '"]',
+        );
+        if (!card) return;
+
+        // Ensure the card's category group is visible
+        var group = card.closest(".category-group");
+        if (group && group.style.display === "none") {
+          // Reset filter to "All"
+          var allTab = document.querySelector(".category-tab");
+          if (allTab) filterChecks("all", allTab);
+        }
+
+        // Open the card and load README
+        if (!card.classList.contains("open")) {
+          var header = card.querySelector(".check-card-header");
+          toggleCheck(header);
+        }
+
+        // Scroll to card after a brief delay for DOM rendering
+        setTimeout(function () {
+          card.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
       }
-      contentEl.setAttribute('data-loaded', 'true');
-    }
 
-    // === Category filter ===
-    function filterChecks(category, tab) {
-      var tabs = document.querySelectorAll('.category-tab');
-      tabs.forEach(function(t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
-      tab.classList.add('active');
-      tab.setAttribute('aria-selected', 'true');
+      window.addEventListener("hashchange", openCheckFromHash);
 
-      var groups = document.querySelectorAll('.category-group');
-      groups.forEach(function(group) {
-        if (category === 'all' || group.getAttribute('data-category') === category) {
-          group.style.display = '';
+      function buildPage(checks) {
+        // Group checks by category
+        var groups = {};
+        var categoryCounts = {};
+
+        checks.forEach(function (c) {
+          if (!groups[c.category]) {
+            groups[c.category] = [];
+            categoryCounts[c.category] = 0;
+          }
+          groups[c.category].push(c);
+          categoryCounts[c.category]++;
+        });
+
+        // Update stats
+        var categories = Object.keys(groups);
+        document.getElementById("stat-checks").textContent = checks.length;
+        document.getElementById("stat-categories").textContent =
+          categories.length;
+        document.getElementById("feature-check-count").textContent =
+          checks.length + " Built-in Checks";
+        document.getElementById("checks-subtitle").textContent =
+          checks.length +
+          " production-safe checks organized across " +
+          categories.length +
+          " categories. Click any check to expand its documentation.";
+
+        // Build category tabs
+        var tabsEl = document.getElementById("category-tabs");
+        tabsEl.innerHTML = "";
+
+        var allTab = document.createElement("button");
+        allTab.className = "category-tab active";
+        allTab.setAttribute("role", "tab");
+        allTab.setAttribute("aria-selected", "true");
+        allTab.innerHTML =
+          'All<span class="tab-count">' + checks.length + "</span>";
+        allTab.onclick = function () {
+          filterChecks("all", allTab);
+        };
+        tabsEl.appendChild(allTab);
+
+        categoryOrder.forEach(function (cat) {
+          if (!categoryCounts[cat]) return;
+          var tab = document.createElement("button");
+          tab.className = "category-tab";
+          tab.setAttribute("role", "tab");
+          tab.setAttribute("aria-selected", "false");
+          tab.innerHTML =
+            cat + '<span class="tab-count">' + categoryCounts[cat] + "</span>";
+          tab.onclick = function () {
+            filterChecks(cat, tab);
+          };
+          tabsEl.appendChild(tab);
+        });
+
+        // Build checks grid
+        var gridEl = document.getElementById("checks-grid");
+        gridEl.innerHTML = "";
+
+        categoryOrder.forEach(function (cat) {
+          if (!groups[cat]) return;
+
+          var groupDiv = document.createElement("div");
+          groupDiv.className = "category-group";
+          groupDiv.setAttribute("data-category", cat);
+
+          var titleDiv = document.createElement("div");
+          titleDiv.className = "category-group-title";
+          titleDiv.innerHTML =
+            cat + " &mdash; " + groups[cat].length + " checks";
+          groupDiv.appendChild(titleDiv);
+
+          groups[cat].forEach(function (c) {
+            groupDiv.appendChild(buildCheckCard(c));
+          });
+
+          gridEl.appendChild(groupDiv);
+        });
+      }
+
+      function buildCheckCard(c) {
+        var card = document.createElement("div");
+        card.className = "check-card";
+        card.id = c.id;
+        card.setAttribute("data-category", c.category);
+        card.setAttribute("data-check-id", c.id);
+
+        var chevronSvg =
+          '<svg class="check-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
+        var linkSvg =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
+
+        var header = document.createElement("div");
+        header.className = "check-card-header";
+        header.setAttribute("role", "button");
+        header.setAttribute("aria-expanded", "false");
+        header.setAttribute("tabindex", "0");
+        header.innerHTML =
+          chevronSvg +
+          '<div class="check-card-info">' +
+          '<div class="check-card-top">' +
+          '<span class="check-card-id">' +
+          escapeHtml(c.id) +
+          "</span>" +
+          '<span class="check-card-badge cat-' +
+          escapeHtml(c.category) +
+          '">' +
+          escapeHtml(c.category) +
+          "</span>" +
+          "</div>" +
+          '<span class="check-card-name">' +
+          escapeHtml(c.description) +
+          "</span>" +
+          "</div>" +
+          '<button class="share-link-btn" aria-label="Copy link to ' +
+          escapeHtml(c.id) +
+          '" title="Copy link">' +
+          linkSvg +
+          "</button>";
+
+        header.onclick = function (e) {
+          if (e.target.closest(".share-link-btn")) return;
+          toggleCheck(header);
+        };
+        header.onkeydown = function (e) {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleCheck(header);
+          }
+        };
+
+        // Share link button handler
+        header.querySelector(".share-link-btn").onclick = function (e) {
+          e.stopPropagation();
+          var url = location.origin + location.pathname + "#" + c.id;
+          navigator.clipboard.writeText(url).then(function () {
+            var btn = e.currentTarget;
+            btn.classList.add("copied");
+            setTimeout(function () {
+              btn.classList.remove("copied");
+            }, 1500);
+          });
+        };
+
+        var content = document.createElement("div");
+        content.className = "check-card-content";
+
+        content.innerHTML =
+          '<div class="loading">Loading documentation...</div>';
+        content.setAttribute("data-loaded", "false");
+
+        card.appendChild(header);
+        card.appendChild(content);
+        return card;
+      }
+
+      function escapeHtml(str) {
+        var div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      // === Copy to clipboard ===
+      function copyText(elementId, btn) {
+        var text = document.getElementById(elementId).textContent;
+        navigator.clipboard.writeText(text).then(function () {
+          var span = btn.querySelector("span");
+          if (span) {
+            span.textContent = "Copied!";
+            btn.classList.add("copied");
+            setTimeout(function () {
+              span.textContent = "Copy";
+              btn.classList.remove("copied");
+            }, 2000);
+          }
+        });
+      }
+
+      function copyCode(btn) {
+        var pre = btn.closest(".code-card, .library-code").querySelector("pre");
+        if (!pre) return;
+        var text = pre.textContent.replace(/^\$ /gm, "");
+        navigator.clipboard.writeText(text).then(function () {
+          btn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+          btn.classList.add("copied");
+          setTimeout(function () {
+            btn.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
+            btn.classList.remove("copied");
+          }, 2000);
+        });
+      }
+
+      // === Toggle check card (fetch README on first open) ===
+      function toggleCheck(header) {
+        var card = header.closest(".check-card");
+        var isOpen = card.classList.contains("open");
+        card.classList.toggle("open");
+        header.setAttribute("aria-expanded", !isOpen);
+
+        var checkId = card.getAttribute("data-check-id");
+
+        if (!isOpen) {
+          // Opening: load README and update URL hash
+          var content = card.querySelector(".check-card-content");
+          if (content.getAttribute("data-loaded") === "false") {
+            loadReadme(checkId, content);
+          }
+          history.replaceState(null, "", "#" + checkId);
         } else {
-          group.style.display = 'none';
+          // Closing: clear hash only if it matches this check
+          if (location.hash === "#" + checkId) {
+            history.replaceState(null, "", location.pathname);
+          }
         }
+      }
+
+      function loadReadme(checkId, contentEl) {
+        if (readmeCache[checkId]) {
+          renderReadme(readmeCache[checkId], contentEl);
+          return;
+        }
+
+        fetch("checks/" + checkId + ".md")
+          .then(function (r) {
+            if (!r.ok) throw new Error("Not found");
+            return r.text();
+          })
+          .then(function (md) {
+            readmeCache[checkId] = md;
+            renderReadme(md, contentEl);
+          })
+          .catch(function () {
+            var loading = contentEl.querySelector(".loading");
+            if (loading) loading.textContent = "Documentation not available.";
+          });
+      }
+
+      function renderReadme(md, contentEl) {
+        var loading = contentEl.querySelector(".loading");
+        if (loading) {
+          var readmeDiv = document.createElement("div");
+          readmeDiv.className = "readme-content";
+          readmeDiv.innerHTML = marked.parse(md);
+
+          readmeDiv.querySelectorAll("table").forEach(function (table) {
+            var wrap = document.createElement("div");
+            wrap.className = "table-wrap";
+            table.parentNode.insertBefore(wrap, table);
+            wrap.appendChild(table);
+          });
+
+          loading.replaceWith(readmeDiv);
+        }
+        contentEl.setAttribute("data-loaded", "true");
+      }
+
+      // === Category filter ===
+      function filterChecks(category, tab) {
+        var tabs = document.querySelectorAll(".category-tab");
+        tabs.forEach(function (t) {
+          t.classList.remove("active");
+          t.setAttribute("aria-selected", "false");
+        });
+        tab.classList.add("active");
+        tab.setAttribute("aria-selected", "true");
+
+        var groups = document.querySelectorAll(".category-group");
+        groups.forEach(function (group) {
+          if (
+            category === "all" ||
+            group.getAttribute("data-category") === category
+          ) {
+            group.style.display = "";
+          } else {
+            group.style.display = "none";
+          }
+        });
+      }
+
+      // === Mobile nav ===
+      function toggleMobileNav() {
+        var nav = document.getElementById("mobile-nav");
+        var btn = document.querySelector(".nav-hamburger");
+        var isOpen = nav.classList.contains("open");
+        nav.classList.toggle("open");
+        btn.setAttribute("aria-expanded", !isOpen);
+      }
+      function closeMobileNav() {
+        document.getElementById("mobile-nav").classList.remove("open");
+        document
+          .querySelector(".nav-hamburger")
+          .setAttribute("aria-expanded", "false");
+      }
+
+      // === Back to top ===
+      var backToTop = document.getElementById("back-to-top");
+      window.addEventListener(
+        "scroll",
+        function () {
+          if (window.scrollY > 600) {
+            backToTop.classList.add("visible");
+          } else {
+            backToTop.classList.remove("visible");
+          }
+        },
+        { passive: true },
+      );
+
+      // === Keyboard accessibility ===
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeMobileNav();
       });
-    }
-
-    // === Mobile nav ===
-    function toggleMobileNav() {
-      var nav = document.getElementById('mobile-nav');
-      var btn = document.querySelector('.nav-hamburger');
-      var isOpen = nav.classList.contains('open');
-      nav.classList.toggle('open');
-      btn.setAttribute('aria-expanded', !isOpen);
-    }
-    function closeMobileNav() {
-      document.getElementById('mobile-nav').classList.remove('open');
-      document.querySelector('.nav-hamburger').setAttribute('aria-expanded', 'false');
-    }
-
-    // === Back to top ===
-    var backToTop = document.getElementById('back-to-top');
-    window.addEventListener('scroll', function() {
-      if (window.scrollY > 600) { backToTop.classList.add('visible'); }
-      else { backToTop.classList.remove('visible'); }
-    }, { passive: true });
-
-    // === Keyboard accessibility ===
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') closeMobileNav();
-    });
-  </script>
-
-</body>
+    </script>
+  </body>
 </html>
