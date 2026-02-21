@@ -112,12 +112,12 @@
       display: flex; align-items: center; gap: 8px; list-style: none;
     }
     .nav-links a {
-      display: block; padding: 6px 14px; font-size: 0.875rem; font-weight: 500;
+      display: flex; align-items: center; padding: 6px 14px; font-size: 0.875rem; font-weight: 500;
       color: var(--text-secondary); border-radius: 6px; transition: color 0.2s, background 0.2s;
     }
     .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.06); }
     .nav-github {
-      display: inline-flex; align-items: center; gap: 6px;
+      display: flex; align-items: center; gap: 6px;
       padding: 7px 16px; font-size: 0.85rem; font-weight: 600;
       color: var(--text); background: var(--bg-surface);
       border: 1px solid var(--border); border-radius: 6px;
@@ -281,8 +281,8 @@
     }
     .category-tab.active .tab-count { background: rgba(255,255,255,0.2); }
 
-    .checks-grid { display: grid; gap: 12px; }
-    .category-group { margin-bottom: 8px; }
+    .checks-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .category-group { margin-bottom: 8px; min-width: 0; }
     .category-group-title {
       font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.08em; color: var(--text-dim);
@@ -291,32 +291,35 @@
     .check-card {
       background: var(--bg-surface); border: 1px solid var(--border);
       border-radius: var(--radius); transition: border-color 0.2s, box-shadow 0.2s;
-      overflow: hidden;
+      overflow: hidden; min-width: 0;
     }
     .check-card:hover { border-color: var(--border-light); }
     .check-card-header {
-      display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+      display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px;
       cursor: pointer; user-select: none; transition: background 0.2s;
     }
     .check-card-header:hover { background: rgba(255,255,255,0.02); }
     .check-card-chevron {
       flex-shrink: 0; width: 20px; height: 20px; color: var(--text-dim);
-      transition: transform 0.25s ease, color 0.2s;
+      transition: transform 0.25s ease, color 0.2s; margin-top: 2px;
     }
     .check-card.open .check-card-chevron { transform: rotate(90deg); color: var(--accent); }
-    .check-card-id {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.875rem;
-      font-weight: 600; color: var(--pg-blue-light); flex-shrink: 0; min-width: 180px;
-    }
     .check-card-info { flex: 1; min-width: 0; }
-    .check-card-name {
-      font-size: 0.9rem; font-weight: 500; color: var(--text);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    .check-card-top {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px;
+    }
+    .check-card-id {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+      font-weight: 600; color: var(--pg-blue-light);
     }
     .check-card-badge {
-      flex-shrink: 0; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.05em; padding: 3px 10px; border-radius: 100px;
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; padding: 2px 9px; border-radius: 100px;
       background: rgba(51,103,145,0.15); color: var(--pg-blue-light);
+    }
+    .check-card-name {
+      font-size: 0.88rem; font-weight: 400; color: var(--text-secondary);
+      line-height: 1.5;
     }
     .check-card-badge.cat-indexes { background: rgba(168,85,247,0.12); color: #c084fc; }
     .check-card-badge.cat-vacuum { background: rgba(251,146,60,0.12); color: #fb923c; }
@@ -337,6 +340,7 @@
 
     .check-card-content {
       display: none; padding: 0 20px 20px; border-top: 1px solid var(--border);
+      min-width: 0; overflow-x: auto;
     }
     .check-card.open .check-card-content { display: block; }
     .check-card-content .loading {
@@ -357,6 +361,8 @@
     /* Rendered markdown inside check cards */
     .check-card-content .readme-content {
       margin-top: 16px; font-size: 0.9rem; line-height: 1.7; color: var(--text-secondary);
+      overflow-wrap: break-word; word-break: break-word;
+      overflow-x: auto;
     }
     .readme-content h1, .readme-content h2, .readme-content h3 {
       color: var(--text); margin: 1.2em 0 0.5em; font-weight: 600;
@@ -374,12 +380,18 @@
     .readme-content pre {
       background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
       padding: 16px; overflow-x: auto; margin: 0.8em 0;
+      max-width: 100%; box-sizing: border-box;
     }
     .readme-content pre code {
       background: none; padding: 0; font-size: 0.82rem; color: var(--text);
+      white-space: pre; word-break: normal; overflow-wrap: normal;
+    }
+    .readme-content .table-wrap {
+      overflow-x: auto; margin: 0.8em 0; -webkit-overflow-scrolling: touch;
+      max-width: 100%;
     }
     .readme-content table {
-      width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 0.85rem;
+      border-collapse: collapse; font-size: 0.85rem; min-width: 320px; width: max-content;
     }
     .readme-content th, .readme-content td {
       padding: 8px 12px; border: 1px solid var(--border); text-align: left;
@@ -388,6 +400,7 @@
     .readme-content blockquote {
       border-left: 3px solid var(--pg-blue); padding: 0.5em 1em; margin: 0.8em 0;
       background: rgba(51,103,145,0.08); border-radius: 0 var(--radius) var(--radius) 0;
+      overflow-wrap: break-word;
     }
     .readme-content a { color: var(--pg-blue-light); }
     .readme-content a:hover { color: var(--accent); }
@@ -476,7 +489,6 @@
       .quickstart-grid { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: repeat(2, 1fr); }
       .library-grid { grid-template-columns: 1fr; }
-      .check-card-id { min-width: 140px; }
     }
     @media (max-width: 640px) {
       .nav-links { display: none; }
@@ -488,13 +500,21 @@
       .section { padding: 56px 0; }
       .checks-section { padding: 56px 0; }
       .check-card-header { padding: 12px 16px; gap: 10px; }
-      .check-card-id { min-width: auto; font-size: 0.8rem; }
-      .check-card-badge { display: none; }
-      .check-card-name { font-size: 0.85rem; }
+      .check-card-id { font-size: 0.8rem; }
+      .check-card-name { font-size: 0.82rem; }
+      .check-card-content { padding: 0 14px 16px; }
       .category-tab { padding: 6px 14px; font-size: 0.8rem; }
       .hero-stats { gap: 20px; }
-      .hero-install { flex-direction: column; gap: 8px; }
+      .hero-install {
+        max-width: 100%; width: 100%;
+      }
+      .hero-install code {
+        min-width: 0; overflow-x: auto; white-space: nowrap;
+        -webkit-overflow-scrolling: touch;
+      }
+      .hero-install .copy-btn { flex-shrink: 0; }
       .section-header h2 { font-size: 1.6rem; }
+      .readme-content pre { padding: 12px; font-size: 0.78rem; }
     }
   </style>
 </head>
@@ -930,9 +950,13 @@
       header.setAttribute('tabindex', '0');
       header.innerHTML =
         chevronSvg +
-        '<span class="check-card-id">' + escapeHtml(c.id) + '</span>' +
-        '<span class="check-card-info"><span class="check-card-name">' + escapeHtml(c.description) + '</span></span>' +
-        '<span class="check-card-badge cat-' + escapeHtml(c.category) + '">' + escapeHtml(c.category) + '</span>' +
+        '<div class="check-card-info">' +
+          '<div class="check-card-top">' +
+            '<span class="check-card-id">' + escapeHtml(c.id) + '</span>' +
+            '<span class="check-card-badge cat-' + escapeHtml(c.category) + '">' + escapeHtml(c.category) + '</span>' +
+          '</div>' +
+          '<span class="check-card-name">' + escapeHtml(c.description) + '</span>' +
+        '</div>' +
         '<button class="share-link-btn" aria-label="Copy link to ' + escapeHtml(c.id) + '" title="Copy link">' + linkSvg + '</button>';
 
       header.onclick = function(e) {
@@ -1049,6 +1073,14 @@
         var readmeDiv = document.createElement('div');
         readmeDiv.className = 'readme-content';
         readmeDiv.innerHTML = marked.parse(md);
+
+        readmeDiv.querySelectorAll('table').forEach(function(table) {
+          var wrap = document.createElement('div');
+          wrap.className = 'table-wrap';
+          table.parentNode.insertBefore(wrap, table);
+          wrap.appendChild(table);
+        });
+
         loading.replaceWith(readmeDiv);
       }
       contentEl.setAttribute('data-loaded', 'true');
