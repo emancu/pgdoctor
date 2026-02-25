@@ -39,7 +39,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries PKTypesQueries) check.Checker {
+func New(queries PKTypesQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

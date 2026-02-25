@@ -40,7 +40,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries CacheEfficiencyQueries) check.Checker {
+func New(queries CacheEfficiencyQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

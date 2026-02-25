@@ -55,7 +55,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableVacuumHealthQueries) check.Checker {
+func New(queries TableVacuumHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

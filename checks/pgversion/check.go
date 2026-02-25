@@ -35,7 +35,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(versioner VersionQueries) check.Checker {
+func New(versioner VersionQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		versioner: versioner,
 	}

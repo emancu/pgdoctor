@@ -1686,6 +1686,7 @@ const sessionSettings = `-- name: SessionSettings :many
  * 4. Session-level changes (SET command)
  *
  * Technical approach:
+ * - Dynamically discovers application roles (login-capable, non-system)
  * - pg_db_role_setting stores role configs as text arrays: ['key=value', ...]
  * - UNNEST + split_part parse these into usable key/value pairs
  * - CROSS JOIN creates full matrix of roles × settings (shows gaps)
@@ -1697,14 +1698,18 @@ const sessionSettings = `-- name: SessionSettings :many
  * what the role actually gets vs what they override.
  */
 WITH roles AS (
-  SELECT
-    r.rolname
-    , r.oid
+  SELECT r.rolname, r.oid
   FROM pg_roles AS r
-  WHERE r.rolname IN (
-    'app_ro'
-    , 'app_rw'
-  )
+  WHERE r.rolcanlogin = true
+    AND r.rolsuper = false
+    AND r.rolreplication = false
+    AND r.rolname NOT LIKE 'pg_%'
+    AND r.rolname NOT IN (
+      'postgres',
+      'rds_superuser', 'rdsadmin', 'rds_replication',
+      'cloudsqladmin', 'cloudsqlagent', 'cloudsqlsuperuser',
+      'azure_superuser', 'azure_pg_admin', 'azuresu'
+    )
 )
 
 , settings AS (

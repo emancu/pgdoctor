@@ -36,7 +36,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableBloatQueries) check.Checker {
+func New(queries TableBloatQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

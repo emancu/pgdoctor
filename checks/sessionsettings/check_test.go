@@ -146,7 +146,7 @@ func Test_SessionSettings(t *testing.T) {
 		},
 		// Transaction timeout tests
 		{
-			Name: "transaction_timeout missing for app_ro",
+			Name: "transaction_timeout missing for app_ro (PG < 17)",
 			Rows: removeFromSessionSettings("app_ro", "transaction_timeout"),
 			Expect: []ExpectedResultCheck{
 				{ID: "session-settings", Sev: check.SeverityFail},
@@ -381,4 +381,127 @@ func Test_SessionSettings_SpecificDetailChecks(t *testing.T) {
 			require.Equal(t, tc.ExpectedStatus, foundRow.Cells[4], "Status should match")
 		})
 	}
+}
+
+func Test_SessionSettings_EmptyRoles(t *testing.T) {
+	t.Parallel()
+
+	queryer := newStaticSessionSettingsQueryer([]db.SessionSettingsRow{})
+
+	checker := sessionsettings.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	results := report.Results
+	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+
+	result := results[0]
+	require.Equal(t, check.SeverityOK, result.Severity, "Empty roles should be OK")
+	require.Equal(t, "No application roles found", result.Details)
+}
+
+func Test_SessionSettings_ArbitraryRoleNames(t *testing.T) {
+	t.Parallel()
+
+	settings := map[string]map[string]string{
+		"api_user": {
+			"statement_timeout":                   "3000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "3000",
+			"log_min_duration_statement":          "2000",
+		},
+		"worker_user": {
+			"statement_timeout":                   "3000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "3000",
+			"log_min_duration_statement":          "2000",
+		},
+	}
+
+	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
+
+	checker := sessionsettings.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	results := report.Results
+	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+	require.Equal(t, check.SeverityOK, results[0].Severity, "Arbitrary role names with optimal settings should be OK")
+}
+
+func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
+	t.Parallel()
+
+	settings := map[string]map[string]string{
+		"api_user": {
+			"statement_timeout":                   "3000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "3000",
+			"log_min_duration_statement":          "2000",
+		},
+	}
+
+	cfg := check.Config{
+		"session-settings": {"roles": "api_user,nonexistent"},
+	}
+
+	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
+
+	checker := sessionsettings.New(queryer, cfg)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	results := report.Results
+	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+
+	result := results[0]
+	require.Equal(t, check.SeverityWarn, result.Severity, "Missing configured role should warn")
+	require.NotNil(t, result.Table, "Result should have a table")
+
+	// Find the "Role not found" row
+	var foundRow *check.TableRow
+	for _, row := range result.Table.Rows {
+		if len(row.Cells) >= 5 && row.Cells[0] == "nonexistent" && row.Cells[4] == "Role not found" {
+			foundRow = &row
+			break
+		}
+	}
+	require.NotNil(t, foundRow, "Should find 'Role not found' row for nonexistent role")
+}
+
+func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
+	t.Parallel()
+
+	// DB has both api_user and worker_user
+	settings := map[string]map[string]string{
+		"api_user": {
+			"statement_timeout":                   "3000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "3000",
+			"log_min_duration_statement":          "2000",
+		},
+		"worker_user": {
+			"statement_timeout":                   "0", // bad
+			"idle_in_transaction_session_timeout": "0", // bad
+			"transaction_timeout":                 "0", // bad
+			"log_min_duration_statement":          "-1", // bad
+		},
+	}
+
+	// Config only specifies api_user — worker_user should be ignored
+	cfg := check.Config{
+		"session-settings": {"roles": "api_user"},
+	}
+
+	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
+
+	checker := sessionsettings.New(queryer, cfg)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	results := report.Results
+	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+
+	// Only api_user is checked (which has good settings), worker_user is ignored
+	require.Equal(t, check.SeverityOK, results[0].Severity, "Should only check configured roles")
 }

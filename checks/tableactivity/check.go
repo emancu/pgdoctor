@@ -35,7 +35,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableActivityQueries) check.Checker {
+func New(queries TableActivityQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

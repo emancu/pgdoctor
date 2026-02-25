@@ -153,7 +153,7 @@ The public API in `pgdoctor.go` accepts an explicit check list, enabling consume
 
 ```go
 // Run checks against a database connection
-pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
+pgdoctor.Run(ctx, conn, checks, cfg, only, ignored) ([]*check.Report, error)
 
 // Get all built-in checks
 pgdoctor.AllChecks() []check.Package

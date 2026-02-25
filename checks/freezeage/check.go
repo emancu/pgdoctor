@@ -48,7 +48,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries FreezeAgeQueries) check.Checker {
+func New(queries FreezeAgeQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

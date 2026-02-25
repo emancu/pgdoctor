@@ -38,7 +38,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queryer VacuumSettingsQueries) check.Checker {
+func New(queryer VacuumSettingsQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queryer: queryer,
 	}

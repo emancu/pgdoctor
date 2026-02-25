@@ -164,7 +164,7 @@ func main() {
     conn, _ := pgx.Connect(ctx, "postgres://localhost:5432/mydb")
     defer conn.Close(ctx)
 
-    reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), nil, nil)
+    reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), nil, nil, nil)
     if err != nil {
         panic(err)
     }
@@ -179,7 +179,7 @@ func main() {
 
 ```go
 // Run checks (pass AllChecks() for built-in set, or append your own)
-pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
+pgdoctor.Run(ctx, conn, checks, cfg, only, ignored) ([]*check.Report, error)
 
 // List all built-in checks
 pgdoctor.AllChecks() []check.Package

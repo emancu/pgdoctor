@@ -62,7 +62,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ConnectionHealthQueries) check.Checker {
+func New(queries ConnectionHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

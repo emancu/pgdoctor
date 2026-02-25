@@ -53,7 +53,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ReplicationLagQueries) check.Checker {
+func New(queries ReplicationLagQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

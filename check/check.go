@@ -48,12 +48,16 @@ type Checker interface {
 	Check(context.Context) (*Report, error)
 }
 
+// Config holds per-check configuration keyed by check ID.
+// Each check defines its own supported keys.
+type Config map[string]map[string]string
+
 // Package holds references to a check's exported functions.
 // This allows the generator to create a simple list that consumers
 // can use to either get metadata or instantiate checkers.
 type Package struct {
 	Metadata func() Metadata
-	New      func(DBTX) Checker
+	New      func(DBTX, Config) Checker
 }
 
 type Metadata struct {

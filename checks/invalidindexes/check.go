@@ -36,7 +36,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries InvalidIndexesQueries) check.Checker {
+func New(queries InvalidIndexesQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

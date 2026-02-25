@@ -43,7 +43,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableSeqScansQueries) check.Checker {
+func New(queries TableSeqScansQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

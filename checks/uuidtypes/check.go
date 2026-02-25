@@ -35,7 +35,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries UUIDTypesQueries) check.Checker {
+func New(queries UUIDTypesQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

@@ -42,7 +42,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queryer ReplicationSlotsQueries) check.Checker {
+func New(queryer ReplicationSlotsQueries, _ ...check.Config) check.Checker {
 	return &checker{queryer: queryer}
 }
 

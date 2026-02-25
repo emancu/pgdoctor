@@ -18,7 +18,7 @@ const checkTimeout = 2 * time.Second
 // Run is the entrypoint to executing pgdoctor's checks.
 // Returns all check reports with their metadata and results.
 // Use AllChecks() for the built-in set, or append contrib checks for custom runs.
-func Run(ctx context.Context, conn db.DBTX, checks []check.Package, only, ignored []string) ([]*check.Report, error) {
+func Run(ctx context.Context, conn db.DBTX, checks []check.Package, cfg check.Config, only, ignored []string) ([]*check.Report, error) {
 	ignoredMap := map[string]struct{}{}
 	for _, ignore := range ignored {
 		ignoredMap[ignore] = struct{}{}
@@ -32,7 +32,7 @@ func Run(ctx context.Context, conn db.DBTX, checks []check.Package, only, ignore
 
 	for _, pkg := range checks {
 		// Instantiate the checker for this check
-		checker := pkg.New(conn)
+		checker := pkg.New(conn, cfg)
 		if !shouldRunCheck(checker, onlyMap, ignoredMap) {
 			continue
 		}

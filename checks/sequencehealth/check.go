@@ -35,7 +35,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries SequenceHealthQueries) check.Checker {
+func New(queries SequenceHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}

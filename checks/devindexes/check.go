@@ -40,7 +40,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries DevIndexesQueries) check.Checker {
+func New(queries DevIndexesQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
