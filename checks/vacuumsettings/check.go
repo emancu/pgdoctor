@@ -27,8 +27,8 @@ type checker struct {
 	queryer VacuumSettingsQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryVacuum,
 		CheckID:     "vacuum-settings",
 		Name:        "PostgreSQL Vacuum & Maintenance Configs",
@@ -38,13 +38,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queryer VacuumSettingsQueries) check.Checker {
+func New(queryer VacuumSettingsQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queryer: queryer,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

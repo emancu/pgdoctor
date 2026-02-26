@@ -36,8 +36,8 @@ type checker struct {
 	queryer ConnectionEfficiencyQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "connection-efficiency",
 		Name:        "Connection Efficiency",
@@ -47,13 +47,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queryer ConnectionEfficiencyQueries) check.Checker {
+func New(queryer ConnectionEfficiencyQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queryer: queryer,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

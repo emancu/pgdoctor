@@ -8,7 +8,6 @@ import (
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionhealth"
-	"github.com/emancu/pgdoctor/checks/devindexes"
 	"github.com/emancu/pgdoctor/checks/duplicateindexes"
 	"github.com/emancu/pgdoctor/checks/freezeage"
 	"github.com/emancu/pgdoctor/checks/indexbloat"
@@ -36,169 +35,163 @@ import (
 )
 
 // AllChecks returns all available check packages.
-// Consumers call .Metadata() for check information or .New(conn) to instantiate checkers.
-func AllChecks() []check.CheckPackage {
-	return []check.CheckPackage{
+// Consumers call .Metadata() for check information or .New(conn, cfg) to instantiate checkers.
+func AllChecks() []check.Package {
+	return []check.Package{
 		{
 			Metadata: cacheefficiency.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return cacheefficiency.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return cacheefficiency.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: connectionefficiency.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return connectionefficiency.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return connectionefficiency.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: connectionhealth.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return connectionhealth.New(db.New(conn))
-			},
-		},
-		{
-			Metadata: devindexes.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return devindexes.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return connectionhealth.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: duplicateindexes.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return duplicateindexes.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return duplicateindexes.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: freezeage.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return freezeage.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return freezeage.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: indexbloat.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return indexbloat.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return indexbloat.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: indexusage.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return indexusage.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return indexusage.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: invalidindexes.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return invalidindexes.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return invalidindexes.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: partitioning.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return partitioning.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return partitioning.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: partitionusage.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return partitionusage.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return partitionusage.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: pgversion.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return pgversion.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return pgversion.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: pktypes.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return pktypes.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return pktypes.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: replicationlag.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return replicationlag.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return replicationlag.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: replicationslots.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return replicationslots.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return replicationslots.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: sequencehealth.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return sequencehealth.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return sequencehealth.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: sessionsettings.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return sessionsettings.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return sessionsettings.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: statisticsfreshness.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return statisticsfreshness.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return statisticsfreshness.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: tableactivity.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return tableactivity.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return tableactivity.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: tablebloat.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return tablebloat.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return tablebloat.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: tableseqscans.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return tableseqscans.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return tableseqscans.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: tablevacuumhealth.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return tablevacuumhealth.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return tablevacuumhealth.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: tempusage.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return tempusage.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return tempusage.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: toaststorage.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return toaststorage.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return toaststorage.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: uuiddefaults.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return uuiddefaults.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return uuiddefaults.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: uuidtypes.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return uuidtypes.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return uuidtypes.New(db.New(conn), cfg)
 			},
 		},
 		{
 			Metadata: vacuumsettings.Metadata,
-			New: func(conn db.DBTX) check.Checker {
-				return vacuumsettings.New(db.New(conn))
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return vacuumsettings.New(db.New(conn), cfg)
 			},
 		},
 	}

@@ -19,12 +19,6 @@
       "description": "Monitors connection pool saturation, idle ratios, and stuck transactions"
     },
     {
-      "id": "dev-indexes",
-      "name": "Temporary Dev Indexes",
-      "category": "indexes",
-      "description": "Identifies temporary development indexes that should be promoted or dropped"
-    },
-    {
       "id": "duplicate-indexes",
       "name": "Duplicate Indexes",
       "category": "indexes",

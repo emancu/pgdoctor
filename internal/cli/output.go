@@ -269,8 +269,9 @@ func severityDisplay(severity check.Severity) (string, func(string) string) {
 		return "WARN", colorForSeverity(severity)
 	case check.SeverityFail:
 		return "FAIL", colorForSeverity(severity)
+	default:
+		return strings.ToUpper(severity.String()), colorForSeverity(severity)
 	}
-	panic(fmt.Sprintf("unknown severity: %v", severity))
 }
 
 func colorForSeverity(severity check.Severity) func(string) string {

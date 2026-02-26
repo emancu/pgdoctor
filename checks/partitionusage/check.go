@@ -27,8 +27,8 @@ type checker struct {
 	queries PartitionUsageQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "partition-usage",
 		Name:        "Partition Key Usage",
@@ -38,13 +38,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries PartitionUsageQueries) check.Checker {
+func New(queries PartitionUsageQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

@@ -29,8 +29,8 @@ type checker struct {
 	queries CacheEfficiencyQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "cache-efficiency",
 		Name:        "Cache Efficiency",
@@ -40,13 +40,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries CacheEfficiencyQueries) check.Checker {
+func New(queries CacheEfficiencyQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 
@@ -87,13 +87,18 @@ func checkCacheHitRatio(row db.DatabaseCacheEfficiencyRow, report *check.Report)
 		return
 	}
 
+	severity := check.SeverityWarn
+	if cacheRatio < cacheLowThreshold {
+		severity = check.SeverityFail
+	}
+
 	details := fmt.Sprintf("Cache hit ratio: %.2f%% (below threshold)\nBlocks hit: %d\nBlocks read from disk: %d",
 		cacheRatio, row.BlksHit.Int64, row.BlksRead.Int64)
 
 	report.AddFinding(check.Finding{
 		ID:       "cache-hit-ratio",
 		Name:     "Cache Hit Ratio",
-		Severity: check.SeverityWarn,
+		Severity: severity,
 		Details:  details,
 	})
 }

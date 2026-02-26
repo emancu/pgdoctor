@@ -18,7 +18,7 @@ const checkTimeout = 2 * time.Second
 // Run is the entrypoint to executing pgdoctor's checks.
 // Returns all check reports with their metadata and results.
 // Use AllChecks() for the built-in set, or append contrib checks for custom runs.
-func Run(ctx context.Context, conn db.DBTX, checks []check.CheckPackage, only, ignored []string) ([]*check.Report, error) {
+func Run(ctx context.Context, conn db.DBTX, checks []check.Package, cfg check.Config, only, ignored []string) ([]*check.Report, error) {
 	ignoredMap := map[string]struct{}{}
 	for _, ignore := range ignored {
 		ignoredMap[ignore] = struct{}{}
@@ -32,7 +32,7 @@ func Run(ctx context.Context, conn db.DBTX, checks []check.CheckPackage, only, i
 
 	for _, pkg := range checks {
 		// Instantiate the checker for this check
-		checker := pkg.New(conn)
+		checker := pkg.New(conn, cfg)
 		if !shouldRunCheck(checker, onlyMap, ignoredMap) {
 			continue
 		}
@@ -66,7 +66,8 @@ func Run(ctx context.Context, conn db.DBTX, checks []check.CheckPackage, only, i
 //   - "category" -> "category" (exact match)
 //
 // Invalid filters are those that don't match any check ID or category.
-func ValidateFilters(checks []check.CheckPackage, filters []string) (valid []string, invalid []string) {
+func ValidateFilters(checks []check.Package, filters []string) ([]string, []string) {
+	var valid, invalid []string
 
 	// Build set of valid check IDs and categories
 	validCheckIDs := map[string]struct{}{}

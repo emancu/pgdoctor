@@ -24,8 +24,8 @@ type checker struct {
 	queries TableActivityQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "table-activity",
 		Name:        "Table Activity",
@@ -35,13 +35,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries TableActivityQueries) check.Checker {
+func New(queries TableActivityQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

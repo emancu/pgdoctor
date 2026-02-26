@@ -31,8 +31,8 @@ type checker struct {
 	queryer ReplicationSlotsQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "replication-slots",
 		Name:        "Replication Slots",
@@ -42,11 +42,11 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queryer ReplicationSlotsQueries) check.Checker {
+func New(queryer ReplicationSlotsQueries, _ ...check.Config) check.Checker {
 	return &checker{queryer: queryer}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

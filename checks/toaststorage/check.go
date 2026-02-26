@@ -37,8 +37,8 @@ const (
 	wideColumnTextThreshold  = 10000 // 10KB
 )
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategorySchema,
 		CheckID:     "toast-storage",
 		Name:        "TOAST Storage Analysis",
@@ -48,13 +48,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries ToastStorageQueries) check.Checker {
+func New(queries ToastStorageQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 
