@@ -398,6 +398,116 @@ func TestMyCheck(t *testing.T) {
 | Binary entry | `cmd/pgdoctor/main.go` |
 | sqlc config | `sqlc.yaml` |
 
+## Design Philosophy
+
+Lessons learned from production usage across hundreds of PostgreSQL instances:
+
+1. **Signal-to-noise ratio over completeness** — A WARN that gets investigated is better than a FAIL that gets ignored. Use FAIL only for things that need immediate attention. Downgrade severity when in doubt.
+
+2. **Context-aware thresholds beat static rules** — When `InstanceMetadata` is available, scale thresholds by hardware:
+   - Vacuum settings should scale with CPU cores and memory
+   - Connection limits depend on instance class
+   - Partition recommendations should consider write patterns
+   - When metadata is `nil`, fall back to conservative defaults
+
+3. **Recommendations must work with real ORMs** — Example: `GENERATED ALWAYS AS IDENTITY` is technically correct but breaks ActiveRecord fixtures, Ecto seeds, and data migrations. Use `BY DEFAULT AS IDENTITY` instead. Always test recommendations against Rails/Ecto/Django patterns.
+
+4. **Push logic to SQL** — Do string truncation, formatting, and filtering in the query rather than in Go. Less data transfer, easier to debug (can paste the SQL directly), and the database is better at it.
+
+## Version-Specific Queries
+
+Pattern for handling PostgreSQL version differences:
+
+```go
+// Create separate queries for different PG versions
+// name: ReplicationSlots :many (PG17+)
+// name: ReplicationSlotsPG15 :many (PG15/16)
+
+// In check.go, select based on version:
+meta := check.InstanceMetadataFromContext(ctx)
+if meta != nil && meta.EngineVersionMajor >= 17 {
+    rows, err = c.queries.ReplicationSlots(ctx)
+} else {
+    rows, err = c.queries.ReplicationSlotsPG15(ctx)
+}
+```
+
+Use `NULL::TYPE AS column_name` in older-version queries to maintain consistent row types across versions.
+
+## Consumer Pattern (Contrib Checks)
+
+External consumers can extend pgdoctor with their own checks:
+
+```go
+import (
+    pgdoctor "github.com/emancu/pgdoctor"
+    "github.com/emancu/pgdoctor/check"
+)
+
+// Combine built-in + custom checks
+allChecks := append(pgdoctor.AllChecks(), myContribChecks()...)
+reports, _ := pgdoctor.Run(ctx, conn, allChecks, cfg, only, ignored)
+```
+
+Each contrib check creates its own sqlc queries internally, using the `check.DBTX` interface. This allows organizations to add domain-specific checks (naming conventions, internal standards) without forking.
+
+## Severity Assignment Guide
+
+| Severity | When to use | Examples |
+|----------|------------|---------|
+| FAIL | Data loss risk, security issue, imminent outage | No backups, publicly accessible, sequence at 90%+ |
+| WARN | Should fix but not urgent, performance degradation | Old storage type, high bloat, outdated minor version |
+| OK | Everything is fine | Always report at least one OK finding per check |
+
+**Rule of thumb:** If a DBA would page someone at 3am, it's a FAIL. If it should go in the sprint backlog, it's a WARN.
+
+## Testing Patterns (Advanced)
+
+Beyond the basic table-driven pattern documented above:
+
+### Scenario builder functions
+
+Use named constructors for readability in test data:
+
+```go
+func healthySlot(name string) db.ReplicationSlotsRow { ... }
+func inactiveSlot(name string, seconds, lag int64) db.ReplicationSlotsRow { ... }
+```
+
+### pgtype helper constructors
+
+Reduce boilerplate when constructing test rows:
+
+```go
+func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+func pgInt8(i int64) pgtype.Int8 { return pgtype.Int8{Int64: i, Valid: true} }
+```
+
+### Always test the error path
+
+```go
+func Test_QueryError(t *testing.T) {
+    queryer := &mockQueryer{err: fmt.Errorf("connection refused")}
+    _, err := checker.Check(ctx)
+    require.ErrorContains(t, err, "check-id")
+}
+```
+
+### Always test metadata validation
+
+Verify CheckID, Name, Category, SQL, and Readme are set:
+
+```go
+func Test_Metadata(t *testing.T) {
+    m := Metadata()
+    assert.NotEmpty(t, m.CheckID)
+    assert.NotEmpty(t, m.Name)
+    assert.NotEmpty(t, m.Category)
+    assert.NotEmpty(t, m.SQL)
+    assert.NotEmpty(t, m.Readme)
+}
+```
+
 ## Questions to Ask
 
 When adding or modifying checks:

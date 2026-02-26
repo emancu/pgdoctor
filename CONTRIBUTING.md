@@ -80,6 +80,16 @@ go build -o pgdoctor ./cmd/pgdoctor
 go test ./...
 ```
 
+## Severity Philosophy
+
+Choose severity carefully — it determines how users prioritize their work:
+
+- **FAIL**: Requires action. Security risk, data loss potential, or imminent outage.
+- **WARN**: Should address. Performance issue, technical debt, or best practice violation.
+- **OK**: Passing. Always include at least one OK finding when no issues are detected.
+
+When in doubt, prefer WARN over FAIL. A noisy tool that cries wolf loses trust.
+
 ## Code Standards
 
 - **Never edit generated files** (`db/`, `checks.go`)
