@@ -175,65 +175,6 @@ func (q *Queries) DatabaseFreezeAge(ctx context.Context) ([]DatabaseFreezeAgeRow
 	return items, nil
 }
 
-const devIndexes = `-- name: DevIndexes :many
-SELECT
-  (n.nspname || '.' || t.relname)::text AS table_name
-  , i.relname::text AS index_name
-  , pg_relation_size(i.oid) AS index_size_bytes
-  , coalesce(s.idx_scan, 0) AS idx_scan
-  , coalesce(s.idx_tup_read, 0) AS idx_tup_read
-  , pg_get_indexdef(idx.indexrelid) AS indexdef
-FROM pg_class AS i
-INNER JOIN pg_index AS idx ON i.oid = idx.indexrelid
-INNER JOIN pg_class AS t ON idx.indrelid = t.oid
-INNER JOIN pg_namespace AS n ON t.relnamespace = n.oid
-LEFT JOIN pg_stat_user_indexes AS s ON i.oid = s.indexrelid
-WHERE
-  i.relkind = 'i'
-  AND idx.indisvalid
-  AND i.relname LIKE '\_dev%'
-  AND n.nspname = 'public'
-ORDER BY
-  coalesce(s.idx_scan, 0) DESC, pg_relation_size(i.oid) DESC
-`
-
-type DevIndexesRow struct {
-	TableName      pgtype.Text
-	IndexName      pgtype.Text
-	IndexSizeBytes pgtype.Int8
-	IdxScan        pgtype.Int8
-	IdxTupRead     pgtype.Int8
-	Indexdef       pgtype.Text
-}
-
-// Identifies indexes created during development (prefixed with _dev).
-// These should either be promoted to permanent indexes or dropped.
-func (q *Queries) DevIndexes(ctx context.Context) ([]DevIndexesRow, error) {
-	rows, err := q.db.Query(ctx, devIndexes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []DevIndexesRow
-	for rows.Next() {
-		var i DevIndexesRow
-		if err := rows.Scan(
-			&i.TableName,
-			&i.IndexName,
-			&i.IndexSizeBytes,
-			&i.IdxScan,
-			&i.IdxTupRead,
-			&i.Indexdef,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
 
 const duplicateIndexes = `-- name: DuplicateIndexes :many
 WITH index_columns AS (

@@ -116,7 +116,6 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `invalid-indexes` | Indexes in invalid state needing rebuild |
 | `duplicate-indexes` | Exact and prefix duplicate indexes |
 | `index-usage` | Unused and inefficient indexes |
-| `dev-indexes` | Temporary development indexes |
 | `index-bloat` | B-tree index bloat estimates |
 
 ### vacuum

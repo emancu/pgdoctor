@@ -8,7 +8,6 @@ import (
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionhealth"
-	"github.com/emancu/pgdoctor/checks/devindexes"
 	"github.com/emancu/pgdoctor/checks/duplicateindexes"
 	"github.com/emancu/pgdoctor/checks/freezeage"
 	"github.com/emancu/pgdoctor/checks/indexbloat"
@@ -55,12 +54,6 @@ func AllChecks() []check.Package {
 			Metadata: connectionhealth.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return connectionhealth.New(db.New(conn), cfg)
-			},
-		},
-		{
-			Metadata: devindexes.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return devindexes.New(db.New(conn), cfg)
 			},
 		},
 		{
