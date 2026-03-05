@@ -1,6 +1,8 @@
 # Session Settings Check
 
-Verifies that PostgreSQL role-level session settings (timeouts and logging) are properly configured for app_ro and app_rw roles.
+Verifies that PostgreSQL role-level session settings (timeouts and logging) are properly configured for application roles.
+
+By default, application roles are **discovered dynamically** — any login-capable, non-system role is checked. You can also specify exact roles via configuration (see Library Configuration below).
 
 ## What it checks
 
@@ -28,17 +30,11 @@ Common production problems caused by misconfigured settings:
 Configure role settings using `ALTER ROLE`:
 
 ```sql
--- For read-only role
-ALTER ROLE app_ro SET statement_timeout = '3000ms';
-ALTER ROLE app_ro SET transaction_timeout = '3000ms';
-ALTER ROLE app_ro SET idle_in_transaction_session_timeout = '60000ms';
-ALTER ROLE app_ro SET log_min_duration_statement = '2000ms';
-
--- For read-write role
-ALTER ROLE app_rw SET statement_timeout = '3000ms';
-ALTER ROLE app_rw SET transaction_timeout = '3000ms';
-ALTER ROLE app_rw SET idle_in_transaction_session_timeout = '60000ms';
-ALTER ROLE app_rw SET log_min_duration_statement = '2000ms';
+-- For each application role
+ALTER ROLE <role_name> SET statement_timeout = '3000ms';
+ALTER ROLE <role_name> SET transaction_timeout = '3000ms';
+ALTER ROLE <role_name> SET idle_in_transaction_session_timeout = '60000ms';
+ALTER ROLE <role_name> SET log_min_duration_statement = '2000ms';
 ```
 
 ### Recommended Values
@@ -68,9 +64,12 @@ ALTER ROLE app_rw SET log_min_duration_statement = '2000ms';
 After applying settings, verify they're active:
 
 ```sql
-SELECT rolname, rolconfig
-FROM pg_roles
-WHERE rolname IN ('app_ro', 'app_rw');
+SELECT r.rolname, r.rolconfig
+FROM pg_roles AS r
+WHERE r.rolcanlogin = true
+  AND r.rolsuper = false
+  AND r.rolreplication = false
+  AND r.rolname NOT LIKE 'pg_%';
 ```
 
 ### Important Notes
@@ -78,6 +77,19 @@ WHERE rolname IN ('app_ro', 'app_rw');
 - Settings apply to **new connections only** - existing connections keep old values
 - Consider application deployment to cycle connections
 - Monitor application error rates after changes
+
+## Library Configuration
+
+When using pgdoctor as a library, you can specify exact roles to check via configuration:
+
+```go
+cfg := check.Config{
+    "session-settings": {"roles": "app_ro,app_rw"},
+}
+reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), cfg, nil, nil)
+```
+
+When no config is provided, roles are discovered dynamically from the database.
 
 ## References
 

@@ -21,14 +21,14 @@ func newListCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checks := pgdoctor.AllChecks()
 
-			grouped := map[string][]check.CheckMetadata{}
+			grouped := map[string][]check.Metadata{}
 			for _, pkg := range checks {
 				m := pkg.Metadata()
 				grouped[string(m.Category)] = append(grouped[string(m.Category)], m)
 			}
 
 			if len(categories) > 0 {
-				filtered := map[string][]check.CheckMetadata{}
+				filtered := map[string][]check.Metadata{}
 				for _, cat := range categories {
 					if checks, exists := grouped[cat]; exists {
 						filtered[cat] = checks

@@ -27,7 +27,7 @@ checks/
 
 1. **Self-Contained Logic** - Each check directory contains its specific implementation
 2. **Metadata Lives With Check** - CLI discovers checks via `Metadata()` function
-3. **SQL Embedded** - SQL queries are embedded via `//go:embed` and included in CheckMetadata
+3. **SQL Embedded** - SQL queries are embedded via `//go:embed` and included in Metadata
 4. **Shared Generated Code** - All checks use generated code from `db/`
 5. **Independent Execution** - Checks run independently, no dependencies between them
 6. **Simple Structure** - SQL → Generate → Implement → Test
@@ -38,7 +38,7 @@ Each check implements the `check.Checker` interface:
 
 ```go
 type Checker interface {
-    Metadata() CheckMetadata
+    Metadata() Metadata
     Check(context.Context) (*Report, error)
 }
 ```
@@ -103,8 +103,8 @@ type MyQueryQueries interface {
 }
 
 // Metadata returns the check's metadata for discovery and documentation.
-func Metadata() check.CheckMetadata {
-    return check.CheckMetadata{
+func Metadata() check.Metadata {
+    return check.Metadata{
         Category:    check.CategoryConfigs,
         CheckID:     "my-check",
         Name:        "My Check",
@@ -121,7 +121,7 @@ func New(queryer MyQueryQueries) check.Checker {
 }
 
 // Metadata implements check.Checker.
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
     return Metadata()
 }
 

@@ -116,7 +116,6 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `invalid-indexes` | Indexes in invalid state needing rebuild |
 | `duplicate-indexes` | Exact and prefix duplicate indexes |
 | `index-usage` | Unused and inefficient indexes |
-| `dev-indexes` | Temporary development indexes |
 | `index-bloat` | B-tree index bloat estimates |
 
 ### vacuum
@@ -164,7 +163,7 @@ func main() {
     conn, _ := pgx.Connect(ctx, "postgres://localhost:5432/mydb")
     defer conn.Close(ctx)
 
-    reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), nil, nil)
+    reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), nil, nil, nil)
     if err != nil {
         panic(err)
     }
@@ -179,10 +178,10 @@ func main() {
 
 ```go
 // Run checks (pass AllChecks() for built-in set, or append your own)
-pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
+pgdoctor.Run(ctx, conn, checks, cfg, only, ignored) ([]*check.Report, error)
 
 // List all built-in checks
-pgdoctor.AllChecks() []check.CheckPackage
+pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
@@ -206,7 +205,7 @@ Checks implement the `check.Checker` interface:
 
 ```go
 type Checker interface {
-    Metadata() CheckMetadata
+    Metadata() Metadata
     Check(context.Context) (*Report, error)
 }
 ```

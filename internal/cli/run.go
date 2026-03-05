@@ -97,7 +97,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				return &SilentError{ExitCode: 1}
 			}
 
-			reports, err := pgdoctor.Run(ctx, conn, allChecks, validOnly, validIgnored)
+			reports, err := pgdoctor.Run(ctx, conn, allChecks, nil, validOnly, validIgnored)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return &SilentError{ExitCode: 1}

@@ -5,7 +5,9 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -33,11 +35,14 @@ type settingCheck struct {
 }
 
 type checker struct {
-	queryer SessionSettingsQueries
+	queryer     SessionSettingsQueries
+	roles       []string
+	timeoutWarn int64 // default: 5000
+	timeoutFail int64 // default: 10000
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "session-settings",
 		Name:        "PostgreSQL Session Configs",
@@ -47,13 +52,33 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queryer SessionSettingsQueries) check.Checker {
-	return &checker{
-		queryer: queryer,
+func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
+		queryer:     queryer,
+		timeoutWarn: 5000,
+		timeoutFail: 10000,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
+			if roles, ok := myCfg["roles"]; ok {
+				c.roles = strings.Split(roles, ",")
+			}
+			if v, ok := myCfg["timeout_warn"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					c.timeoutWarn = n
+				}
+			}
+			if v, ok := myCfg["timeout_fail"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					c.timeoutFail = n
+				}
+			}
+		}
+	}
+	return c
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 
@@ -67,32 +92,50 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	dbSettings := dbSessionSettings(settings)
 
+	// Determine which roles to check
+	roles := dbSettings.roles() // dynamic discovery
+	if c.roles != nil {
+		roles = c.roles // override with configured roles
+	}
+
+	if len(roles) == 0 {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeverityOK,
+			Details:  "No application roles found",
+		})
+		return report, nil
+	}
+
 	// Collect all setting checks into a table
 	var checks []settingCheck
 
-	roTimeouts, err := checkUserTimeouts(dbSettings, "app_ro")
-	if err != nil {
-		return nil, fmt.Errorf("checking timeouts for app_ro: %w", err)
-	}
-	checks = append(checks, roTimeouts...)
+	for _, role := range roles {
+		if !dbSettings.hasRole(role) {
+			checks = append(checks, settingCheck{
+				Role:     role,
+				Parameter: "(all)",
+				Current:  "N/A",
+				Expected: "Role exists",
+				Status:   "Role not found",
+				Severity: check.SeverityWarn,
+			})
+			continue
+		}
 
-	rwTimeouts, err := checkUserTimeouts(dbSettings, "app_rw")
-	if err != nil {
-		return nil, fmt.Errorf("checking timeouts for app_rw: %w", err)
-	}
-	checks = append(checks, rwTimeouts...)
+		timeouts, err := c.checkUserTimeouts(dbSettings, role)
+		if err != nil {
+			return nil, fmt.Errorf("checking timeouts for %s: %w", role, err)
+		}
+		checks = append(checks, timeouts...)
 
-	roLogSettings, err := checkLogStatements(dbSettings, "app_ro")
-	if err != nil {
-		return nil, fmt.Errorf("checking log statements for app_ro: %w", err)
+		logSettings, err := checkLogStatements(dbSettings, role)
+		if err != nil {
+			return nil, fmt.Errorf("checking log statements for %s: %w", role, err)
+		}
+		checks = append(checks, logSettings...)
 	}
-	checks = append(checks, roLogSettings...)
-
-	rwLogSettings, err := checkLogStatements(dbSettings, "app_rw")
-	if err != nil {
-		return nil, fmt.Errorf("checking log statements for app_rw: %w", err)
-	}
-	checks = append(checks, rwLogSettings...)
 
 	// Determine overall severity
 	overallSeverity := check.SeverityOK
@@ -138,7 +181,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-func checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error) {
+func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error) {
 	var checks []settingCheck
 
 	stmtTimeout, err := s.fetch(user, "statement_timeout")
@@ -151,33 +194,37 @@ func checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error)
 		return nil, fmt.Errorf("fetching idle_in_transaction_session_timeout: %w", err)
 	}
 
-	txTimeout := s.get(user, "transaction_timeout", 0)
+	txTimeout, err := s.fetch(user, "transaction_timeout")
+	if err != nil {
+		return nil, fmt.Errorf("fetching transaction_timeout: %w", err)
+	}
 
 	// Check statement_timeout
+	expectedTimeout := fmt.Sprintf("≤ %dms", c.timeoutWarn)
 	if stmtTimeout == 0 {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "statement_timeout",
 			Current:   "0ms (disabled)",
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "MUST be set",
 			Severity:  check.SeverityFail,
 		})
-	} else if stmtTimeout > 10000 {
+	} else if stmtTimeout > c.timeoutFail {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "statement_timeout",
 			Current:   fmt.Sprintf("%dms", stmtTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "Too high",
 			Severity:  check.SeverityFail,
 		})
-	} else if stmtTimeout > 5000 {
+	} else if stmtTimeout > c.timeoutWarn {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "statement_timeout",
 			Current:   fmt.Sprintf("%dms", stmtTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "High",
 			Severity:  check.SeverityWarn,
 		})
@@ -186,7 +233,7 @@ func checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error)
 			Role:      user,
 			Parameter: "statement_timeout",
 			Current:   fmt.Sprintf("%dms", stmtTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "OK",
 			Severity:  check.SeverityOK,
 		})
@@ -219,25 +266,25 @@ func checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error)
 			Role:      user,
 			Parameter: "transaction_timeout",
 			Current:   "0ms (disabled)",
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "MUST be set (PG17+)",
 			Severity:  check.SeverityFail,
 		})
-	} else if txTimeout > 10000 {
+	} else if txTimeout > c.timeoutFail {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "transaction_timeout",
 			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "Too high",
 			Severity:  check.SeverityFail,
 		})
-	} else if txTimeout > 5000 {
+	} else if txTimeout > c.timeoutWarn {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "transaction_timeout",
 			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "High",
 			Severity:  check.SeverityWarn,
 		})
@@ -246,7 +293,7 @@ func checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error)
 			Role:      user,
 			Parameter: "transaction_timeout",
 			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  "500-5000ms",
+			Expected:  expectedTimeout,
 			Status:    "OK",
 			Severity:  check.SeverityOK,
 		})
@@ -297,6 +344,34 @@ func checkLogStatements(s dbSessionSettings, user string) ([]settingCheck, error
 
 // Type functions
 
+// roles extracts unique role names from query results.
+func (s dbSessionSettings) roles() []string {
+	seen := map[string]struct{}{}
+	var result []string
+	for _, row := range s {
+		if row.RoleName.Valid {
+			if _, ok := seen[row.RoleName.String]; !ok {
+				seen[row.RoleName.String] = struct{}{}
+				result = append(result, row.RoleName.String)
+			}
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+// hasRole checks if a role exists in the query results.
+func (s dbSessionSettings) hasRole(role string) bool {
+	for _, row := range s {
+		if row.RoleName.Valid && row.RoleName.String == role {
+			return true
+		}
+	}
+	return false
+}
+
+// fetch returns the integer value of a setting for a user.
+// Returns (0, nil) when the setting is not found — treats missing as disabled/default.
 func (s dbSessionSettings) fetch(user string, name string) (int64, error) {
 	for _, n := range s {
 		if n.RoleName.Valid && n.RoleName.String == user {
@@ -309,24 +384,5 @@ func (s dbSessionSettings) fetch(user string, name string) (int64, error) {
 			}
 		}
 	}
-
-	return 0, fmt.Errorf("setting %s not found for user %s", name, user)
-}
-
-func (s dbSessionSettings) get(user string, name string, def int64) int64 {
-	for _, n := range s {
-		if n.RoleName.Valid && n.RoleName.String == user {
-			if n.SettingName.Valid && n.SettingName.String == name && n.SettingValue.Valid {
-				intVal, err := strconv.ParseInt(n.SettingValue.String, 10, 64)
-
-				if err != nil {
-					return def
-				}
-
-				return intVal
-			}
-		}
-	}
-
-	return def
+	return 0, nil // not found → treat as disabled/default
 }

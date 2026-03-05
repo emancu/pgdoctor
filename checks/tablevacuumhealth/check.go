@@ -44,8 +44,8 @@ const (
 	analyzeNeededFail = 500_000 // Fail at 500K modifications
 )
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryVacuum,
 		CheckID:     "table-vacuum-health",
 		Name:        "Table Vacuum Health",
@@ -55,13 +55,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries TableVacuumHealthQueries) check.Checker {
+func New(queries TableVacuumHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

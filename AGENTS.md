@@ -6,7 +6,7 @@ pgdoctor is a PostgreSQL health-check CLI and Go library. This guide helps AI ag
 
 ```
 pgdoctor/
-├── check/              # Core types (CheckMetadata, Report, Finding, Severity, Checker interface)
+├── check/              # Core types (Metadata, Report, Finding, Severity, Checker interface)
 ├── db/                 # Generated database code (shared by ALL checks via sqlc)
 ├── checks/             # Individual health checks (self-contained)
 │   └── {checkname}/    # Each check is a package with:
@@ -30,13 +30,13 @@ Every check implements `check.Checker`:
 
 ```go
 type Checker interface {
-    Metadata() CheckMetadata
+    Metadata() Metadata
     Check(context.Context) (*Report, error)
 }
 ```
 
 Each check package exports:
-- `Metadata()` function returning `check.CheckMetadata`
+- `Metadata()` function returning `check.Metadata`
 - `New(queryer)` constructor returning `check.Checker`
 
 ### Check Structure
@@ -82,8 +82,8 @@ type checker struct {
     queryer MyQueryQueries
 }
 
-func Metadata() check.CheckMetadata {
-    return check.CheckMetadata{
+func Metadata() check.Metadata {
+    return check.Metadata{
         Category:    check.CategoryConfigs,
         CheckID:     "my-check",
         Name:        "My Check",
@@ -97,7 +97,7 @@ func New(queryer MyQueryQueries) check.Checker {
     return &checker{queryer: queryer}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
     return Metadata()
 }
 
@@ -131,11 +131,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 ### Report Structure (Field Promotion)
 
-Report embeds CheckMetadata for direct field access:
+Report embeds Metadata for direct field access:
 
 ```go
 type Report struct {
-    CheckMetadata // Embedded: CheckID, Name, Category, Description, SQL
+    Metadata // Embedded: CheckID, Name, Category, Description, SQL
     Severity      Severity
     Results       []Finding
 }
@@ -153,10 +153,10 @@ The public API in `pgdoctor.go` accepts an explicit check list, enabling consume
 
 ```go
 // Run checks against a database connection
-pgdoctor.Run(ctx, conn, checks, only, ignored) ([]*check.Report, error)
+pgdoctor.Run(ctx, conn, checks, cfg, only, ignored) ([]*check.Report, error)
 
 // Get all built-in checks
-pgdoctor.AllChecks() []check.CheckPackage
+pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
@@ -317,7 +317,7 @@ Report severity is automatically the maximum across all findings.
 If a check doesn't appear in `list` or `explain`:
 
 1. Run `go generate ./...` to regenerate `checks.go`
-2. Verify `Metadata()` is exported and returns `check.CheckMetadata`
+2. Verify `Metadata()` is exported and returns `check.Metadata`
 3. Verify check directory is in `sqlc.yaml`
 4. Run `sqlc generate` after adding
 
@@ -325,8 +325,8 @@ If a check doesn't appear in `list` or `explain`:
 
 ### DO
 
-- Embed SQL with `//go:embed query.sql` and include in `CheckMetadata.SQL`
-- Embed README with `//go:embed README.md` and include in `CheckMetadata.Readme`
+- Embed SQL with `//go:embed query.sql` and include in `Metadata.SQL`
+- Embed README with `//go:embed README.md` and include in `Metadata.Readme`
 - Use `check.NewReport(Metadata())` to create reports
 - Access check info via promoted fields: `report.CheckID`, `report.Name`
 - Report `SeverityOK` when no issues found
@@ -397,6 +397,116 @@ func TestMyCheck(t *testing.T) {
 | CLI commands | `internal/cli/` |
 | Binary entry | `cmd/pgdoctor/main.go` |
 | sqlc config | `sqlc.yaml` |
+
+## Design Philosophy
+
+Lessons learned from production usage across hundreds of PostgreSQL instances:
+
+1. **Signal-to-noise ratio over completeness** — A WARN that gets investigated is better than a FAIL that gets ignored. Use FAIL only for things that need immediate attention. Downgrade severity when in doubt.
+
+2. **Context-aware thresholds beat static rules** — When `InstanceMetadata` is available, scale thresholds by hardware:
+   - Vacuum settings should scale with CPU cores and memory
+   - Connection limits depend on instance class
+   - Partition recommendations should consider write patterns
+   - When metadata is `nil`, fall back to conservative defaults
+
+3. **Recommendations must work with real ORMs** — Example: `GENERATED ALWAYS AS IDENTITY` is technically correct but breaks ActiveRecord fixtures, Ecto seeds, and data migrations. Use `BY DEFAULT AS IDENTITY` instead. Always test recommendations against Rails/Ecto/Django patterns.
+
+4. **Push logic to SQL** — Do string truncation, formatting, and filtering in the query rather than in Go. Less data transfer, easier to debug (can paste the SQL directly), and the database is better at it.
+
+## Version-Specific Queries
+
+Pattern for handling PostgreSQL version differences:
+
+```go
+// Create separate queries for different PG versions
+// name: ReplicationSlots :many (PG17+)
+// name: ReplicationSlotsPG15 :many (PG15/16)
+
+// In check.go, select based on version:
+meta := check.InstanceMetadataFromContext(ctx)
+if meta != nil && meta.EngineVersionMajor >= 17 {
+    rows, err = c.queries.ReplicationSlots(ctx)
+} else {
+    rows, err = c.queries.ReplicationSlotsPG15(ctx)
+}
+```
+
+Use `NULL::TYPE AS column_name` in older-version queries to maintain consistent row types across versions.
+
+## Consumer Pattern (Contrib Checks)
+
+External consumers can extend pgdoctor with their own checks:
+
+```go
+import (
+    pgdoctor "github.com/emancu/pgdoctor"
+    "github.com/emancu/pgdoctor/check"
+)
+
+// Combine built-in + custom checks
+allChecks := append(pgdoctor.AllChecks(), myContribChecks()...)
+reports, _ := pgdoctor.Run(ctx, conn, allChecks, cfg, only, ignored)
+```
+
+Each contrib check creates its own sqlc queries internally, using the `check.DBTX` interface. This allows organizations to add domain-specific checks (naming conventions, internal standards) without forking.
+
+## Severity Assignment Guide
+
+| Severity | When to use | Examples |
+|----------|------------|---------|
+| FAIL | Data loss risk, security issue, imminent outage | No backups, publicly accessible, sequence at 90%+ |
+| WARN | Should fix but not urgent, performance degradation | Old storage type, high bloat, outdated minor version |
+| OK | Everything is fine | Always report at least one OK finding per check |
+
+**Rule of thumb:** If a DBA would page someone at 3am, it's a FAIL. If it should go in the sprint backlog, it's a WARN.
+
+## Testing Patterns (Advanced)
+
+Beyond the basic table-driven pattern documented above:
+
+### Scenario builder functions
+
+Use named constructors for readability in test data:
+
+```go
+func healthySlot(name string) db.ReplicationSlotsRow { ... }
+func inactiveSlot(name string, seconds, lag int64) db.ReplicationSlotsRow { ... }
+```
+
+### pgtype helper constructors
+
+Reduce boilerplate when constructing test rows:
+
+```go
+func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+func pgInt8(i int64) pgtype.Int8 { return pgtype.Int8{Int64: i, Valid: true} }
+```
+
+### Always test the error path
+
+```go
+func Test_QueryError(t *testing.T) {
+    queryer := &mockQueryer{err: fmt.Errorf("connection refused")}
+    _, err := checker.Check(ctx)
+    require.ErrorContains(t, err, "check-id")
+}
+```
+
+### Always test metadata validation
+
+Verify CheckID, Name, Category, SQL, and Readme are set:
+
+```go
+func Test_Metadata(t *testing.T) {
+    m := Metadata()
+    assert.NotEmpty(t, m.CheckID)
+    assert.NotEmpty(t, m.Name)
+    assert.NotEmpty(t, m.Category)
+    assert.NotEmpty(t, m.SQL)
+    assert.NotEmpty(t, m.Readme)
+}
+```
 
 ## Questions to Ask
 

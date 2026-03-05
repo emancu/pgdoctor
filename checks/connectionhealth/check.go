@@ -51,8 +51,8 @@ type checker struct {
 	queries ConnectionHealthQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryConfigs,
 		CheckID:     "connection-health",
 		Name:        "Connection Health",
@@ -62,21 +62,19 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries ConnectionHealthQueries) check.Checker {
+func New(queries ConnectionHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
-	meta := check.InstanceMetadataFromContext(ctx)
-	// EMANCU: Should I check metadata here, or guarantee that it panics if no metadata available?
 	stats, err := c.queries.ConnectionStats(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("running %s/%s (stats): %w", check.CategoryConfigs, report.CheckID, err)
@@ -92,14 +90,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s (long-idle): %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
-	// Add connection overview first (informational)
-	// TODO: Move this table at the parent/report. Only one table shold be displayed
-	// Or to `dba` command.
 	addConnectionOverview(stats, report)
 
-	checkConnectionSaturation(meta, stats, report)
-	checkPoolPressure(meta, stats, report)
-	checkIdleRatio(meta, stats, report)
+	checkConnectionSaturation(stats, report)
+	checkPoolPressure(stats, report)
+	checkIdleRatio(stats, report)
 	checkIdleInTransaction(idleTxns, report)
 	checkLongIdleConnections(longIdle, report)
 
@@ -107,8 +102,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 // addConnectionOverview adds an informational finding showing key connection metrics.
-// EMANCU: I dont like this, I would like to have it in verbose only or something like
-// that for the parent check only!
 func addConnectionOverview(stats db.ConnectionStatsRow, report *check.Report) {
 	maxConns := stats.MaxConnections.Int32
 	reserved := stats.ReservedConnections.Int32
@@ -134,7 +127,7 @@ func addConnectionOverview(stats db.ConnectionStatsRow, report *check.Report) {
 }
 
 // checkConnectionSaturation checks if we're running out of available connections.
-func checkConnectionSaturation(meta *check.InstanceMetadata, stats db.ConnectionStatsRow, report *check.Report) {
+func checkConnectionSaturation(stats db.ConnectionStatsRow, report *check.Report) {
 	maxConns := stats.MaxConnections.Int32
 	reserved := stats.ReservedConnections.Int32
 	available := maxConns - reserved
@@ -168,7 +161,7 @@ func checkConnectionSaturation(meta *check.InstanceMetadata, stats db.Connection
 // checkPoolPressure detects when the pool has minimal idle capacity and new queries may queue.
 // This is different from saturation (approaching max_connections) - pool pressure means
 // all available connections are busy even if we haven't hit the limit.
-func checkPoolPressure(meta *check.InstanceMetadata, stats db.ConnectionStatsRow, report *check.Report) {
+func checkPoolPressure(stats db.ConnectionStatsRow, report *check.Report) {
 	total := stats.TotalConnections.Int64
 	active := stats.ActiveConnections.Int64
 	idle := stats.IdleConnections.Int64
@@ -212,7 +205,7 @@ func checkPoolPressure(meta *check.InstanceMetadata, stats db.ConnectionStatsRow
 }
 
 // checkIdleRatio detects when too many connections are idle (potential pool misconfiguration).
-func checkIdleRatio(meta *check.InstanceMetadata, stats db.ConnectionStatsRow, report *check.Report) {
+func checkIdleRatio(stats db.ConnectionStatsRow, report *check.Report) {
 	total := stats.TotalConnections.Int64
 	idle := stats.IdleConnections.Int64
 

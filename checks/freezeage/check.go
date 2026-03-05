@@ -37,8 +37,8 @@ const (
 	tableAgeFailThreshold = int64(800_000_000)
 )
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryVacuum,
 		CheckID:     "freeze-age",
 		Name:        "Transaction ID Freeze Age",
@@ -48,13 +48,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries FreezeAgeQueries) check.Checker {
+func New(queries FreezeAgeQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

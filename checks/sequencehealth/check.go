@@ -24,8 +24,8 @@ type checker struct {
 	queries SequenceHealthQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategorySchema,
 		CheckID:     "sequence-health",
 		Name:        "Sequence Health",
@@ -35,13 +35,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries SequenceHealthQueries) check.Checker {
+func New(queries SequenceHealthQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 
@@ -84,7 +84,7 @@ func checkNearExhaustion(rows []db.SequenceHealthRow, report *check.Report) {
 	for _, row := range rows {
 		usage := getUsagePercent(row)
 		if row.IsCyclic.Bool {
-			continue // Cyclic sequences will wrap around -- EMANCU: I wonder who uses Cyclic sequences and why
+			continue // Cyclic sequences wrap around safely
 		}
 		if usage >= 90 {
 			critical = append(critical, row)

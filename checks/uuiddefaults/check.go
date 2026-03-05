@@ -25,8 +25,8 @@ type checker struct {
 	queries UUIDDefaultsQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryPerformance,
 		CheckID:     "uuid-defaults",
 		Name:        "UUID Default Value Analysis",
@@ -36,13 +36,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries UUIDDefaultsQueries) check.Checker {
+func New(queries UUIDDefaultsQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

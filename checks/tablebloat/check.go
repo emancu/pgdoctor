@@ -25,8 +25,8 @@ type checker struct {
 	queries TableBloatQueries
 }
 
-func Metadata() check.CheckMetadata {
-	return check.CheckMetadata{
+func Metadata() check.Metadata {
+	return check.Metadata{
 		Category:    check.CategoryVacuum,
 		CheckID:     "table-bloat",
 		Name:        "Table Bloat",
@@ -36,13 +36,13 @@ func Metadata() check.CheckMetadata {
 	}
 }
 
-func New(queries TableBloatQueries) check.Checker {
+func New(queries TableBloatQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
 }
 
-func (c *checker) Metadata() check.CheckMetadata {
+func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
 

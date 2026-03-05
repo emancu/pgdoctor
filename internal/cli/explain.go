@@ -35,7 +35,7 @@ func newExplainCommand() *cobra.Command {
 	return cmd
 }
 
-func newExplainCheckCommand(metadata check.CheckMetadata, sqlOnly *bool) *cobra.Command {
+func newExplainCheckCommand(metadata check.Metadata, sqlOnly *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   metadata.CheckID,
 		Short: metadata.Description,
