@@ -1,0 +1,100 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - dogsled
+    - durationcheck
+    - forbidigo
+    - goconst
+    - godot
+    - gosec
+    - misspell
+    - paralleltest
+    - revive
+    - whitespace
+    - fatcontext
+
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: ^print(ln)?$
+        - pattern: ^fmt\.Print.*$
+          msg: Use fmt.Fprintf with the appropriate writer
+        - pattern: ^log\.Print.*$
+          msg: Use structured logging instead
+    gosec:
+      excludes:
+        - G104
+        - G301
+        - G304
+        - G306
+        - G307
+    revive:
+      rules:
+        - name: blank-imports
+        - name: bool-literal-in-expr
+        - name: call-to-gc
+        - name: comment-spacings
+        - name: confusing-naming
+        - name: confusing-results
+        - name: constant-logical-expr
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: deep-exit
+        - name: defer
+        - name: dot-imports
+        - name: duplicated-imports
+        - name: early-return
+        - name: empty-block
+        - name: empty-lines
+        - name: enforce-map-style
+          arguments:
+            - literal
+        - name: enforce-slice-style
+          arguments:
+            - literal
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: import-shadowing
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+    staticcheck:
+      checks:
+        - -S1016
+        - all
+
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - staticcheck
+        text: 'SA1019: '
+        source: '//nolint:deprecation '
+      # CLI output — errors writing to stdout/stderr are not actionable.
+      - linters:
+          - errcheck
+        source: 'fmt\.Fprint'
+      # Deferred Close calls — errors are not actionable.
+      - linters:
+          - errcheck
+        source: 'defer .+\.Close'
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax

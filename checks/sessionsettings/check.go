@@ -114,12 +114,12 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	for _, role := range roles {
 		if !dbSettings.hasRole(role) {
 			checks = append(checks, settingCheck{
-				Role:     role,
+				Role:      role,
 				Parameter: "(all)",
-				Current:  "N/A",
-				Expected: "Role exists",
-				Status:   "Role not found",
-				Severity: check.SeverityWarn,
+				Current:   "N/A",
+				Expected:  "Role exists",
+				Status:    "Role not found",
+				Severity:  check.SeverityWarn,
 			})
 			continue
 		}

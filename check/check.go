@@ -80,8 +80,8 @@ type Report struct {
 func NewReport(metadata Metadata) *Report {
 	return &Report{
 		Metadata: metadata,
-		Severity:      SeverityOK, // Start at OK, will be updated as results are added
-		Results:       []Finding{},
+		Severity: SeverityOK, // Start at OK, will be updated as results are added
+		Results:  []Finding{},
 	}
 }
 

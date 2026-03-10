@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/pgversion"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/stretchr/testify/require"
 )
 
 func newStaticVersioner(row db.PGVersionRow) pgversion.VersionQueries {

@@ -6,9 +6,9 @@ import (
 	_ "embed"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 //go:embed query.sql

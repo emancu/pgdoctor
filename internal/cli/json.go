@@ -1,3 +1,4 @@
+// Package cli implements the pgdoctor command-line interface.
 package cli
 
 import (
@@ -25,8 +26,8 @@ type jsonFinding struct {
 }
 
 type jsonTable struct {
-	Headers []string     `json:"headers"`
-	Rows    []jsonRow    `json:"rows"`
+	Headers []string  `json:"headers"`
+	Rows    []jsonRow `json:"rows"`
 }
 
 type jsonRow struct {
