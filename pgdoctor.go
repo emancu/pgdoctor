@@ -66,9 +66,7 @@ func Run(ctx context.Context, conn db.DBTX, checks []check.Package, cfg check.Co
 //   - "category" -> "category" (exact match)
 //
 // Invalid filters are those that don't match any check ID or category.
-func ValidateFilters(checks []check.Package, filters []string) ([]string, []string) {
-	var valid, invalid []string
-
+func ValidateFilters(checks []check.Package, filters []string) (valid, invalid []string) {
 	// Build set of valid check IDs and categories
 	validCheckIDs := map[string]struct{}{}
 	validCategories := map[string]struct{}{}

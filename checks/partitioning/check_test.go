@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/stretchr/testify/require"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/partitioning"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/require"
 )
 
 // Mock queryer for testing.

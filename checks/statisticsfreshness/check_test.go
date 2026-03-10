@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/stretchr/testify/require"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/statisticsfreshness"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/require"
 )
 
 type mockStatisticsFreshnessQueryer struct {

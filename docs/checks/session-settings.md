@@ -80,16 +80,26 @@ WHERE r.rolcanlogin = true
 
 ## Library Configuration
 
-When using pgdoctor as a library, you can specify exact roles to check via configuration:
+When using pgdoctor as a library, you can configure roles and timeout thresholds:
 
 ```go
 cfg := check.Config{
-    "session-settings": {"roles": "app_ro,app_rw"},
+    "session-settings": {
+        "roles":        "app_ro,app_rw",
+        "timeout_warn": "2000",   // above this → WARN (default: 5000)
+        "timeout_fail": "5000",   // above this → FAIL (default: 10000)
+    },
 }
 reports, err := pgdoctor.Run(ctx, conn, pgdoctor.AllChecks(), cfg, nil, nil)
 ```
 
-When no config is provided, roles are discovered dynamically from the database.
+| Key | Description | Default |
+|-----|-------------|---------|
+| `roles` | Comma-separated list of roles to check | Discovered dynamically |
+| `timeout_warn` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a WARN | `5000` |
+| `timeout_fail` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a FAIL | `10000` |
+
+When no config is provided, roles are discovered dynamically and default thresholds apply.
 
 ## References
 

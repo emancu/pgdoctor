@@ -1,5 +1,5 @@
 # Binaries
-pgdoctor
+/pgdoctor
 *.exe
 
 # IDE

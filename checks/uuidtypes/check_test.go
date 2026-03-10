@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/uuidtypes"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/stretchr/testify/require"
 )
 
 type mockQueryer struct {

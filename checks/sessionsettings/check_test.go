@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/stretchr/testify/require"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/require"
 )
 
 func newStaticSessionSettingsQueryer(rows []db.SessionSettingsRow) sessionSettingsQueryer {
@@ -592,9 +592,9 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 			"log_min_duration_statement":          "2000",
 		},
 		"worker_user": {
-			"statement_timeout":                   "0", // bad
-			"idle_in_transaction_session_timeout": "0", // bad
-			"transaction_timeout":                 "0", // bad
+			"statement_timeout":                   "0",  // bad
+			"idle_in_transaction_session_timeout": "0",  // bad
+			"transaction_timeout":                 "0",  // bad
 			"log_min_duration_statement":          "-1", // bad
 		},
 	}
