@@ -302,22 +302,28 @@ func Test_ConnectionHealth_IdleRatio(t *testing.T) {
 			expectedSeverity: check.SeverityOK,
 		},
 		{
+			name:             "reported sample no longer fails",
+			total:            29,
+			idle:             22, // 75.9% idle - advisory, stays OK
+			expectedSeverity: check.SeverityOK,
+		},
+		{
 			name:             "healthy idle ratio",
 			total:            100,
-			idle:             40, // 40% (below 50% warn threshold)
+			idle:             40, // 40% (well below 90% warn threshold)
 			expectedSeverity: check.SeverityOK,
 		},
 		{
 			name:             "warning idle ratio",
-			total:            100,
-			idle:             60, // 60% (at or above 50% warn threshold)
+			total:            29,
+			idle:             27, // 93.1% (at or above 90% warn threshold)
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "fail idle ratio",
+			name:             "very high idle ratio still only warns",
 			total:            100,
-			idle:             92, // 92%
-			expectedSeverity: check.SeverityFail,
+			idle:             95, // 95% - no longer a FAIL tier
+			expectedSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -593,7 +599,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 
 		stats := healthyStats()
 		stats.TotalConnections = int64Val(100)
-		stats.IdleConnections = int64Val(85) // trigger warning
+		stats.IdleConnections = int64Val(92) // trigger warning (>= 90%)
 
 		mock := &mockQueries{
 			stats: stats,

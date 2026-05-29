@@ -20,8 +20,9 @@ const (
 	saturationWarnPercent = 70.0
 	saturationFailPercent = 85.0
 
-	idleRatioWarnPercent = 50.0
-	idleRatioFailPercent = 75.0
+	// Idle ratio is advisory only — saturation and pool-pressure already guard
+	// real connection exhaustion, so this check can only ever be OK or WARN.
+	idleRatioWarnPercent = 90.0
 	// Skip idle ratio check below this threshold to avoid false positives
 	// in low-traffic databases.
 	minConnectionsForIdleCheck = int64(20)
@@ -232,15 +233,10 @@ func checkIdleRatio(stats db.ConnectionStatsRow, report *check.Report) {
 		return
 	}
 
-	severity := check.SeverityWarn
-	if idlePercent >= idleRatioFailPercent {
-		severity = check.SeverityFail
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "idle-ratio",
 		Name:     "Idle Connection Ratio",
-		Severity: severity,
+		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("High idle ratio: %.1f%% of connections (%d/%d) are idle", idlePercent, idle, total),
 	})
 }

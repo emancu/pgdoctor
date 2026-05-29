@@ -23,8 +23,22 @@ SELECT
   , rs.slot_name::text AS slot_name
   , rs.wal_status::text AS wal_status
 
+  -- Cluster-wide WAL retention budget as bytes; -1 means unlimited (passed through
+  -- verbatim). max_slot_wal_keep_size reports unit 'MB' with setting as an integer
+  -- count of MB, so multiply by 1 MiB. The -1 guard avoids misreading the sentinel
+  -- as a size. (PG13+; cluster-wide GUC, so a single constant via CROSS JOIN.)
+  , cap.max_slot_wal_keep_bytes AS max_slot_wal_keep_bytes
+
 FROM pg_stat_replication AS sr
 LEFT JOIN pg_replication_slots AS rs ON sr.pid = rs.active_pid
+CROSS JOIN LATERAL (
+  SELECT CASE
+           WHEN s.setting = '-1' THEN -1::bigint
+           ELSE s.setting::bigint * 1024 * 1024
+         END AS max_slot_wal_keep_bytes
+  FROM pg_settings AS s
+  WHERE s.name = 'max_slot_wal_keep_size'
+) AS cap
 ORDER BY
   EXTRACT(EPOCH FROM sr.replay_lag) DESC NULLS LAST
   , sr.application_name;

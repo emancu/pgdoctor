@@ -23,10 +23,22 @@ const (
 	physicalFailSeconds = 1.0  // 1 second
 
 	// Logical replication thresholds (CDC/Debezium, selective replication).
-	// Debezium can wait up to 30 seconds to acknowledge WAL consumption during batch processing.
-	// These thresholds accommodate Debezium's normal operation while detecting genuine issues.
-	logicalWarnSeconds = 20.0 // 20 seconds - investigation threshold
-	logicalFailSeconds = 35.0 // 35 seconds - exceeds Debezium max ack window
+	//
+	// Absolute liveness tier: replay_lag time tracks Debezium's ack cadence, not
+	// danger — the real risk is slot backlog bytes. WARN/FAIL therefore require
+	// BOTH high time AND high bytes; time alone (small backlog) is normal batch
+	// behaviour.
+	logicalWarnSeconds = 120.0             // 2 minutes
+	logicalFailSeconds = 300.0             // 5 minutes
+	logicalWarnBytes   = int64(576716800)  // 550 MiB
+	logicalFailBytes   = int64(2147483648) // 2 GiB
+
+	// Capacity-relative tier: when max_slot_wal_keep_size is a real cap (> 0), the
+	// backlog as a fraction of that budget is a danger signal independent of time.
+	// It fires before the budget is exhausted and Postgres flips wal_status to
+	// 'unreserved', giving lead time to act.
+	logicalRelativeWarnFraction = 0.50
+	logicalRelativeFailFraction = 0.85
 
 	// WAL retention status values.
 	walStatusLost       = "lost"
@@ -172,19 +184,58 @@ func checkPhysicalReplicationLag(rows []db.ReplicationLagRow, report *check.Repo
 	})
 }
 
+// logicalLagSeverity is the MAX of two independent tiers. The absolute liveness
+// tier gates on BOTH time AND bytes (high time with a small backlog is normal
+// Debezium batching). The capacity-relative tier — active only when capBytes is a
+// real cap (> 0) — compares the backlog against a fraction of max_slot_wal_keep_size
+// regardless of time, catching a slot approaching its retention budget before
+// Postgres flips wal_status to 'unreserved'.
+func logicalLagSeverity(timeSec float64, bytes, capBytes int64) check.Severity {
+	severity := logicalAbsoluteSeverity(timeSec, bytes)
+	if rel := logicalRelativeSeverity(bytes, capBytes); rel > severity {
+		severity = rel
+	}
+	return severity
+}
+
+func logicalAbsoluteSeverity(timeSec float64, bytes int64) check.Severity {
+	if timeSec >= logicalFailSeconds && bytes >= logicalFailBytes {
+		return check.SeverityFail
+	}
+	if timeSec >= logicalWarnSeconds && bytes >= logicalWarnBytes {
+		return check.SeverityWarn
+	}
+	return check.SeverityOK
+}
+
+// logicalRelativeSeverity is disabled (always OK) unless capBytes > 0; a cap of -1
+// (unlimited, the RDS default) or 0 means there is no retention budget to measure
+// against. Fractions use float64 to avoid int64 overflow at large caps.
+func logicalRelativeSeverity(bytes, capBytes int64) check.Severity {
+	if capBytes <= 0 {
+		return check.SeverityOK
+	}
+	switch {
+	case float64(bytes) >= float64(capBytes)*logicalRelativeFailFraction:
+		return check.SeverityFail
+	case float64(bytes) >= float64(capBytes)*logicalRelativeWarnFraction:
+		return check.SeverityWarn
+	default:
+		return check.SeverityOK
+	}
+}
+
 func checkLogicalReplicationLag(rows []db.ReplicationLagRow, report *check.Report) {
 	var laggingRows []db.ReplicationLagRow
 	maxSeverity := check.SeverityOK
 
 	for _, row := range rows {
 		// COALESCE in query ensures these are always valid
-		lagSeconds := row.ReplayLagSeconds.Float64
-		if lagSeconds >= logicalWarnSeconds {
+		severity := logicalLagSeverity(row.ReplayLagSeconds.Float64, row.ReplayLagBytes.Int64, row.MaxSlotWalKeepBytes.Int64)
+		if severity != check.SeverityOK {
 			laggingRows = append(laggingRows, row)
-			if lagSeconds >= logicalFailSeconds {
-				maxSeverity = check.SeverityFail
-			} else if maxSeverity != check.SeverityFail {
-				maxSeverity = check.SeverityWarn
+			if severity > maxSeverity {
+				maxSeverity = severity
 			}
 		}
 	}
@@ -202,11 +253,7 @@ func checkLogicalReplicationLag(rows []db.ReplicationLagRow, report *check.Repor
 	var tableRows []check.TableRow
 	for _, row := range laggingRows {
 		// COALESCE in query ensures these are always valid
-		lagSeconds := row.ReplayLagSeconds.Float64
-		severity := check.SeverityWarn
-		if lagSeconds >= logicalFailSeconds {
-			severity = check.SeverityFail
-		}
+		severity := logicalLagSeverity(row.ReplayLagSeconds.Float64, row.ReplayLagBytes.Int64, row.MaxSlotWalKeepBytes.Int64)
 
 		slotName := row.SlotName.String
 		if slotName == "" {
@@ -217,7 +264,7 @@ func checkLogicalReplicationLag(rows []db.ReplicationLagRow, report *check.Repor
 			Cells: []string{
 				row.ApplicationName.String,
 				row.State.String,
-				fmt.Sprintf("%.2fs", lagSeconds),
+				fmt.Sprintf("%.2fs", row.ReplayLagSeconds.Float64),
 				check.FormatBytes(row.ReplayLagBytes.Int64),
 				slotName,
 			},

@@ -83,6 +83,29 @@ func removeFromSessionSettings(role, name string) []db.SessionSettingsRow {
 	return mapToSessionSettingsRows(settings)
 }
 
+// removeFromAllRoles drops a setting from every role, simulating a server that
+// lacks the setting (e.g. transaction_timeout on PG<17 emits no row).
+func removeFromAllRoles(name string) []db.SessionSettingsRow {
+	settings := optimalSessionSettings()
+	for role := range settings {
+		delete(settings[role], name)
+	}
+
+	return mapToSessionSettingsRows(settings)
+}
+
+// setUnit stamps the row matching role/name with the given base Unit, mirroring
+// what the real query returns from pg_settings.unit.
+func setUnit(rows []db.SessionSettingsRow, role, name, unit string) []db.SessionSettingsRow {
+	for i := range rows {
+		if rows[i].RoleName.String == role && rows[i].SettingName.String == name {
+			rows[i].Unit = pgtype.Text{String: unit, Valid: true}
+		}
+	}
+
+	return rows
+}
+
 func Test_SessionSettings(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +146,18 @@ func Test_SessionSettings(t *testing.T) {
 			},
 		},
 		{
+			// ALTER ROLE stores unit-suffixed values literally. "2000ms" must
+			// parse to 2000 (≤ 5000 warn threshold) instead of crashing the check.
+			Name: "statement_timeout unit-suffixed 2000ms for app_ro is OK",
+			Rows: setUnit(
+				overrideOptimalSessionSettings("app_ro", "statement_timeout", "2000ms"),
+				"app_ro", "statement_timeout", "ms",
+			),
+			Expect: []ExpectedResultCheck{
+				{ID: "session-settings", Sev: check.SeverityOK},
+			},
+		},
+		{
 			Name: "statement_timeout disabled for both roles",
 			Rows: overrideBothRoles("statement_timeout", "0"),
 			Expect: []ExpectedResultCheck{
@@ -146,13 +181,24 @@ func Test_SessionSettings(t *testing.T) {
 		},
 		// Transaction timeout tests
 		{
-			Name: "transaction_timeout missing for app_ro (PG < 17)",
+			// Row absent ⇒ server predates PG17 ⇒ transaction_timeout is skipped,
+			// not failed. The remaining optimal settings keep the check OK.
+			Name: "transaction_timeout missing for app_ro (PG < 17) is skipped",
 			Rows: removeFromSessionSettings("app_ro", "transaction_timeout"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityOK},
 			},
 		},
 		{
+			// All roles lack the row ⇒ PG<17 ⇒ no transaction_timeout finding at all.
+			Name: "transaction_timeout absent for all roles (PG < 17) yields no finding",
+			Rows: removeFromAllRoles("transaction_timeout"),
+			Expect: []ExpectedResultCheck{
+				{ID: "session-settings", Sev: check.SeverityOK},
+			},
+		},
+		{
+			// PG17+ present with value 0 must still FAIL (regression guard).
 			Name: "transaction_timeout disabled for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "transaction_timeout", "0"),
 			Expect: []ExpectedResultCheck{
@@ -219,6 +265,38 @@ func Test_SessionSettings(t *testing.T) {
 				require.NotNil(t, result.Table, "Non-OK result should have a table")
 				require.Greater(t, len(result.Table.Rows), 0, "Table should have rows")
 			}
+		})
+	}
+}
+
+func Test_ParseDurationMs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		value    string
+		baseUnit string
+		expect   int64
+	}{
+		{name: "ms suffix", value: "2000ms", expect: 2000},
+		{name: "seconds suffix", value: "2s", expect: 2000},
+		{name: "minutes suffix", value: "1min", expect: 60000},
+		{name: "bare number defaults to ms", value: "2000", expect: 2000},
+		{name: "zero", value: "0", expect: 0},
+		{name: "disabled sentinel keeps sign", value: "-1", expect: -1},
+		{name: "fractional seconds", value: "1.5s", expect: 1500},
+		{name: "space before unit", value: "2000 ms", expect: 2000},
+		{name: "bare number with ms base unit", value: "2000", baseUnit: "ms", expect: 2000},
+		{name: "microseconds round to nearest ms", value: "1500us", expect: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := sessionsettings.ParseDurationMs(tt.value, tt.baseUnit)
+			require.NoError(t, err)
+			require.Equal(t, tt.expect, got)
 		})
 	}
 }

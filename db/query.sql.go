@@ -175,7 +175,6 @@ func (q *Queries) DatabaseFreezeAge(ctx context.Context) ([]DatabaseFreezeAgeRow
 	return items, nil
 }
 
-
 const duplicateIndexes = `-- name: DuplicateIndexes :many
 WITH index_columns AS (
   SELECT
@@ -970,84 +969,6 @@ func (q *Queries) LongIdleConnections(ctx context.Context) ([]LongIdleConnection
 	return items, nil
 }
 
-const missingProviderIdTables = `-- name: MissingProviderIdTables :many
-WITH user_tables AS (
-  SELECT
-    (n.nspname || '.' || c.relname)::text AS table_name
-    , c.oid AS table_oid
-    , pg_catalog.pg_table_size(c.oid) AS table_size_bytes
-    , CASE
-      WHEN c.relkind = 'p'
-        THEN (
-          -- For partitioned tables, sum stats from all child partitions
-          SELECT COALESCE(SUM(child_stats.n_live_tup), 0)::bigint
-          FROM pg_catalog.pg_inherits AS i
-          INNER JOIN pg_stat_user_tables AS child_stats ON i.inhrelid = child_stats.relid
-          WHERE i.inhparent = c.oid
-        )
-      ELSE COALESCE(s.n_live_tup, 0)
-    END AS estimated_rows
-  FROM pg_catalog.pg_class AS c
-  INNER JOIN pg_catalog.pg_namespace AS n ON c.relnamespace = n.oid
-  LEFT JOIN pg_stat_user_tables AS s ON c.oid = s.relid
-  WHERE
-    c.relkind IN ('r', 'p')
-    AND n.nspname = 'public'
-)
-
-, tables_with_provider_id AS (
-  SELECT DISTINCT a.attrelid AS table_oid
-  FROM pg_catalog.pg_attribute AS a
-  WHERE
-    a.attname = 'provider_id'
-    AND a.attnum > 0
-    AND NOT a.attisdropped
-)
-
-SELECT
-  CURRENT_DATABASE()::text AS database_name
-  , ut.table_name
-  , ut.table_size_bytes
-  , ut.estimated_rows
-FROM user_tables AS ut
-LEFT JOIN tables_with_provider_id AS t ON ut.table_oid = t.table_oid
-WHERE t.table_oid IS NULL
-ORDER BY ut.table_size_bytes DESC
-`
-
-type MissingProviderIdTablesRow struct {
-	DatabaseName   pgtype.Text
-	TableName      pgtype.Text
-	TableSizeBytes pgtype.Int8
-	EstimatedRows  pgtype.Int8
-}
-
-// Identifies tables without provider_id column for multi-tenancy support.
-func (q *Queries) MissingProviderIdTables(ctx context.Context) ([]MissingProviderIdTablesRow, error) {
-	rows, err := q.db.Query(ctx, missingProviderIdTables)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []MissingProviderIdTablesRow
-	for rows.Next() {
-		var i MissingProviderIdTablesRow
-		if err := rows.Scan(
-			&i.DatabaseName,
-			&i.TableName,
-			&i.TableSizeBytes,
-			&i.EstimatedRows,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const pGVersion = `-- name: PGVersion :one
 SELECT
   current_setting('server_version_num')::integer / 10000 AS major
@@ -1239,21 +1160,36 @@ SELECT
   , rs.slot_name::text AS slot_name
   , rs.wal_status::text AS wal_status
 
+  -- Cluster-wide WAL retention budget as bytes; -1 means unlimited (passed through
+  -- verbatim). max_slot_wal_keep_size reports unit 'MB' with setting as an integer
+  -- count of MB, so multiply by 1 MiB. The -1 guard avoids misreading the sentinel
+  -- as a size. (PG13+; cluster-wide GUC, so a single constant via CROSS JOIN.)
+  , cap.max_slot_wal_keep_bytes AS max_slot_wal_keep_bytes
+
 FROM pg_stat_replication AS sr
 LEFT JOIN pg_replication_slots AS rs ON sr.pid = rs.active_pid
+CROSS JOIN LATERAL (
+  SELECT CASE
+           WHEN s.setting = '-1' THEN -1::bigint
+           ELSE s.setting::bigint * 1024 * 1024
+         END AS max_slot_wal_keep_bytes
+  FROM pg_settings AS s
+  WHERE s.name = 'max_slot_wal_keep_size'
+) AS cap
 ORDER BY
   EXTRACT(EPOCH FROM sr.replay_lag) DESC NULLS LAST
   , sr.application_name
 `
 
 type ReplicationLagRow struct {
-	ApplicationName  pgtype.Text
-	State            pgtype.Text
-	ReplicationType  pgtype.Text
-	ReplayLagBytes   pgtype.Int8
-	ReplayLagSeconds pgtype.Float8
-	SlotName         pgtype.Text
-	WalStatus        pgtype.Text
+	ApplicationName     pgtype.Text
+	State               pgtype.Text
+	ReplicationType     pgtype.Text
+	ReplayLagBytes      pgtype.Int8
+	ReplayLagSeconds    pgtype.Float8
+	SlotName            pgtype.Text
+	WalStatus           pgtype.Text
+	MaxSlotWalKeepBytes pgtype.Int8
 }
 
 // Monitors replication lag for both physical and logical replication streams.
@@ -1275,6 +1211,7 @@ func (q *Queries) ReplicationLag(ctx context.Context) ([]ReplicationLagRow, erro
 			&i.ReplayLagSeconds,
 			&i.SlotName,
 			&i.WalStatus,
+			&i.MaxSlotWalKeepBytes,
 		); err != nil {
 			return nil, err
 		}
@@ -1620,23 +1557,28 @@ func (q *Queries) SequenceHealth(ctx context.Context) ([]SequenceHealthRow, erro
 
 const sessionSettings = `-- name: SessionSettings :many
 /*
- * PostgreSQL settings follow a precedence hierarchy:
- * 1. System defaults (postgresql.conf)
- * 2. Database-level overrides (ALTER DATABASE ... SET)
- * 3. Role-level overrides (ALTER ROLE ... SET)  <- This query checks these
- * 4. Session-level changes (SET command)
+ * PostgreSQL GUC precedence for ALTER ROLE / ALTER DATABASE settings,
+ * from most specific to least:
  *
- * Technical approach:
- * - Dynamically discovers application roles (login-capable, non-system)
- * - pg_db_role_setting stores role configs as text arrays: ['key=value', ...]
- * - UNNEST + split_part parse these into usable key/value pairs
- * - CROSS JOIN creates full matrix of roles × settings (shows gaps)
- * - LEFT JOIN preserves NULLs to identify which settings use defaults
- * - setdatabase = 0 filters for cluster-wide settings (not DB-specific)
+ *   1. ALTER ROLE r IN DATABASE d SET ...     (setrole=r.oid, setdatabase=d.oid)
+ *   2. ALTER ROLE r SET ...                   (setrole=r.oid, setdatabase=0)
+ *   3. ALTER DATABASE d SET ... / ALTER ROLE ALL IN DATABASE d
+ *                                             (setrole=0,     setdatabase=d.oid)
+ *   4. ALTER ROLE ALL SET ...                 (setrole=0,     setdatabase=0)
+ *   5. postgresql.conf / ALTER SYSTEM / built-in default
  *
- * NOTE: reset_val represents the effective default (includes DB-level overrides),
- * not the raw postgresql.conf value. This is appropriate since we want to know
- * what the role actually gets vs what they override.
+ * For each application role and inspected setting, this query returns the
+ * value the role would actually see on connect to the current database —
+ * i.e., the most-specific row from pg_db_role_setting, falling back to
+ * pg_settings.reset_val when no override at levels 1-4 applies.
+ *
+ * Caveat: pg_settings.reset_val reflects what the *connecting* session
+ * would get on RESET, including any ALTER ROLE settings on the role
+ * pgdoctor connects as. Run pgdoctor as a role with no overrides for the
+ * inspected settings, otherwise the level-5 fallback can be wrong for
+ * other roles. (Switching to pg_file_settings + boot_val to remove this
+ * caveat is a planned follow-up; it requires the pg_read_all_settings
+ * predefined role.)
  */
 WITH roles AS (
   SELECT r.rolname, r.oid
@@ -1654,10 +1596,7 @@ WITH roles AS (
 )
 
 , settings AS (
-  SELECT
-    s.name
-    , s.reset_val
-    , s.unit
+  SELECT s.name, s.reset_val, s.unit
   FROM pg_settings AS s
   WHERE s.name IN (
     'statement_timeout'
@@ -1667,47 +1606,79 @@ WITH roles AS (
   )
 )
 
-, role_configs AS (
-  SELECT
-    r.rolname
-    , unnest(coalesce(
-      (
-        SELECT drs.setconfig
-        FROM pg_db_role_setting AS drs
-        WHERE
-          drs.setrole = r.oid
-          AND drs.setdatabase = 0
-      )
-      , ARRAY[]::text []
-    )) AS config_setting
-  FROM roles AS r
+, current_db AS (
+  SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database()
 )
 
-, parsed_configs AS (
+, overrides AS (
   SELECT
+    drs.setrole AS role_oid
+    , drs.setdatabase AS db_oid
+    , split_part(cfg, '=', 1) AS param_name
+    , substring(cfg FROM position('=' IN cfg) + 1) AS param_value
+  FROM pg_db_role_setting AS drs
+  CROSS JOIN LATERAL unnest(coalesce(drs.setconfig, ARRAY[]::text [])) AS cfg
+  WHERE split_part(cfg, '=', 1) IN (
+    'statement_timeout'
+    , 'idle_in_transaction_session_timeout'
+    , 'transaction_timeout'
+    , 'log_min_duration_statement'
+  )
+)
+
+, candidates AS (
+  SELECT
+    r.rolname
+    , s.name AS setting_name
+    , s.reset_val AS system_default
+    , s.unit
+    , o.param_value AS override_value
+    , CASE
+      WHEN o.role_oid = r.oid AND o.db_oid = cdb.oid THEN 1
+      WHEN o.role_oid = r.oid AND o.db_oid = 0 THEN 2
+      WHEN o.role_oid = 0 AND o.db_oid = cdb.oid THEN 3
+      WHEN o.role_oid = 0 AND o.db_oid = 0 THEN 4
+    END AS priority
+  FROM roles AS r
+  CROSS JOIN settings AS s
+  CROSS JOIN current_db AS cdb
+  LEFT JOIN overrides AS o
+    ON o.param_name = s.name
+    AND (
+      (o.role_oid = r.oid AND o.db_oid = cdb.oid)
+      OR (o.role_oid = r.oid AND o.db_oid = 0)
+      OR (o.role_oid = 0 AND o.db_oid = cdb.oid)
+      OR (o.role_oid = 0 AND o.db_oid = 0)
+    )
+)
+
+, winners AS (
+  SELECT DISTINCT ON (rolname, setting_name)
     rolname
-    , split_part(config_setting, '=', 1) AS param_name
-    , split_part(config_setting, '=', 2) AS param_value
-  FROM role_configs
+    , setting_name
+    , system_default
+    , unit
+    , override_value
+    , priority
+  FROM candidates
+  ORDER BY rolname, setting_name, priority NULLS LAST
 )
 
 SELECT
-  r.rolname::varchar AS role_name
-  , s.name::varchar AS setting_name
-  , s.reset_val AS system_default
-  , s.unit
-  , coalesce(pc.param_value, s.reset_val) AS setting_value
-  , CASE
-    WHEN pc.param_value IS NOT NULL THEN 'OVERRIDE'
+  rolname::varchar AS role_name
+  , setting_name::varchar AS setting_name
+  , system_default
+  , unit
+  , coalesce(override_value, system_default) AS setting_value
+  , CASE priority
+    WHEN 1 THEN 'OVERRIDE_ROLE_DB'
+    WHEN 2 THEN 'OVERRIDE_ROLE'
+    WHEN 3 THEN 'OVERRIDE_DATABASE'
+    WHEN 4 THEN 'OVERRIDE_ALL'
     ELSE 'DEFAULT'
   END AS status
-FROM roles AS r
-CROSS JOIN settings AS s
-LEFT JOIN parsed_configs AS pc
-  ON
-    r.rolname = pc.rolname
-    AND s.name = pc.param_name
-ORDER BY r.rolname, s.name
+FROM winners
+ORDER BY rolname, setting_name
 `
 
 type SessionSettingsRow struct {
@@ -1719,6 +1690,12 @@ type SessionSettingsRow struct {
 	Status        pgtype.Text
 }
 
+// Every pg_db_role_setting entry that could apply, parsed into key/value.
+// Filtered to our inspected settings so the join below stays tiny.
+// substring(... from position('=' in ...) + 1) handles values that contain '='.
+// Cross every role with every setting; LEFT JOIN every candidate override.
+// Each (role, setting) row can produce up to 4 candidate rows; we pick the
+// most-specific one (lowest priority number) via DISTINCT ON below.
 func (q *Queries) SessionSettings(ctx context.Context) ([]SessionSettingsRow, error) {
 	rows, err := q.db.Query(ctx, sessionSettings)
 	if err != nil {

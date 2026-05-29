@@ -11,6 +11,25 @@ By default, application roles are **discovered dynamically** — any login-capab
 - **idle_in_transaction_session_timeout**: Timeout for idle transactions
 - **log_min_duration_statement**: Threshold for logging slow queries
 
+## Precedence model
+
+For each `(role, setting)` pair, the check resolves the value the role would actually see when it connects to the current database, walking the PostgreSQL GUC hierarchy from most-specific to least-specific:
+
+| Priority | Source                                              | `pg_db_role_setting` row              |
+|----------|-----------------------------------------------------|---------------------------------------|
+| 1        | `ALTER ROLE r IN DATABASE d SET ...`                | `setrole=r.oid`, `setdatabase=d.oid`  |
+| 2        | `ALTER ROLE r SET ...`                              | `setrole=r.oid`, `setdatabase=0`      |
+| 3        | `ALTER DATABASE d SET ...` / `ALTER ROLE ALL IN DATABASE d SET ...` | `setrole=0`, `setdatabase=d.oid` |
+| 4        | `ALTER ROLE ALL SET ...`                            | `setrole=0`, `setdatabase=0`          |
+| 5        | Cluster default (`postgresql.conf` / `ALTER SYSTEM` / built-in) | `pg_settings.reset_val` fallback |
+
+The `status` column in the SQL result reports which level the value came from (`OVERRIDE_ROLE_DB`, `OVERRIDE_ROLE`, `OVERRIDE_DATABASE`, `OVERRIDE_ALL`, `DEFAULT`) so the origin of any value is debuggable from the raw query.
+
+### Caveats
+
+- Level-5 fallback uses `pg_settings.reset_val`, which reflects what the *connecting* session would receive on `RESET` — including any `ALTER ROLE` overrides on the role pgdoctor itself connects as. To keep that fallback accurate for other roles, **run pgdoctor as a role with no overrides on the inspected settings**.
+- Switching the cluster-default fallback to `pg_file_settings` + `boot_val` is a planned follow-up. It removes the caveat above but requires granting pgdoctor membership in the `pg_read_all_settings` predefined role, which is why it's intentionally out of scope for this check today.
+
 ## Why it matters
 
 Proper session settings prevent critical production issues:
