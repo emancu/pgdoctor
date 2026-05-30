@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -387,68 +386,11 @@ func (s dbSessionSettings) fetch(user, name string) (value int64, found bool, er
 		if !n.SettingName.Valid || n.SettingName.String != name || !n.SettingValue.Valid {
 			continue
 		}
-		ms, err := parseDurationMs(n.SettingValue.String, n.Unit.String)
+		ms, err := check.ParseDurationMs(n.SettingValue.String, n.Unit.String)
 		if err != nil {
 			return 0, false, fmt.Errorf("setting %s for user %s has invalid value %q: %w", name, user, n.SettingValue.String, err)
 		}
 		return ms, true, nil
 	}
 	return 0, false, nil
-}
-
-// timeUnitFactors maps GUC time-unit suffixes to a millisecond multiplier.
-// PostgreSQL only recognises these lowercase, case-sensitive suffixes; there is
-// no bare "m" time unit ("min" is the only minute spelling).
-var timeUnitFactors = map[string]float64{
-	"us":  1.0 / 1000,
-	"ms":  1,
-	"s":   1000,
-	"min": 60000,
-	"h":   3600000,
-	"d":   86400000,
-}
-
-// parseDurationMs converts a pg_settings value to integer milliseconds.
-//
-// ALTER ROLE stores values literally, so value may carry a unit suffix
-// ("2000ms", "1.5s", "2000 ms") or be a bare number interpreted in baseUnit.
-// The sign is preserved so sentinel values like -1 (disabled) survive.
-func parseDurationMs(value, baseUnit string) (int64, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, fmt.Errorf("empty value")
-	}
-
-	// Match the longest trailing alphabetic suffix that is a known time unit.
-	numeric, factor := value, factorForUnit(baseUnit)
-	for i := len(value) - 1; i >= 0; i-- {
-		if !isASCIILetter(value[i]) {
-			suffix := value[i+1:]
-			if f, ok := timeUnitFactors[suffix]; ok {
-				numeric = strings.TrimSpace(value[:i+1])
-				factor = f
-			}
-			break
-		}
-	}
-
-	n, err := strconv.ParseFloat(numeric, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parsing numeric part %q: %w", numeric, err)
-	}
-
-	return int64(math.Round(n * factor)), nil
-}
-
-// factorForUnit returns the ms multiplier for a row's base Unit, defaulting to
-// milliseconds when the unit is empty or not a recognised time unit.
-func factorForUnit(unit string) float64 {
-	if f, ok := timeUnitFactors[unit]; ok {
-		return f
-	}
-	return 1
-}
-
-func isASCIILetter(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
