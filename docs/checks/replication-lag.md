@@ -64,23 +64,31 @@ Physical replication uses streaming replication protocol where WAL is sent direc
 
 Monitors replay lag for logical replication subscribers (CDC, selective replication, Debezium).
 
-**Severity:**
-- FAIL: >= 35 seconds
-- WARN: >= 20 seconds
-- OK: < 20 seconds
+Severity is the **maximum of two independent tiers** evaluated per slot. A slot is flagged if either tier fires.
 
-**Why much looser than physical?** Logical replication (especially Debezium/CDC) involves:
-- Decoding WAL into logical changes
-- Publishing to external systems (e.g., Kafka)
-- Waiting for Kafka acknowledgments (with `acks=all` replication)
-- Debezium batch processing and LSN flushing (can wait up to 30 seconds)
+#### Tier A — absolute liveness (time AND bytes)
 
-**Debezium-specific behavior:** The Debezium PostgreSQL connector batches changes and flushes LSN positions back to PostgreSQL periodically. During low-activity periods, it can legitimately hold WAL positions for 10-30 seconds before acknowledging consumption. This is normal operation, not a failure.
+Requires **both** a sustained high replay lag **and** a material backlog:
 
-**Thresholds explained:**
-- **< 20s**: Normal operation, including Debezium batch processing
-- **20-35s**: Something may be slow (Kafka backpressure, consumer lag) - investigate
-- **>= 35s**: Consumer is genuinely stuck or misconfigured - requires intervention
+- WARN: replay lag >= 120s **AND** backlog >= 550 MiB
+- FAIL: replay lag >= 300s **AND** backlog >= 2 GiB
+- OK: otherwise
+
+**Why gate on both?** For Debezium/CDC, `replay_lag` time tracks the connector's LSN-ack cadence (batching, Kafka round-trips), not danger. A slot can show high time with a tiny backlog during low-activity periods — that is normal batch behaviour, not a failure. The backlog in bytes is the real risk signal. Requiring both dimensions avoids paging on routine batching while still catching a genuinely growing, stuck slot.
+
+#### Tier B — capacity-relative (backlog vs retention budget)
+
+Active **only when `max_slot_wal_keep_size` is a real cap** (a positive value). On RDS the default is `-1` (unlimited), which **disables this tier** — Tier A is then the only signal.
+
+- WARN: backlog >= 50% of `max_slot_wal_keep_size`
+- FAIL: backlog >= 85% of `max_slot_wal_keep_size`
+- OK: otherwise (or cap is `-1`/unset)
+
+This tier is **independent of time**: a backlog consuming most of the retention budget is dangerous regardless of how long the slot has been lagging.
+
+**Why an early-warning tier?** `wal_status` reflects what Postgres has *already* done to the slot: `reserved`/`extended` mean WAL is still kept, `unreserved` means the slot has exceeded its budget and its WAL is at risk of removal, `lost` means WAL is already gone. Tier B fires at 50-85% of the cap *while `wal_status` is still `reserved`/`extended`* — i.e. **before** the budget is exhausted and the status flips to `unreserved`. The 85% FAIL threshold deliberately sits below 100% to give headroom to act. At 100% the slot flips to `unreserved` and both this check (relative FAIL) and `wal-retention` (FAIL) fire as separate findings of equal severity — reinforcing, not double-counting, so page severity is unchanged.
+
+The fraction is computed in `float64` (`backlog / cap`) to avoid integer overflow at large caps.
 
 ## Lag Metrics Explained
 
@@ -115,7 +123,7 @@ For Debezium and other CDC tools using logical replication, `replay_lag` measure
 
 ### What This Means
 
-When you see "30 seconds of lag" for Debezium, this includes:
+Debezium's reported `replay_lag` time bundles several stages:
 - WAL decoding time (usually <100ms)
 - Kafka publish time (usually <1 second)
 - Kafka acknowledgment time (depends on `acks=all` and replication)
@@ -123,18 +131,21 @@ When you see "30 seconds of lag" for Debezium, this includes:
 
 ### Normal vs Problematic Lag
 
-**Normal Debezium latency:** 1-2 seconds
-- Includes WAL decode + Kafka round-trip with `acks=all`
-- Kafka typically responds in milliseconds to low seconds
+High `replay_lag` **time on its own is normal** for Debezium — it reflects the
+connector's LSN-ack cadence (batching for throughput), not danger. A slot sitting at
+tens of seconds of replay lag with a small backlog is healthy and is intentionally
+reported as OK.
 
-**Problematic lag:** 5+ seconds (your threshold)
-- Indicates actual processing backlog
-- Could be caused by:
-  - High write volume (too many changes to process)
-  - Kafka broker issues (slow responses, replication lag)
-  - Network latency (Debezium to Kafka connection)
-  - Debezium configuration (batch sizes too small)
-  - Downstream consumer lag (backpressure from slow consumers)
+Lag is **problematic** only when it signals an unbounded, growing backlog, which is
+what the `logical-replication-lag` thresholds above capture:
+- **Liveness** — replay lag time stays high *and* the retained backlog is large
+  (≥120s + ≥550 MiB → warn; ≥300s + ≥2 GiB → fail).
+- **Capacity** — the backlog consumes a large fraction of `max_slot_wal_keep_size`
+  (≥50% → warn; ≥85% → fail), when a cap is set. This is the early signal before
+  `wal_status` flips to `unreserved`.
+
+A growing backlog is usually caused by a stuck or slow consumer: Kafka broker issues,
+network problems, too-small Debezium batch sizes, or downstream backpressure.
 
 ### Diagnosing High Debezium Lag
 

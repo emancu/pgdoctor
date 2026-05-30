@@ -83,6 +83,29 @@ func removeFromSessionSettings(role, name string) []db.SessionSettingsRow {
 	return mapToSessionSettingsRows(settings)
 }
 
+// removeFromAllRoles drops a setting from every role, simulating a server that
+// lacks the setting (e.g. transaction_timeout on PG<17 emits no row).
+func removeFromAllRoles(name string) []db.SessionSettingsRow {
+	settings := optimalSessionSettings()
+	for role := range settings {
+		delete(settings[role], name)
+	}
+
+	return mapToSessionSettingsRows(settings)
+}
+
+// setUnit stamps the row matching role/name with the given base Unit, mirroring
+// what the real query returns from pg_settings.unit.
+func setUnit(rows []db.SessionSettingsRow, role, name, unit string) []db.SessionSettingsRow {
+	for i := range rows {
+		if rows[i].RoleName.String == role && rows[i].SettingName.String == name {
+			rows[i].Unit = pgtype.Text{String: unit, Valid: true}
+		}
+	}
+
+	return rows
+}
+
 func Test_SessionSettings(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +146,18 @@ func Test_SessionSettings(t *testing.T) {
 			},
 		},
 		{
+			// ALTER ROLE stores unit-suffixed values literally. "2000ms" must
+			// parse to 2000 (≤ 5000 warn threshold) instead of crashing the check.
+			Name: "statement_timeout unit-suffixed 2000ms for app_ro is OK",
+			Rows: setUnit(
+				overrideOptimalSessionSettings("app_ro", "statement_timeout", "2000ms"),
+				"app_ro", "statement_timeout", "ms",
+			),
+			Expect: []ExpectedResultCheck{
+				{ID: "session-settings", Sev: check.SeverityOK},
+			},
+		},
+		{
 			Name: "statement_timeout disabled for both roles",
 			Rows: overrideBothRoles("statement_timeout", "0"),
 			Expect: []ExpectedResultCheck{
@@ -146,13 +181,24 @@ func Test_SessionSettings(t *testing.T) {
 		},
 		// Transaction timeout tests
 		{
-			Name: "transaction_timeout missing for app_ro (PG < 17)",
+			// Row absent ⇒ server predates PG17 ⇒ transaction_timeout is skipped,
+			// not failed. The remaining optimal settings keep the check OK.
+			Name: "transaction_timeout missing for app_ro (PG < 17) is skipped",
 			Rows: removeFromSessionSettings("app_ro", "transaction_timeout"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityOK},
 			},
 		},
 		{
+			// All roles lack the row ⇒ PG<17 ⇒ no transaction_timeout finding at all.
+			Name: "transaction_timeout absent for all roles (PG < 17) yields no finding",
+			Rows: removeFromAllRoles("transaction_timeout"),
+			Expect: []ExpectedResultCheck{
+				{ID: "session-settings", Sev: check.SeverityOK},
+			},
+		},
+		{
+			// PG17+ present with value 0 must still FAIL (regression guard).
 			Name: "transaction_timeout disabled for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "transaction_timeout", "0"),
 			Expect: []ExpectedResultCheck{

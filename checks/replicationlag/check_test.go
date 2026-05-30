@@ -58,13 +58,14 @@ func healthyPhysical(appName string) db.ReplicationLagRow {
 
 func healthyLogical(appName string) db.ReplicationLagRow {
 	return db.ReplicationLagRow{
-		ApplicationName:  pgText(appName),
-		State:            pgText("streaming"),
-		ReplicationType:  pgText("logical"),
-		ReplayLagBytes:   pgInt8(10240),
-		ReplayLagSeconds: pgFloat8(1.0), // 1s - healthy for logical
-		SlotName:         pgText(fmt.Sprintf("%s_slot", appName)),
-		WalStatus:        pgText("reserved"),
+		ApplicationName:     pgText(appName),
+		State:               pgText("streaming"),
+		ReplicationType:     pgText("logical"),
+		ReplayLagBytes:      pgInt8(10240),
+		ReplayLagSeconds:    pgFloat8(1.0), // 1s - healthy for logical
+		MaxSlotWalKeepBytes: pgInt8(capUnlimited),
+		SlotName:            pgText(fmt.Sprintf("%s_slot", appName)),
+		WalStatus:           pgText("reserved"),
 	}
 }
 
@@ -80,39 +81,54 @@ func laggingPhysical(appName string, lagSeconds float64) db.ReplicationLagRow {
 	}
 }
 
-func laggingLogical(appName string, lagSeconds float64) db.ReplicationLagRow {
+// laggingLogical builds a logical row with explicit time AND bytes AND the
+// cluster's max_slot_wal_keep_size cap. Severity is the max of the absolute tier
+// (time AND bytes) and the capacity-relative tier (bytes vs cap fraction), so
+// tests must supply all three. Pass capUnlimited to disable the relative tier.
+func laggingLogical(appName string, lagSeconds float64, lagBytes, capBytes int64) db.ReplicationLagRow {
 	return db.ReplicationLagRow{
-		ApplicationName:  pgText(appName),
-		State:            pgText("streaming"),
-		ReplicationType:  pgText("logical"),
-		ReplayLagBytes:   pgInt8(int64(lagSeconds * 1024 * 1024)),
-		ReplayLagSeconds: pgFloat8(lagSeconds),
-		SlotName:         pgText(fmt.Sprintf("%s_slot", appName)),
-		WalStatus:        pgText("reserved"),
+		ApplicationName:     pgText(appName),
+		State:               pgText("streaming"),
+		ReplicationType:     pgText("logical"),
+		ReplayLagBytes:      pgInt8(lagBytes),
+		ReplayLagSeconds:    pgFloat8(lagSeconds),
+		MaxSlotWalKeepBytes: pgInt8(capBytes),
+		SlotName:            pgText(fmt.Sprintf("%s_slot", appName)),
+		WalStatus:           pgText("reserved"),
 	}
 }
 
+const (
+	gib          = int64(1024 * 1024 * 1024)
+	mib          = int64(1024 * 1024)
+	capUnlimited = int64(-1)        // max_slot_wal_keep_size = -1 (RDS default)
+	warnBytes    = int64(576716800) // logicalWarnBytes (550 MiB)
+	failBytes    = 2 * gib          // logicalFailBytes (2 GiB)
+)
+
 func nonStreamingState(appName, state string) db.ReplicationLagRow {
 	return db.ReplicationLagRow{
-		ApplicationName:  pgText(appName),
-		State:            pgText(state),
-		ReplicationType:  pgText("physical"),
-		ReplayLagBytes:   pgInt8(0),
-		ReplayLagSeconds: pgFloat8(0),
-		SlotName:         pgText(fmt.Sprintf("%s_slot", appName)),
-		WalStatus:        pgText("reserved"),
+		ApplicationName:     pgText(appName),
+		State:               pgText(state),
+		ReplicationType:     pgText("physical"),
+		ReplayLagBytes:      pgInt8(0),
+		ReplayLagSeconds:    pgFloat8(0),
+		MaxSlotWalKeepBytes: pgInt8(capUnlimited),
+		SlotName:            pgText(fmt.Sprintf("%s_slot", appName)),
+		WalStatus:           pgText("reserved"),
 	}
 }
 
 func walIssue(appName, walStatus string) db.ReplicationLagRow {
 	return db.ReplicationLagRow{
-		ApplicationName:  pgText(appName),
-		State:            pgText("streaming"),
-		ReplicationType:  pgText("logical"),
-		ReplayLagBytes:   pgInt8(1024),
-		ReplayLagSeconds: pgFloat8(0.5),
-		SlotName:         pgText(fmt.Sprintf("%s_slot", appName)),
-		WalStatus:        pgText(walStatus),
+		ApplicationName:     pgText(appName),
+		State:               pgText("streaming"),
+		ReplicationType:     pgText("logical"),
+		ReplayLagBytes:      pgInt8(1024),
+		ReplayLagSeconds:    pgFloat8(0.5),
+		MaxSlotWalKeepBytes: pgInt8(capUnlimited),
+		SlotName:            pgText(fmt.Sprintf("%s_slot", appName)),
+		WalStatus:           pgText(walStatus),
 	}
 }
 
@@ -146,7 +162,7 @@ func TestCheck_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	// Should have 5 findings: replication-state, wal-retention, physical-lag, logical-lag (all OK)
+	// Should have 4 findings: replication-state, wal-retention, physical-lag, logical-lag (all OK)
 	assert.Len(t, report.Results, 4)
 	assert.Equal(t, check.SeverityOK, report.Severity)
 
@@ -255,7 +271,7 @@ func TestCheck_LogicalReplicationLag_Warning(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingLogical("debezium", 25.0), // 25s - warning (threshold: 20s)
+			laggingLogical("debezium", 130.0, 9*gib, capUnlimited), // high time AND bytes - warning
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -284,7 +300,7 @@ func TestCheck_LogicalReplicationLag_Fail(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingLogical("debezium", 40.0), // 40s - fail (threshold: 35s)
+			laggingLogical("debezium", 350.0, 9*gib, capUnlimited), // high time AND bytes - fail
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -312,13 +328,35 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 	tests := []struct {
 		name           string
 		lagSeconds     float64
+		lagBytes       int64
+		capBytes       int64
 		expectSeverity check.Severity
 	}{
-		{"under threshold", 10.0, check.SeverityOK},
-		{"exactly at warn threshold", 20.0, check.SeverityWarn},
-		{"over warn threshold", 25.0, check.SeverityWarn},
-		{"exactly at fail threshold", 35.0, check.SeverityFail},
-		{"over fail threshold", 50.0, check.SeverityFail},
+		// --- Absolute tier (cap = -1 disables the relative tier) ---
+		// Reported healthy samples: high-ish time but tiny backlog stays OK.
+		{"57.59s with 149.3MiB backlog, no cap", 57.59, 149*mib + 307*1024, capUnlimited, check.SeverityOK},
+		{"20.76s with 34.1MiB backlog, no cap", 20.76, 34 * mib, capUnlimited, check.SeverityOK},
+		// Time alone is not enough — bytes below warn tier.
+		{"warn time but bytes below warn", 130.0, mib, capUnlimited, check.SeverityOK},
+		// Bytes alone is not enough — time below warn tier.
+		{"warn bytes but time below warn", 10.0, 9 * gib, capUnlimited, check.SeverityOK},
+		{"130s with 600MiB AND-gate warn", 130.0, 600 * mib, capUnlimited, check.SeverityWarn},
+		{"350s with 3GiB AND-gate fail", 350.0, 3 * gib, capUnlimited, check.SeverityFail},
+		// Fail time but bytes only in warn tier ⇒ degrades to warn.
+		{"fail time with warn-tier bytes degrades to warn", 350.0, 600 * mib, capUnlimited, check.SeverityWarn},
+		{"exactly at warn thresholds", 120.0, warnBytes, capUnlimited, check.SeverityWarn},
+		{"exactly at fail thresholds", 300.0, failBytes, capUnlimited, check.SeverityFail},
+
+		// --- Capacity-relative tier (low time, so the absolute tier is OK) ---
+		{"cap=1GiB backlog 600MiB (>=50%) warn", 5.0, 600 * mib, gib, check.SeverityWarn},
+		{"cap=1GiB backlog 950MiB (>=85%) fail", 5.0, 950 * mib, gib, check.SeverityFail},
+		{"cap=10GiB backlog 100MiB OK", 5.0, 100 * mib, 10 * gib, check.SeverityOK},
+
+		// --- Tiers disagree: max wins ---
+		// Absolute FAIL (350s/3GiB), relative OK (3GiB < 50% of 10GiB) ⇒ FAIL.
+		{"absolute fail, relative ok, max=fail", 350.0, 3 * gib, 10 * gib, check.SeverityFail},
+		// Absolute OK (low time), relative FAIL (950MiB >= 85% of 1GiB) ⇒ FAIL.
+		{"absolute ok, relative fail, max=fail", 5.0, 950 * mib, gib, check.SeverityFail},
 	}
 
 	for _, tt := range tests {
@@ -327,7 +365,7 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 
 			queryer := &mockQueryer{
 				rows: []db.ReplicationLagRow{
-					laggingLogical("debezium", tt.lagSeconds),
+					laggingLogical("debezium", tt.lagSeconds, tt.lagBytes, tt.capBytes),
 				},
 			}
 			checker := replicationlag.New(queryer)
@@ -348,7 +386,7 @@ func TestCheck_MixedReplicationTypes(t *testing.T) {
 			healthyPhysical("standby1"),
 			laggingPhysical("standby2", 0.5), // warn
 			healthyLogical("debezium1"),
-			laggingLogical("debezium2", 40.0), // fail (threshold: 35s)
+			laggingLogical("debezium2", 350.0, 9*gib, capUnlimited), // fail: high time AND bytes
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -577,10 +615,10 @@ func TestCheck_MultipleIssues(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 2.0),         // physical lag fail
-			laggingLogical("debezium1", 40.0),        // logical lag fail (threshold: 35s)
-			nonStreamingState("standby2", "catchup"), // state warn
-			walIssue("debezium2", "unreserved"),      // wal fail
+			laggingPhysical("standby1", 2.0),                        // physical lag fail
+			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // logical lag fail: time AND bytes
+			nonStreamingState("standby2", "catchup"),                // state warn
+			walIssue("debezium2", "unreserved"),                     // wal fail
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -645,13 +683,14 @@ func TestCheck_FormatBytes(t *testing.T) {
 	t.Parallel()
 
 	row := db.ReplicationLagRow{
-		ApplicationName:  pgText("debezium"),
-		State:            pgText("streaming"),
-		ReplicationType:  pgText("logical"),
-		ReplayLagBytes:   pgInt8(1536 * 1024 * 1024), // 1.5GiB
-		ReplayLagSeconds: pgFloat8(40.0),             // Lagging (threshold: 35s)
-		SlotName:         pgText("debezium_slot"),
-		WalStatus:        pgText("reserved"),
+		ApplicationName:     pgText("debezium"),
+		State:               pgText("streaming"),
+		ReplicationType:     pgText("logical"),
+		ReplayLagBytes:      pgInt8(3 * 1024 * 1024 * 1024), // 3GiB - above warn tier
+		ReplayLagSeconds:    pgFloat8(350.0),                // high time so the row lags
+		MaxSlotWalKeepBytes: pgInt8(capUnlimited),
+		SlotName:            pgText("debezium_slot"),
+		WalStatus:           pgText("reserved"),
 	}
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{row}}
@@ -673,20 +712,21 @@ func TestCheck_FormatBytes(t *testing.T) {
 
 	// Check lag bytes formatting (4th column, index 3)
 	lagBytesCell := logicalFinding.Table.Rows[0].Cells[3]
-	assert.Contains(t, lagBytesCell, "1.5GiB")
+	assert.Contains(t, lagBytesCell, "3.0GiB")
 }
 
 func TestCheck_FormatSeconds(t *testing.T) {
 	t.Parallel()
 
 	row := db.ReplicationLagRow{
-		ApplicationName:  pgText("debezium"),
-		State:            pgText("streaming"),
-		ReplicationType:  pgText("logical"),
-		ReplayLagBytes:   pgInt8(1024),
-		ReplayLagSeconds: pgFloat8(23.456), // Lagging (warn threshold: 20s)
-		SlotName:         pgText("debezium_slot"),
-		WalStatus:        pgText("reserved"),
+		ApplicationName:     pgText("debezium"),
+		State:               pgText("streaming"),
+		ReplicationType:     pgText("logical"),
+		ReplayLagBytes:      pgInt8(9 * 1024 * 1024 * 1024), // 9GiB so the row lags
+		ReplayLagSeconds:    pgFloat8(123.456),              // high time, lagging
+		MaxSlotWalKeepBytes: pgInt8(capUnlimited),
+		SlotName:            pgText("debezium_slot"),
+		WalStatus:           pgText("reserved"),
 	}
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{row}}
@@ -708,7 +748,7 @@ func TestCheck_FormatSeconds(t *testing.T) {
 
 	// Check lag seconds formatting (3rd column, index 2) - should be formatted to 2 decimals
 	lagSecondsCell := logicalFinding.Table.Rows[0].Cells[2]
-	assert.Equal(t, "23.46s", lagSecondsCell)
+	assert.Equal(t, "123.46s", lagSecondsCell)
 }
 
 func TestCheck_QueryError(t *testing.T) {
@@ -746,7 +786,7 @@ func TestCheck_PrescriptionsPresent(t *testing.T) {
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
 			laggingPhysical("standby1", 2.0),
-			laggingLogical("debezium1", 40.0), // fail (threshold: 35s)
+			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // fail: time AND bytes
 			nonStreamingState("standby2", "catchup"),
 			walIssue("debezium2", "lost"),
 		},

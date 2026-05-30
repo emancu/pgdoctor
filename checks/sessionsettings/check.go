@@ -184,17 +184,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]settingCheck, error) {
 	var checks []settingCheck
 
-	stmtTimeout, err := s.fetch(user, "statement_timeout")
+	stmtTimeout, _, err := s.fetch(user, "statement_timeout")
 	if err != nil {
 		return nil, fmt.Errorf("fetching statement_timeout: %w", err)
 	}
 
-	idleTimeout, err := s.fetch(user, "idle_in_transaction_session_timeout")
+	idleTimeout, _, err := s.fetch(user, "idle_in_transaction_session_timeout")
 	if err != nil {
 		return nil, fmt.Errorf("fetching idle_in_transaction_session_timeout: %w", err)
 	}
 
-	txTimeout, err := s.fetch(user, "transaction_timeout")
+	txTimeout, txFound, err := s.fetch(user, "transaction_timeout")
 	if err != nil {
 		return nil, fmt.Errorf("fetching transaction_timeout: %w", err)
 	}
@@ -260,43 +260,47 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 		})
 	}
 
-	// Check transaction_timeout
-	if txTimeout == 0 {
-		checks = append(checks, settingCheck{
-			Role:      user,
-			Parameter: "transaction_timeout",
-			Current:   "0ms (disabled)",
-			Expected:  expectedTimeout,
-			Status:    "MUST be set (PG17+)",
-			Severity:  check.SeverityFail,
-		})
-	} else if txTimeout > c.timeoutFail {
-		checks = append(checks, settingCheck{
-			Role:      user,
-			Parameter: "transaction_timeout",
-			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  expectedTimeout,
-			Status:    "Too high",
-			Severity:  check.SeverityFail,
-		})
-	} else if txTimeout > c.timeoutWarn {
-		checks = append(checks, settingCheck{
-			Role:      user,
-			Parameter: "transaction_timeout",
-			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  expectedTimeout,
-			Status:    "High",
-			Severity:  check.SeverityWarn,
-		})
-	} else {
-		checks = append(checks, settingCheck{
-			Role:      user,
-			Parameter: "transaction_timeout",
-			Current:   fmt.Sprintf("%dms", txTimeout),
-			Expected:  expectedTimeout,
-			Status:    "OK",
-			Severity:  check.SeverityOK,
-		})
+	// Check transaction_timeout (PG17+). When the row is absent the server
+	// predates PG17 and lacks the setting entirely — skip it rather than
+	// false-FAILing every role.
+	if txFound {
+		if txTimeout == 0 {
+			checks = append(checks, settingCheck{
+				Role:      user,
+				Parameter: "transaction_timeout",
+				Current:   "0ms (disabled)",
+				Expected:  expectedTimeout,
+				Status:    "MUST be set (PG17+)",
+				Severity:  check.SeverityFail,
+			})
+		} else if txTimeout > c.timeoutFail {
+			checks = append(checks, settingCheck{
+				Role:      user,
+				Parameter: "transaction_timeout",
+				Current:   fmt.Sprintf("%dms", txTimeout),
+				Expected:  expectedTimeout,
+				Status:    "Too high",
+				Severity:  check.SeverityFail,
+			})
+		} else if txTimeout > c.timeoutWarn {
+			checks = append(checks, settingCheck{
+				Role:      user,
+				Parameter: "transaction_timeout",
+				Current:   fmt.Sprintf("%dms", txTimeout),
+				Expected:  expectedTimeout,
+				Status:    "High",
+				Severity:  check.SeverityWarn,
+			})
+		} else {
+			checks = append(checks, settingCheck{
+				Role:      user,
+				Parameter: "transaction_timeout",
+				Current:   fmt.Sprintf("%dms", txTimeout),
+				Expected:  expectedTimeout,
+				Status:    "OK",
+				Severity:  check.SeverityOK,
+			})
+		}
 	}
 
 	return checks, nil
@@ -305,7 +309,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 func checkLogStatements(s dbSessionSettings, user string) ([]settingCheck, error) {
 	var checks []settingCheck
 
-	minDuration, err := s.fetch(user, "log_min_duration_statement")
+	minDuration, _, err := s.fetch(user, "log_min_duration_statement")
 	if err != nil {
 		return nil, fmt.Errorf("fetching log_min_duration_statement: %w", err)
 	}
@@ -370,19 +374,23 @@ func (s dbSessionSettings) hasRole(role string) bool {
 	return false
 }
 
-// fetch returns the integer value of a setting for a user.
-// Returns (0, nil) when the setting is not found — treats missing as disabled/default.
-func (s dbSessionSettings) fetch(user string, name string) (int64, error) {
+// fetch returns the millisecond value of a setting for a user.
+// found is false when no matching row with a valid value exists — for
+// version-gated settings (e.g. transaction_timeout on PG<17) the query emits no
+// row at all, so absence is the only reliable "unsupported version" signal.
+func (s dbSessionSettings) fetch(user, name string) (value int64, found bool, err error) {
 	for _, n := range s {
-		if n.RoleName.Valid && n.RoleName.String == user {
-			if n.SettingName.Valid && n.SettingName.String == name && n.SettingValue.Valid {
-				intVal, err := strconv.ParseInt(n.SettingValue.String, 10, 64)
-				if err != nil {
-					return 0, fmt.Errorf("setting %s for user %s has invalid integer value: %w", name, user, err)
-				}
-				return intVal, nil
-			}
+		if !n.RoleName.Valid || n.RoleName.String != user {
+			continue
 		}
+		if !n.SettingName.Valid || n.SettingName.String != name || !n.SettingValue.Valid {
+			continue
+		}
+		ms, err := check.ParseDurationMs(n.SettingValue.String, n.Unit.String)
+		if err != nil {
+			return 0, false, fmt.Errorf("setting %s for user %s has invalid value %q: %w", name, user, n.SettingValue.String, err)
+		}
+		return ms, true, nil
 	}
-	return 0, nil // not found → treat as disabled/default
+	return 0, false, nil
 }
