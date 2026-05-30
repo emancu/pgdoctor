@@ -89,6 +89,11 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 			fmt.Fprintln(w)
 			printTable(w, result.Table, 2, opts)
 		}
+		if opts.detail == string(detailDebug) && result.Debug != "" {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "  Debug:")
+			fmt.Fprintf(w, "%s\n", indent(result.Debug, 4))
+		}
 	} else {
 		fmt.Fprintf(w, "%s %s %s%s\n",
 			colorFunc(fmt.Sprintf("[%s]", label)),
