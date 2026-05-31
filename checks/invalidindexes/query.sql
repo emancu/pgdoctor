@@ -1,14 +1,7 @@
 -- name: BrokenIndexes :many
--- Reports indexes that are NOT indisvalid, classifying each as either a
--- genuinely-broken index (is_leftover = false -> FAIL) or an abandoned
--- REINDEX CONCURRENTLY transient (_ccnew/_ccold family, is_leftover = true -> WARN).
--- Excludes indexes currently being built: during CREATE INDEX CONCURRENTLY and
--- REINDEX INDEX CONCURRENTLY, pg_stat_progress_create_index.index_relid points
--- to the new (invalid) index OID, so an active progress row means "in flight,
--- not broken" (verified against PG15/PG16 ReindexRelationConcurrently).
--- Schema exclusion is intentionally narrower than duplicateindexes: an invalid
--- index in cron/pgpartman/debezium is a real operational problem worth reporting,
--- whereas a *duplicate* design choice there is not ours to fix.
+-- Invalid indexes, flagging _ccnew/_ccold REINDEX CONCURRENTLY leftovers via
+-- is_leftover. Excludes indexes a concurrent build is still working on (their
+-- index_relid is in pg_stat_progress_create_index): in flight, not broken.
 SELECT
   n.nspname::text AS schema_name
   , tbl.relname::text AS table_name
