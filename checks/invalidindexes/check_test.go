@@ -32,40 +32,84 @@ func newMockQueryerWithError(err error) *mockInvalidIndexesQueryer {
 	return &mockInvalidIndexesQueryer{err: err}
 }
 
+func brokenIndex(schema, table, index string) db.BrokenIndexesRow {
+	return db.BrokenIndexesRow{
+		SchemaName: schema,
+		TableName:  table,
+		IndexName:  index,
+		IsLeftover: false,
+	}
+}
+
+func leftoverIndex(schema, table, index string) db.BrokenIndexesRow {
+	return db.BrokenIndexesRow{
+		SchemaName: schema,
+		TableName:  table,
+		IndexName:  index,
+		IsLeftover: true,
+	}
+}
+
+// findingByID returns the finding with the given ID, failing the test if absent.
+func findingByID(t *testing.T, report *check.Report, id string) check.Finding {
+	t.Helper()
+	for _, f := range report.Results {
+		if f.ID == id {
+			return f
+		}
+	}
+	require.Failf(t, "finding not found", "no finding with ID %q", id)
+	return check.Finding{}
+}
+
 func Test_InvalidIndexes(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
 		Name             string
 		Indexes          []db.BrokenIndexesRow
-		ExpectedSeverity check.Severity
-		ExpectedID       string
+		ReportSeverity   check.Severity
+		BrokenSeverity   check.Severity
+		LeftoverSeverity check.Severity
 	}
 
 	testCases := []testCase{
 		{
-			Name:             "no invalid indexes - OK",
+			Name:             "no rows - both OK, report OK",
 			Indexes:          []db.BrokenIndexesRow{},
-			ExpectedSeverity: check.SeverityOK,
-			ExpectedID:       "invalid-indexes",
+			ReportSeverity:   check.SeverityOK,
+			BrokenSeverity:   check.SeverityOK,
+			LeftoverSeverity: check.SeverityOK,
 		},
 		{
-			Name: "one invalid index - WARN",
+			Name: "only broken - broken FAIL, leftovers OK, report FAIL",
 			Indexes: []db.BrokenIndexesRow{
-				{TableName: "users", IndexName: "idx_users_email"},
+				brokenIndex("public", "users", "idx_users_email"),
+				brokenIndex("public", "posts", "idx_posts_created_at"),
 			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedID:       "invalid-indexes",
+			ReportSeverity:   check.SeverityFail,
+			BrokenSeverity:   check.SeverityFail,
+			LeftoverSeverity: check.SeverityOK,
 		},
 		{
-			Name: "multiple invalid indexes - WARN",
+			Name: "only leftovers - broken OK, leftovers WARN, report WARN",
 			Indexes: []db.BrokenIndexesRow{
-				{TableName: "users", IndexName: "idx_users_email"},
-				{TableName: "posts", IndexName: "idx_posts_created_at"},
-				{TableName: "comments", IndexName: "idx_comments_user_id"},
+				leftoverIndex("public", "users", "idx_users_email_ccnew"),
+				leftoverIndex("public", "posts", "idx_posts_created_at_ccold1"),
 			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedID:       "invalid-indexes",
+			ReportSeverity:   check.SeverityWarn,
+			BrokenSeverity:   check.SeverityOK,
+			LeftoverSeverity: check.SeverityWarn,
+		},
+		{
+			Name: "mixed - broken FAIL, leftovers WARN, report FAIL",
+			Indexes: []db.BrokenIndexesRow{
+				brokenIndex("public", "users", "idx_users_email"),
+				leftoverIndex("app", "orders", "idx_orders_status_ccnew"),
+			},
+			ReportSeverity:   check.SeverityFail,
+			BrokenSeverity:   check.SeverityFail,
+			LeftoverSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -73,217 +117,160 @@ func Test_InvalidIndexes(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 
-			queryer := newMockQueryer(tc.Indexes)
-
-			checker := invalidindexes.New(queryer)
+			checker := invalidindexes.New(newMockQueryer(tc.Indexes))
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
-			results := report.Results
-			require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-			result := results[0]
-			require.Equal(t, tc.ExpectedID, result.ID, "Result ID should match")
-			require.Equal(t, tc.ExpectedSeverity, result.Severity, "Result severity should match")
 			require.Equal(t, check.CategoryIndexes, report.Category, "Category should be indexes")
+			require.Len(t, report.Results, 2, "Should always emit exactly 2 findings")
+			require.Equal(t, tc.ReportSeverity, report.Severity, "Report severity should be the max")
+
+			broken := findingByID(t, report, "broken-indexes")
+			require.Equal(t, tc.BrokenSeverity, broken.Severity, "broken-indexes severity")
+
+			leftovers := findingByID(t, report, "abandoned-leftovers")
+			require.Equal(t, tc.LeftoverSeverity, leftovers.Severity, "abandoned-leftovers severity")
 		})
 	}
 }
 
-func Test_InvalidIndexes_DetailsContent(t *testing.T) {
+func Test_InvalidIndexes_NoRows_Details(t *testing.T) {
+	t.Parallel()
+
+	checker := invalidindexes.New(newMockQueryer(nil))
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	broken := findingByID(t, report, "broken-indexes")
+	require.Equal(t, check.SeverityOK, broken.Severity)
+	require.Nil(t, broken.Table, "OK broken finding should have no table")
+	require.Contains(t, broken.Details, "No broken indexes")
+
+	leftovers := findingByID(t, report, "abandoned-leftovers")
+	require.Equal(t, check.SeverityOK, leftovers.Severity)
+	require.Nil(t, leftovers.Table, "OK leftover finding should have no table")
+	require.Contains(t, leftovers.Details, "No abandoned")
+}
+
+func Test_InvalidIndexes_Broken_TableAndRemediation(t *testing.T) {
 	t.Parallel()
 
 	indexes := []db.BrokenIndexesRow{
-		{TableName: "users", IndexName: "idx_users_email"},
-		{TableName: "posts", IndexName: "idx_posts_created_at"},
+		brokenIndex("public", "users", "idx_users_email"),
+		brokenIndex("app", "posts", "idx_posts_created_at"),
 	}
 
-	queryer := newMockQueryer(indexes)
-
-	checker := invalidindexes.New(queryer)
+	checker := invalidindexes.New(newMockQueryer(indexes))
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+	broken := findingByID(t, report, "broken-indexes")
+	require.Equal(t, check.SeverityFail, broken.Severity)
 
-	result := results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity)
+	// Count phrasing (plural).
+	require.Contains(t, broken.Details, "2 broken indexes")
 
-	// Verify details contain count
-	require.Contains(t, result.Details, "2 invalid indexes", "Details should mention count")
+	// Remediation commands present.
+	require.Contains(t, broken.Details, "REINDEX INDEX CONCURRENTLY")
+	require.Contains(t, broken.Details, "DROP INDEX CONCURRENTLY")
 
-	// Verify details contain table and index names
-	require.Contains(t, result.Details, "users", "Details should contain table name")
-	require.Contains(t, result.Details, "idx_users_email", "Details should contain index name")
-	require.Contains(t, result.Details, "posts", "Details should contain table name")
-	require.Contains(t, result.Details, "idx_posts_created_at", "Details should contain index name")
+	// Table contains exactly the broken rows with the right cells.
+	require.NotNil(t, broken.Table)
+	require.Equal(t, []string{"Schema", "Table", "Index"}, broken.Table.Headers)
+	require.Len(t, broken.Table.Rows, 2)
+	require.Equal(t, []string{"public", "users", "idx_users_email"}, broken.Table.Rows[0].Cells)
+	require.Equal(t, []string{"app", "posts", "idx_posts_created_at"}, broken.Table.Rows[1].Cells)
+	require.Equal(t, check.SeverityFail, broken.Table.Rows[0].Severity)
+
+	// The leftover finding stays OK with no table.
+	leftovers := findingByID(t, report, "abandoned-leftovers")
+	require.Equal(t, check.SeverityOK, leftovers.Severity)
+	require.Nil(t, leftovers.Table)
 }
 
-func Test_InvalidIndexes_PrescriptionContent(t *testing.T) {
+func Test_InvalidIndexes_Leftovers_TableAndRemediation(t *testing.T) {
 	t.Parallel()
 
 	indexes := []db.BrokenIndexesRow{
-		{TableName: "users", IndexName: "idx_users_email"},
+		leftoverIndex("public", "users", "idx_users_email_ccnew"),
 	}
 
-	queryer := newMockQueryer(indexes)
-
-	checker := invalidindexes.New(queryer)
+	checker := invalidindexes.New(newMockQueryer(indexes))
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+	leftovers := findingByID(t, report, "abandoned-leftovers")
+	require.Equal(t, check.SeverityWarn, leftovers.Severity)
 
-	result := results[0]
-	require.NotEmpty(t, result.Details, "Details should not be empty")
+	// Count phrasing (singular).
+	require.Contains(t, leftovers.Details, "1 abandoned leftover index")
+
+	// Remediation command present (DROP only for leftovers).
+	require.Contains(t, leftovers.Details, "DROP INDEX CONCURRENTLY")
+	require.NotContains(t, leftovers.Details, "REINDEX INDEX CONCURRENTLY")
+
+	require.NotNil(t, leftovers.Table)
+	require.Equal(t, []string{"Schema", "Table", "Index"}, leftovers.Table.Headers)
+	require.Len(t, leftovers.Table.Rows, 1)
+	require.Equal(t, []string{"public", "users", "idx_users_email_ccnew"}, leftovers.Table.Rows[0].Cells)
+	require.Equal(t, check.SeverityWarn, leftovers.Table.Rows[0].Severity)
+
+	// The broken finding stays OK with no table.
+	broken := findingByID(t, report, "broken-indexes")
+	require.Equal(t, check.SeverityOK, broken.Severity)
+	require.Nil(t, broken.Table)
 }
 
-func Test_InvalidIndexes_OKResult(t *testing.T) {
+func Test_InvalidIndexes_Mixed_Partitioning(t *testing.T) {
 	t.Parallel()
 
-	// No invalid indexes
-	queryer := newMockQueryer([]db.BrokenIndexesRow{})
+	indexes := []db.BrokenIndexesRow{
+		brokenIndex("public", "users", "idx_users_email"),
+		brokenIndex("public", "orders", "idx_orders_status"),
+		leftoverIndex("app", "posts", "idx_posts_created_at_ccnew"),
+	}
 
-	checker := invalidindexes.New(queryer)
+	checker := invalidindexes.New(newMockQueryer(indexes))
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
+	require.Equal(t, check.SeverityFail, report.Severity)
 
-	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Should be OK when no invalid indexes")
-	require.Empty(t, result.Details, "Details should be empty for OK result")
+	broken := findingByID(t, report, "broken-indexes")
+	require.Equal(t, check.SeverityFail, broken.Severity)
+	require.Contains(t, broken.Details, "2 broken indexes")
+	require.NotNil(t, broken.Table)
+	require.Len(t, broken.Table.Rows, 2)
+
+	leftovers := findingByID(t, report, "abandoned-leftovers")
+	require.Equal(t, check.SeverityWarn, leftovers.Severity)
+	require.Contains(t, leftovers.Details, "1 abandoned leftover index")
+	require.NotNil(t, leftovers.Table)
+	require.Len(t, leftovers.Table.Rows, 1)
+	require.Equal(t, []string{"app", "posts", "idx_posts_created_at_ccnew"}, leftovers.Table.Rows[0].Cells)
 }
 
 func Test_InvalidIndexes_QueryError(t *testing.T) {
 	t.Parallel()
 
-	// Mock query error
-	expectedErr := fmt.Errorf("database connection error")
-	queryer := newMockQueryerWithError(expectedErr)
+	queryer := newMockQueryerWithError(fmt.Errorf("database connection error"))
 
 	checker := invalidindexes.New(queryer)
 	_, err := checker.Check(context.Background())
 
-	require.Error(t, err, "Should return error when query fails")
-	require.Contains(t, err.Error(), "invalid-indexes", "Error should mention check ID")
-}
-
-func Test_InvalidIndexes_CategoryFiltering(t *testing.T) {
-	t.Parallel()
-
-	indexes := []db.BrokenIndexesRow{
-		{TableName: "users", IndexName: "idx_users_email"},
-	}
-
-	queryer := newMockQueryer(indexes)
-
-	// Create report with indexes category filtered out
-
-	// Use the actual runner which handles filtering
-	// We can't test filtering directly here since Report is internal
-	// but we can verify the check respects the reporter interface
-	checker := invalidindexes.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	// Should still run and add result when not filtered
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have result when not filtered")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "invalid-indexes")
 }
 
 func Test_InvalidIndexes_Metadata(t *testing.T) {
 	t.Parallel()
 
-	queryer := newMockQueryer([]db.BrokenIndexesRow{})
-	checker := invalidindexes.New(queryer)
-	metadata := checker.Metadata()
+	m := invalidindexes.Metadata()
 
-	require.Equal(t, "invalid-indexes", metadata.CheckID, "CheckID should match")
-	require.Equal(t, "Invalid Indexes", metadata.Name, "Name should match")
-	require.Equal(t, check.CategoryIndexes, metadata.Category, "Category should be indexes")
-	require.NotEmpty(t, metadata.Description, "Description should not be empty")
-}
-
-func Test_InvalidIndexes_ResultStructure(t *testing.T) {
-	t.Parallel()
-
-	indexes := []db.BrokenIndexesRow{
-		{TableName: "orders", IndexName: "idx_orders_status"},
-	}
-
-	queryer := newMockQueryer(indexes)
-
-	checker := invalidindexes.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	results := report.Results
-	require.Equal(t, 1, len(results))
-
-	result := results[0]
-	require.Equal(t, "Invalid Indexes", result.Name, "Name should match")
-	require.Equal(t, "invalid-indexes", report.CheckID, "CheckID should match")
-	require.Equal(t, "invalid-indexes", result.ID, "ID should match CheckID")
-	require.Equal(t, check.CategoryIndexes, report.Category, "Category should match")
-	require.Equal(t, check.SeverityWarn, result.Severity, "Severity should be WARN for invalid indexes")
-	require.NotEmpty(t, result.Details, "Details should not be empty")
-}
-
-func Test_InvalidIndexes_CountAccuracy(t *testing.T) {
-	t.Parallel()
-
-	type testCase struct {
-		Name          string
-		IndexCount    int
-		ExpectedCount string
-	}
-
-	testCases := []testCase{
-		{
-			Name:          "single invalid index",
-			IndexCount:    1,
-			ExpectedCount: "1 invalid index",
-		},
-		{
-			Name:          "five invalid indexes",
-			IndexCount:    5,
-			ExpectedCount: "5 invalid indexes",
-		},
-		{
-			Name:          "ten invalid indexes",
-			IndexCount:    10,
-			ExpectedCount: "10 invalid indexes",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Name, func(t *testing.T) {
-			t.Parallel()
-
-			// Generate N invalid indexes
-			indexes := make([]db.BrokenIndexesRow, tc.IndexCount)
-			for i := 0; i < tc.IndexCount; i++ {
-				indexes[i] = db.BrokenIndexesRow{
-					TableName: fmt.Sprintf("table_%d", i),
-					IndexName: fmt.Sprintf("idx_table_%d_column", i),
-				}
-			}
-
-			queryer := newMockQueryer(indexes)
-
-			checker := invalidindexes.New(queryer)
-			report, err := checker.Check(context.Background())
-			require.NoError(t, err)
-
-			results := report.Results
-			require.Equal(t, 1, len(results))
-
-			result := results[0]
-			require.Contains(t, result.Details, tc.ExpectedCount, "Details should contain accurate count")
-		})
-	}
+	require.Equal(t, "invalid-indexes", m.CheckID, "CheckID should match")
+	require.Equal(t, "Invalid Indexes", m.Name, "Name should match")
+	require.Equal(t, check.CategoryIndexes, m.Category, "Category should be indexes")
+	require.NotEmpty(t, m.Description, "Description should not be empty")
+	require.NotEmpty(t, m.SQL, "SQL should not be empty")
+	require.NotEmpty(t, m.Readme, "Readme should not be empty")
 }
