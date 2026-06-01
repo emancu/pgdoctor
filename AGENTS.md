@@ -294,6 +294,15 @@ Five categories:
 
 Report severity is automatically the maximum across all findings. `SeveritySkip` is ordered below `SeverityOK` so it doesn't affect severity comparisons.
 
+### Presets
+
+The CLI groups checks into presets (defined in `internal/cli/presets.go`), selected with `--preset`:
+
+- `all` - every check (the default)
+- `triage` - the subset worth running during an active incident: runtime health and capacity signals (connection health/efficiency, replication lag/slots, table bloat, vacuum health, freeze age, invalid indexes, temp usage, cache efficiency) — not slow schema-design audits.
+
+When adding a check, ask: **is this useful during an active incident?** If yes, add its CheckID to `triageChecks` in `internal/cli/presets.go`. Schema-design and capacity-planning checks generally belong only in `all`.
+
 ## Common Tasks
 
 ### Adding a New Check
@@ -525,3 +534,4 @@ When adding or modifying checks:
 4. Multiple findings (subchecks)? If yes, what IDs?
 5. What SQL query is needed?
 6. What PostgreSQL versions should this support?
+7. Useful during an active incident? If so, add it to the `triage` preset (`internal/cli/presets.go`).
