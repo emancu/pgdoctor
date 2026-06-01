@@ -1,74 +1,67 @@
-# Invalid Indexes
+# Invalid Indexes Check
 
-Identifies indexes left in an invalid state (`pg_index.indisvalid = false`). The planner ignores invalid indexes, so they cost disk and maintenance without serving any query.
+Identifies PostgreSQL indexes that are in an invalid state and not being used by the query planner.
 
-## What It Checks
+## What it checks
 
-Every invalid index is reported as **WARN** and tagged with a `Type` so you know how to act on it. Indexes a concurrent build is *currently* working on are excluded — they are invalid only until the build finishes.
+- Indexes marked as invalid in `pg_index.indisvalid`
+- Indexes that failed during concurrent creation or reindexing
+- Orphaned invalid indexes taking up disk space
+- Abandoned `_ccnew`/`_ccold` leftovers from a cancelled `REINDEX CONCURRENTLY` (tagged `leftover` — safe to drop)
 
-### Broken (`broken`)
-A permanently-invalid index: a `CREATE INDEX CONCURRENTLY` that failed or was interrupted, or any other index PostgreSQL has marked invalid.
+Indexes a live `CREATE`/`REINDEX INDEX CONCURRENTLY` is still building are excluded — they are invalid only until the build finishes.
 
-**Severity**: WARN
-
-**Example**:
-```sql
-CREATE INDEX CONCURRENTLY idx_users_email ON users(email);
--- interrupted or failed -> idx_users_email stays indisvalid = false
-```
-
-### Abandoned REINDEX leftover (`leftover`)
-A `_ccnew`/`_ccold` transient left behind by a failed or cancelled `REINDEX INDEX CONCURRENTLY`. The original index is still valid and in use, so the leftover is harmless clutter.
-
-**Severity**: WARN
-
-**Example**:
-```sql
-REINDEX INDEX CONCURRENTLY idx_orders_status;
--- cancelled mid-build -> idx_orders_status_ccnew left behind, invalid
-```
-
-### Excluded: builds in flight
-While a `CREATE INDEX CONCURRENTLY` or `REINDEX INDEX CONCURRENTLY` is running, the new index is invalid until the build completes. These have an active `pg_stat_progress_create_index` row and are excluded — in flight, not broken.
-
-System schemas (`pg_catalog`, `information_schema`, `pg_toast`) are excluded. Unlike duplicate indexes, an invalid index in `cron`/`pgpartman`/`debezium` *is* reported — there, it is a real operational problem.
-
-## Why It Matters
+## Why it matters
 
 Invalid indexes cause problems:
+- **Wasted disk space**: Invalid indexes consume storage but provide no benefit
+- **Query performance**: Not used by the query planner, defeating their purpose
+- **Hidden failures**: May indicate underlying data quality or operational issues
+- **Confusion**: Can mislead developers during query optimization
 
-- **Wasted disk space**: they consume storage but provide no benefit
-- **Query performance**: the planner ignores them, defeating their purpose
-- **Hidden failures**: often a sign of an interrupted migration or operational issue
-- **Confusion**: can mislead developers during query optimization
+An index becomes invalid when:
+- `CREATE INDEX CONCURRENTLY` fails or is interrupted
+- `REINDEX CONCURRENTLY` encounters an error
+- Data doesn't satisfy the index conditions
 
 ## How to Fix
 
-### Broken indexes
-Rebuild it (preferred if the index is still wanted) or drop it:
+For each invalid index, choose one of these options:
+
+### Option 1: Recreate the Index
 
 ```sql
-REINDEX INDEX CONCURRENTLY your_schema.your_index;
--- or, if it is no longer needed:
-DROP INDEX CONCURRENTLY your_schema.your_index;
+REINDEX INDEX CONCURRENTLY your_index_name;
 ```
 
-Check the PostgreSQL logs for the original failure before rebuilding.
+**Before recreating:**
+1. Investigate why the index failed initially
+2. Check for locking issues or timeout problems
+3. Verify the underlying data satisfies the index conditions
+4. Consider if the index definition needs modification
 
-### Abandoned leftovers
-The original index is still valid — just drop the leftover:
+### Option 2: Drop the Index
+
+If the index is no longer needed:
 
 ```sql
-DROP INDEX CONCURRENTLY your_schema.your_leftover;
+DROP INDEX CONCURRENTLY your_index_name;
 ```
 
-## Important Considerations
+### Investigation Steps
 
-- **Read replicas**: on a standby, an in-flight build on the primary can briefly show its `_ccnew` as a `leftover` — `pg_stat_progress_create_index` reflects local backends only. It clears once the build replays.
-- **Naming collisions**: a user index literally named `*_ccnew`/`*_ccold` that is genuinely invalid would be tagged `leftover` rather than `broken`. Rare, and only affects the label.
+1. **Check index definition:**
+   ```sql
+   SELECT indexdef FROM pg_indexes WHERE indexname = 'your_index_name';
+   ```
+
+2. **Review PostgreSQL logs** for errors during index creation
+
+3. **Verify data integrity** - ensure data meets index constraints
+
+4. **Check for lock conflicts** that might have interrupted creation
 
 ## References
 
-- [PostgreSQL: CREATE INDEX](https://www.postgresql.org/docs/current/sql-createindex.html)
-- [PostgreSQL: REINDEX](https://www.postgresql.org/docs/current/sql-reindex.html)
-- [PostgreSQL: pg_stat_progress_create_index](https://www.postgresql.org/docs/current/progress-reporting.html#CREATE-INDEX-PROGRESS-REPORTING)
+- [PostgreSQL Documentation: CREATE INDEX](https://www.postgresql.org/docs/current/sql-createindex.html)
+- [PostgreSQL Documentation: REINDEX](https://www.postgresql.org/docs/current/sql-reindex.html)
