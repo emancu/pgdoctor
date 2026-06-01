@@ -7,6 +7,9 @@ Identifies PostgreSQL indexes that are in an invalid state and not being used by
 - Indexes marked as invalid in `pg_index.indisvalid`
 - Indexes that failed during concurrent creation or reindexing
 - Orphaned invalid indexes taking up disk space
+- Abandoned `_ccnew`/`_ccold` leftovers from a cancelled `REINDEX CONCURRENTLY` (tagged `leftover` — safe to drop)
+
+Indexes a live `CREATE`/`REINDEX INDEX CONCURRENTLY` is still building are excluded — they are invalid only until the build finishes.
 
 ## Why it matters
 

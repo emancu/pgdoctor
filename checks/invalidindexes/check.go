@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -49,12 +48,12 @@ func (c *checker) Metadata() check.Metadata {
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
-	invalidIndexes, err := c.queries.BrokenIndexes(ctx)
+	rows, err := c.queries.BrokenIndexes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryIndexes, report.CheckID, err)
 	}
 
-	if len(invalidIndexes) == 0 {
+	if len(rows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
@@ -63,17 +62,43 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	lines := []string{}
-	for _, index := range invalidIndexes {
-		lines = append(lines, fmt.Sprintf("%s\t%s", index.TableName, index.IndexName))
+	// One finding, all WARN: a broken index and an abandoned _ccnew/_ccold
+	// leftover are both "clean this up" work, not a 3am page. The Type column
+	// preserves the distinction; the fix for each lives in the README and
+	// `explain` output rather than inline, to keep the run summary terse.
+	var broken, leftover int
+	tableRows := make([]check.TableRow, 0, len(rows))
+	for _, row := range rows {
+		kind := "broken"
+		if row.IsLeftover {
+			kind = "leftover"
+			leftover++
+		} else {
+			broken++
+		}
+		tableRows = append(tableRows, check.TableRow{
+			Cells:    []string{row.SchemaName, row.TableName, row.IndexName, kind},
+			Severity: check.SeverityWarn,
+		})
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
 		Name:     report.Name,
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("There are %d invalid indexes.\n%s\n", len(invalidIndexes), strings.Join(lines, "\n")),
+		Details:  fmt.Sprintf("%s (%d broken, %d leftover)", pluralIndexes(len(rows)), broken, leftover),
+		Table: &check.Table{
+			Headers: []string{"Schema", "Table", "Index", "Type"},
+			Rows:    tableRows,
+		},
 	})
 
 	return report, nil
+}
+
+func pluralIndexes(n int) string {
+	if n == 1 {
+		return "1 invalid index"
+	}
+	return fmt.Sprintf("%d invalid indexes", n)
 }
