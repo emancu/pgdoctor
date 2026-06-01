@@ -27,10 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`session-settings`**: unit-aware parsing of timeout values like `2000ms`/`1min` that previously crashed and skipped the entire check; `transaction_timeout` (PG17+) is now skipped on older versions instead of reporting a false `MUST be set` failure.
 - **`--detail debug`**: renders `Finding.Debug` for single-finding checks (previously only shown for multi-finding checks).
 
-### Removed
-
-- Orphaned `MissingProviderIdTables` generated query (no corresponding check existed).
-
 ## [0.2.0] - 2026-04-05
 
 ### Added
