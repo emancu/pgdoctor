@@ -3,7 +3,6 @@
 Analyzes database-wide buffer cache hit ratio to identify memory pressure and I/O bottlenecks.
 
 > **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `statistics-freshness` check to validate statistics maturity.
-> **Note**: This is a coarse advisory. PostgreSQL counts OS-page-cache hits as `blks_read`, so a low ratio overstates true disk pressure — confirm genuine memory pressure with read latency, physical IOPS, or `pg_stat_io` before acting. A small hot-working-set database should sit at 99%+, while healthy mixed OLTP routinely runs in the low 90s.
 
 ## What It Checks
 
