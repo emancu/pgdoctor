@@ -3,6 +3,7 @@
 Analyzes database-wide buffer cache hit ratio to identify memory pressure and I/O bottlenecks.
 
 > **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `statistics-freshness` check to validate statistics maturity.
+> **Note**: This is a coarse advisory. PostgreSQL counts OS-page-cache hits as `blks_read`, so a low ratio overstates true disk pressure — confirm genuine memory pressure with read latency, physical IOPS, or `pg_stat_io` before acting. A small hot-working-set database should sit at 99%+, while healthy mixed OLTP routinely runs in the low 90s.
 
 ## What It Checks
 
@@ -13,8 +14,8 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 **Formula**: `blocks_hit / (blocks_hit + blocks_read) * 100`
 
 **Thresholds**:
-- **WARN**: < 95% cache hit ratio
-- **OK**: ≥ 95% cache hit ratio
+- **WARN**: < 90% cache hit ratio
+- **OK**: ≥ 90% cache hit ratio
 
 ## Why Cache Hit Ratio Matters
 
@@ -37,7 +38,7 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 |-------|----------------|
 | > 99% | Excellent - working set fits in memory |
 | 95-99% | Good - most data cached, occasional disk reads |
-| 90-95% | Concerning - significant disk I/O |
+| 90-95% | Acceptable - some disk I/O, normal for mixed OLTP |
 | < 90% | Poor - high disk I/O, performance degraded |
 
 ## Statistics Requirements

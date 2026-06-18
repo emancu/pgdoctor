@@ -60,13 +60,13 @@ func Test_CacheEfficiency(t *testing.T) {
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "warning threshold (90-95%) - WARN",
+			Name: "mid band (90-95%) - OK",
 			Row: db.DatabaseCacheEfficiencyRow{
 				CacheHitRatio: makeNumeric(92.5),
 				BlksHit:       pgtype.Int8{Int64: 925000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 75000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityOK,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -200,19 +200,19 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			Name:             "exactly 95% - OK",
+			Name:             "well above threshold - OK",
 			CacheRatio:       95.0,
 			ExpectedSeverity: check.SeverityOK,
 		},
 		{
-			Name:             "just below 95% - WARN",
-			CacheRatio:       94.9,
-			ExpectedSeverity: check.SeverityWarn,
+			Name:             "mid band now OK - OK",
+			CacheRatio:       92.5,
+			ExpectedSeverity: check.SeverityOK,
 		},
 		{
-			Name:             "exactly 90% - WARN",
+			Name:             "exactly 90% - OK",
 			CacheRatio:       90.0,
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityOK,
 		},
 		{
 			Name:             "just below 90% - WARN",

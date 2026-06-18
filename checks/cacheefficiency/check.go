@@ -17,7 +17,7 @@ var querySQL string
 var readme string
 
 const (
-	cacheWarnThreshold = 95.0
+	cacheWarnThreshold = 90.0
 )
 
 type CacheEfficiencyQueries interface {
