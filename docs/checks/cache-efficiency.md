@@ -13,7 +13,6 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 **Formula**: `blocks_hit / (blocks_hit + blocks_read) * 100`
 
 **Thresholds**:
-- **FAIL**: < 90% cache hit ratio
 - **WARN**: < 95% cache hit ratio
 - **OK**: ≥ 95% cache hit ratio
 
@@ -39,7 +38,7 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 | > 99% | Excellent - working set fits in memory |
 | 95-99% | Good - most data cached, occasional disk reads |
 | 90-95% | Concerning - significant disk I/O |
-| < 90% | Critical - high disk I/O, performance degraded |
+| < 90% | Poor - high disk I/O, performance degraded |
 
 ## Statistics Requirements
 
