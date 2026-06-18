@@ -60,23 +60,23 @@ func Test_CacheEfficiency(t *testing.T) {
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "warning threshold (90-95%) - WARN",
+			Name: "mid band (90-95%) - OK",
 			Row: db.DatabaseCacheEfficiencyRow{
 				CacheHitRatio: makeNumeric(92.5),
 				BlksHit:       pgtype.Int8{Int64: 925000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 75000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityOK,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "critical threshold (<90%) - FAIL",
+			Name: "low ratio (<90%) - WARN",
 			Row: db.DatabaseCacheEfficiencyRow{
 				CacheHitRatio: makeNumeric(85.0),
 				BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityFail,
+			ExpectedSeverity: check.SeverityWarn,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -131,7 +131,7 @@ func Test_CacheEfficiency_DetailsContent(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	result := results[0]
-	require.Equal(t, check.SeverityFail, result.Severity)
+	require.Equal(t, check.SeverityWarn, result.Severity)
 
 	require.Contains(t, result.Details, "85.00%", "Details should contain cache ratio")
 	require.Contains(t, result.Details, "850000", "Details should contain blocks hit")
@@ -200,24 +200,24 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			Name:             "exactly 95% - OK",
+			Name:             "well above threshold - OK",
 			CacheRatio:       95.0,
 			ExpectedSeverity: check.SeverityOK,
 		},
 		{
-			Name:             "just below 95% - WARN",
-			CacheRatio:       94.9,
-			ExpectedSeverity: check.SeverityWarn,
+			Name:             "mid band now OK - OK",
+			CacheRatio:       92.5,
+			ExpectedSeverity: check.SeverityOK,
 		},
 		{
-			Name:             "exactly 90% - WARN",
+			Name:             "exactly 90% - OK",
 			CacheRatio:       90.0,
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityOK,
 		},
 		{
-			Name:             "just below 90% - FAIL",
+			Name:             "just below 90% - WARN",
 			CacheRatio:       89.9,
-			ExpectedSeverity: check.SeverityFail,
+			ExpectedSeverity: check.SeverityWarn,
 		},
 	}
 

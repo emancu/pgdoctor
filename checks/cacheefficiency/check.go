@@ -17,8 +17,7 @@ var querySQL string
 var readme string
 
 const (
-	cacheLowThreshold  = 90.0
-	cacheWarnThreshold = 95.0
+	cacheWarnThreshold = 90.0
 )
 
 type CacheEfficiencyQueries interface {
@@ -87,18 +86,13 @@ func checkCacheHitRatio(row db.DatabaseCacheEfficiencyRow, report *check.Report)
 		return
 	}
 
-	severity := check.SeverityWarn
-	if cacheRatio < cacheLowThreshold {
-		severity = check.SeverityFail
-	}
-
 	details := fmt.Sprintf("Cache hit ratio: %.2f%% (below threshold)\nBlocks hit: %d\nBlocks read from disk: %d",
 		cacheRatio, row.BlksHit.Int64, row.BlksRead.Int64)
 
 	report.AddFinding(check.Finding{
 		ID:       "cache-hit-ratio",
 		Name:     "Cache Hit Ratio",
-		Severity: severity,
+		Severity: check.SeverityWarn,
 		Details:  details,
 	})
 }
