@@ -16,7 +16,10 @@ import (
 
 // The golden files in internal/cli/testdata were captured from the original
 // internal/cli renderer before it was refactored away. These tests prove the
-// root-package renderers reproduce that output byte-for-byte.
+// root-package renderers reproduce that output byte-for-byte. Some goldens carry
+// trailing whitespace (table cell padding) and a trailing blank line — that is the
+// original output verbatim, so it stays; .gitattributes exempts these files from
+// git's whitespace checks.
 //
 // We cover the distinct rendering paths — each detail level, table truncation,
 // the skip line, hide-passing, colored output, and zero reports — rather than the

@@ -1,0 +1,4 @@
+# Golden files capture renderer output byte-for-byte, including trailing cell
+# padding in tables and the trailing blank line at end of output. Exempt them
+# from whitespace checks so `git diff --check` doesn't flag intentional bytes.
+internal/cli/testdata/*.golden -whitespace

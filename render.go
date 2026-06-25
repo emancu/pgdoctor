@@ -12,13 +12,16 @@ import (
 	"github.com/emancu/pgdoctor/check"
 )
 
-// Renderer streams check reports to an output as they complete and finalises
-// the output once every report has been delivered.
+// Renderer consumes check reports as they complete and finalises the output once
+// every report has been delivered.
 //
-// Report wires directly into Options.OnReport: it never errors, buffering any
-// write/encode failure internally. Flush emits any trailing output (summary,
-// closing array) and returns the first recorded error. Flush is safe to call
-// when zero reports were delivered.
+// Report wires directly into Options.OnReport: it never errors, recording any
+// write/encode failure internally. Whether a renderer writes incrementally or
+// buffers is up to the implementation — TextRenderer streams each report as it
+// arrives; JSONRenderer accumulates them and encodes the array on Flush (to match
+// the historical pretty-printed shape byte-for-byte). Flush emits any trailing or
+// buffered output and returns the first recorded error; it is safe to call when
+// zero reports were delivered.
 type Renderer interface {
 	Report(*check.Report)
 	Flush() error

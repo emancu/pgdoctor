@@ -135,11 +135,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				return &SilentError{ExitCode: 1}
 			}
 
-			if maxSeverity == check.SeverityFail {
-				return &SilentError{ExitCode: 1}
-			}
-
-			return nil
+			return runExitError(opts.output, maxSeverity)
 		},
 	}
 
@@ -151,6 +147,18 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
 
 	return cmd
+}
+
+// runExitError maps the run outcome to a process exit code. Text output exits
+// non-zero when any check fails; JSON output always exits zero after a successful
+// encode — JSON consumers read pass/fail from the document, and automation treats
+// process success as "valid JSON was produced". This preserves the pre-renderer
+// CLI behavior, where the two output paths had different exit semantics.
+func runExitError(output string, maxSeverity check.Severity) error {
+	if output != "json" && maxSeverity == check.SeverityFail {
+		return &SilentError{ExitCode: 1}
+	}
+	return nil
 }
 
 // textOptions maps the CLI's runOptions onto the library's TextOptions.

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Streaming renderers**: the root package now exports a `Renderer` interface (`Report(*check.Report)` + `Flush() error`) with two concrete implementations, `NewTextRenderer(w, TextOptions)` and `NewJSONRenderer(w)`. Renderers wire directly into `Options.OnReport` and stream each check as it completes (`Flush` emits the trailing summary / closing array). This lets external consumers reuse pgdoctor's exact text and JSON output instead of copying it. The CLI now renders through these renderers; its stdout is unchanged (locked byte-for-byte by golden tests across every detail level, `--hide-passing`, and color/`--no-color`).
+- **Reusable renderers**: the root package now exports a `Renderer` interface (`Report(*check.Report)` + `Flush() error`) with two concrete implementations, `NewTextRenderer(w, TextOptions)` and `NewJSONRenderer(w)`. Both wire into `Options.OnReport`; the text renderer streams each check as it completes, while the JSON renderer accumulates reports and encodes the array on `Flush` (preserving the historical pretty-printed shape byte-for-byte). This lets external consumers reuse pgdoctor's exact text and JSON output instead of copying it. The CLI now renders through these renderers; its stdout **and per-format exit codes are unchanged** — stdout locked byte-for-byte by golden tests (every detail level, `--hide-passing`, color/`--no-color`), and exit semantics preserved (text exits non-zero on failing checks; `--output json` always exits zero after a successful encode, so consumers read pass/fail from the document).
 
 ### Changed
 
