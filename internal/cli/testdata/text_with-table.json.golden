@@ -1,0 +1,121 @@
+[
+  {
+    "check_id": "table-bloat",
+    "name": "Table Bloat",
+    "category": "vacuum",
+    "severity": "fail",
+    "results": [
+      {
+        "id": "table-bloat",
+        "name": "Table Bloat",
+        "severity": "fail",
+        "details": "high bloat detected",
+        "table": {
+          "headers": [
+            "Table",
+            "Bloat",
+            "Wasted"
+          ],
+          "rows": [
+            {
+              "cells": [
+                "public.orders",
+                "45%",
+                "1.2GiB"
+              ],
+              "severity": "fail"
+            },
+            {
+              "cells": [
+                "public.users",
+                "12%",
+                "64MiB"
+              ],
+              "severity": "warn"
+            },
+            {
+              "cells": [
+                "public.line_items",
+                "3%",
+                "8MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.a",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.b",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.c",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.d",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.e",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.f",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.g",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.h",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            },
+            {
+              "cells": [
+                "public.i",
+                "1%",
+                "1MiB"
+              ],
+              "severity": "pass"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

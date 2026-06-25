@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Streaming renderers**: the root package now exports a `Renderer` interface (`Report(*check.Report)` + `Flush() error`) with two concrete implementations, `NewTextRenderer(w, TextOptions)` and `NewJSONRenderer(w)`. Renderers wire directly into `Options.OnReport` and stream each check as it completes (`Flush` emits the trailing summary / closing array). This lets external consumers reuse pgdoctor's exact text and JSON output instead of copying it. The CLI now renders through these renderers; its stdout is unchanged (locked byte-for-byte by golden tests across every detail level, `--hide-passing`, and color/`--no-color`).
+
 ### Changed
 
 - **`cache-efficiency`**: now a non-paging advisory — dropped the FAIL tier and lowered the OK threshold to ≥90% (WARN only below 90%). The 90-95% band is dominated by OS-page-cache reads that Postgres counts as `blks_read`, so it was near-constant noise on healthy OLTP instances; genuine memory pressure surfaces in read latency / IOPS, not the global hit ratio.

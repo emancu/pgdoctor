@@ -1,0 +1,25 @@
+Database Health Check: db.example.com/production
+
+VACUUM
+──────
+[FAIL] Table Bloat (table-bloat) [333ms]
+  high bloat detected
+
+  Table              Bloat  Wasted  
+  ─────────────────  ─────  ──────  
+  public.orders      45%    1.2GiB  
+  public.users       12%    64MiB   
+  public.line_items  3%     8MiB    
+  public.a           1%     1MiB    
+  public.b           1%     1MiB    
+  public.c           1%     1MiB    
+  public.d           1%     1MiB    
+  public.e           1%     1MiB    
+  public.f           1%     1MiB    
+  public.g           1%     1MiB    
+  public.h           1%     1MiB    
+  public.i           1%     1MiB    
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 failures (1 checks in 333ms)
+

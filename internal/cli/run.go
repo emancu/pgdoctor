@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strings"
 
+	"github.com/fatih/color"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 
@@ -112,67 +112,27 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				Checks: checks,
 			}
 
-			// JSON output: batch collect then render
-			if opts.output == "json" {
-				var reports []*check.Report
-				runOpts.OnReport = pgdoctor.Collect(&reports)
-				pgdoctor.Run(ctx, conn, runOpts)
+			w := cmd.OutOrStdout()
 
-				w := cmd.OutOrStdout()
-				if err := formatJSON(w, reports); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-					return &SilentError{ExitCode: 1}
-				}
-				return nil
+			var renderer pgdoctor.Renderer
+			if opts.output == "json" {
+				renderer = pgdoctor.NewJSONRenderer(w)
+			} else {
+				renderer = pgdoctor.NewTextRenderer(w, textOptions(opts, dsn))
 			}
 
-			// Text output: stream results with category headers
-			w := cmd.OutOrStdout()
-			dbLabel := parseDSNLabel(dsn)
-			fmt.Fprintf(w, "Database Health Check: %s\n\n", dbLabel)
-
-			var reports []*check.Report
-			var currentCategory string
 			maxSeverity := check.SeverityOK
-
 			runOpts.OnReport = func(r *check.Report) {
-				reports = append(reports, r)
 				if r.Severity > maxSeverity {
 					maxSeverity = r.Severity
 				}
-
-				// Print category header on transition
-				cat := string(r.Category)
-				if cat != currentCategory {
-					if currentCategory != "" {
-						fmt.Fprintln(w)
-					}
-					title := strings.ToUpper(cat)
-					fmt.Fprintln(w, title)
-					fmt.Fprintln(w, strings.Repeat("─", len(title)))
-					currentCategory = cat
-				}
-
-				if r.Severity == check.SeverityOK && opts.hidePassing {
-					return
-				}
-
-				if opts.detail == string(detailSummary) {
-					printCheckSummary(w, r, opts)
-				} else {
-					printCheckReport(w, r, opts)
-				}
+				renderer.Report(r)
 			}
 			pgdoctor.Run(ctx, conn, runOpts)
 
-			fmt.Fprintln(w)
-			printSummary(w, reports)
-
-			if opts.detail == string(detailSummary) || opts.detail == string(detailBrief) {
-				dimFunc := dimColor()
-				fmt.Fprintf(w, "%s\n", dimFunc("To see more: pgdoctor run ... --detail verbose"))
-				fmt.Fprintf(w, "%s\n", dimFunc("To see how to fix: pgdoctor explain <check-id>"))
-				fmt.Fprintln(w)
+			if err := renderer.Flush(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return &SilentError{ExitCode: 1}
 			}
 
 			if maxSeverity == check.SeverityFail {
@@ -191,6 +151,20 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
 
 	return cmd
+}
+
+// textOptions maps the CLI's runOptions onto the library's TextOptions.
+func textOptions(opts *runOptions, dsn string) pgdoctor.TextOptions {
+	return pgdoctor.TextOptions{
+		Title:       fmt.Sprintf("Database Health Check: %s", parseDSNLabel(dsn)),
+		Detail:      pgdoctor.Detail(opts.detail),
+		HidePassing: opts.hidePassing,
+		NoColor:     color.NoColor,
+		FooterHints: []string{
+			"To see more: pgdoctor run ... --detail verbose",
+			"To see how to fix: pgdoctor explain <check-id>",
+		},
+	}
 }
 
 func sortChecksByCategory(checks []check.Package) {

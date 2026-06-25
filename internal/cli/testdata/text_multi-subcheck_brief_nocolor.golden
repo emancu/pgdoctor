@@ -1,0 +1,18 @@
+Database Health Check: db.example.com/production
+
+CONFIGS
+───────
+[FAIL] Connection Efficiency (connection-efficiency)
+[PASS] Active Sessions (connection-efficiency/sessions-ok)
+[WARN] Idle Sessions (connection-efficiency/sessions-idle)
+  too many idle sessions
+  consider a pooler
+[FAIL] Fatal Sessions (connection-efficiency/sessions-fatal)
+  connection saturation imminent
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 failures (1 checks in 1.5s)
+
+To see more: pgdoctor run ... --detail verbose
+To see how to fix: pgdoctor explain <check-id>
+

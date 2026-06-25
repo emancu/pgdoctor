@@ -1,0 +1,28 @@
+Database Health Check: db.example.com/production
+
+VACUUM
+──────
+[FAIL] Table Bloat (table-bloat)
+  high bloat detected
+
+  Table              Bloat  Wasted  
+  ─────────────────  ─────  ──────  
+  public.orders      45%    1.2GiB  
+  public.users       12%    64MiB   
+  public.line_items  3%     8MiB    
+  public.a           1%     1MiB    
+  public.b           1%     1MiB    
+  public.c           1%     1MiB    
+  public.d           1%     1MiB    
+  public.e           1%     1MiB    
+  public.f           1%     1MiB    
+  public.g           1%     1MiB    
+
+  (showing 10 of 12 rows, use --detail verbose to see all)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 failures (1 checks in 333ms)
+
+To see more: pgdoctor run ... --detail verbose
+To see how to fix: pgdoctor explain <check-id>
+

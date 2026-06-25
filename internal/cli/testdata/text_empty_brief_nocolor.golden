@@ -1,0 +1,9 @@
+Database Health Check: db.example.com/production
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary:  (0 checks in 0ms)
+
+To see more: pgdoctor run ... --detail verbose
+To see how to fix: pgdoctor explain <check-id>
+

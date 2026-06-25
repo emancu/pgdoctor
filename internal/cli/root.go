@@ -1,3 +1,4 @@
+// Package cli implements the pgdoctor command-line interface.
 package cli
 
 import (

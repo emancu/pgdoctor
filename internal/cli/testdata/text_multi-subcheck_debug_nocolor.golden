@@ -1,0 +1,21 @@
+Database Health Check: db.example.com/production
+
+CONFIGS
+───────
+[FAIL] Connection Efficiency (connection-efficiency) [1.5s]
+[PASS] Active Sessions (connection-efficiency/sessions-ok)
+[WARN] Idle Sessions (connection-efficiency/sessions-idle)
+  too many idle sessions
+  consider a pooler
+
+  Debug:
+    SELECT count(*) FROM pg_stat_activity WHERE state = 'idle';
+[FAIL] Fatal Sessions (connection-efficiency/sessions-fatal)
+  connection saturation imminent
+
+  Query:
+    SELECT * FROM pg_stat_activity;
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 failures (1 checks in 1.5s)
+

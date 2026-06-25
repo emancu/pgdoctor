@@ -1,0 +1,20 @@
+Database Health Check: db.example.com/production
+
+CONFIGS
+───────
+[PASS] PostgreSQL Version (pg-version) (1/1)
+
+INDEXES
+───────
+[WARN] Invalid Indexes (invalid-indexes) (0/1)
+
+VACUUM
+──────
+[PASS] Table Bloat (table-bloat) (1/1)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 warnings, 2 passed (3 checks in 146ms)
+
+To see more: pgdoctor run ... --detail verbose
+To see how to fix: pgdoctor explain <check-id>
+

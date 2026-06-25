@@ -1,0 +1,27 @@
+[
+  {
+    "check_id": "connection-efficiency",
+    "name": "Connection Efficiency",
+    "category": "configs",
+    "severity": "fail",
+    "results": [
+      {
+        "id": "sessions-idle",
+        "name": "Idle Sessions",
+        "severity": "warn",
+        "details": "too many idle sessions\nconsider a pooler"
+      },
+      {
+        "id": "sessions-fatal",
+        "name": "Fatal Sessions",
+        "severity": "fail",
+        "details": "connection saturation imminent"
+      },
+      {
+        "id": "sessions-ok",
+        "name": "Active Sessions",
+        "severity": "pass"
+      }
+    ]
+  }
+]

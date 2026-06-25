@@ -1,0 +1,12 @@
+Database Health Check: db.example.com/production
+
+CONFIGS
+───────
+[SKIP] Replication Lag (replication-lag) — query cancelled by statement_timeout
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 skipped (1 checks in 2.0s)
+
+To see more: pgdoctor run ... --detail verbose
+To see how to fix: pgdoctor explain <check-id>
+
