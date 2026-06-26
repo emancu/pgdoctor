@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 
@@ -379,9 +380,9 @@ func (r *TextRenderer) printTable(table *check.Table, indentSpaces int) {
 
 func (r *TextRenderer) printSummary() {
 	okCount, warnCount, failCount, skipCount := 0, 0, 0, 0
-	var totalMs int64
+	var totalDuration time.Duration
 	for _, report := range r.reports {
-		totalMs += report.Duration.Milliseconds()
+		totalDuration += report.Duration // sum full durations, convert to ms once (sub-ms fidelity)
 		switch report.Severity {
 		case check.SeverityOK:
 			okCount++
@@ -412,7 +413,7 @@ func (r *TextRenderer) printSummary() {
 
 	dimFunc := r.palette.dim
 	r.printf("Summary: %s %s\n", strings.Join(summaryParts, ", "),
-		dimFunc(fmt.Sprintf("(%d checks in %s)", len(r.reports), check.FormatDurationMs(float64(totalMs)))))
+		dimFunc(fmt.Sprintf("(%d checks in %s)", len(r.reports), check.FormatDurationMs(float64(totalDuration.Milliseconds())))))
 	r.println()
 }
 
