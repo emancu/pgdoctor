@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`cache-efficiency`**: now a non-paging advisory — dropped the FAIL tier and lowered the OK threshold to ≥90% (WARN only below 90%). The 90-95% band is dominated by OS-page-cache reads that Postgres counts as `blks_read`, so it was near-constant noise on healthy OLTP instances; genuine memory pressure surfaces in read latency / IOPS, not the global hit ratio.
+- **`vacuum-settings`**: the WARN-level memory findings (`work_mem` risky/high-usage and the `maintenance_work_mem` total-budget) now emit a single-line `Details`; the multi-line RAM math moved to `Finding.Debug` (visible at `--detail debug`). The one-liners keep the "baseline worst-case ≈" hedging — `work_mem × max_connections` is simultaneously a floor (each sort/hash node can allocate `work_mem`) and a ceiling (poolers cap effective backends). FAIL variants keep their full blocks.
+- **`connection-efficiency`**: `sessions-abandoned` is capped at WARN (previously FAIL above 5%). The metric is a cumulative ratio of already-closed sessions, so it cannot exhaust `max_connections`; real-time exhaustion is `connection-health`'s job. Above 5% the message now reads as chronic client behavior. `sessions-fatal`/`sessions-killed` keep their FAIL tiers.
+- **table rows never outrank their finding**: enforced `TableRow.Severity ≤ Finding.Severity` across all checks — red rows under a yellow `[WARN]` header read as contradictory. Critical-tier rows in `table-bloat`, `table-vacuum-health`, `index-bloat`, `toast-storage`, and `uuid-types` are demoted to WARN (partition logic and thresholds unchanged); `replication-lag`'s `replication-state` instead derives its finding severity from the rows, matching its sibling subchecks (its `State` column already carries the tier). A reusable `internal/checktest.AssertSeverityInvariant` guards the invariant in tests.
 
 ## [0.3.0] - 2026-06-01
 
