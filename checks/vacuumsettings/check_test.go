@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/checks/vacuumsettings"
 	"github.com/emancu/pgdoctor/db"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,6 +34,16 @@ func hasResult(results []check.Finding, id string, severity check.Severity) bool
 		}
 	}
 	return false
+}
+
+// Helper to fetch a finding by ID and severity.
+func findResult(results []check.Finding, id string, severity check.Severity) (check.Finding, bool) {
+	for _, result := range results {
+		if result.ID == id && result.Severity == severity {
+			return result, true
+		}
+	}
+	return check.Finding{}, false
 }
 
 func vacuumRow(name, setting string) db.VacuumSettingsRow {
@@ -248,6 +259,88 @@ func Test_VacuumSettings_MultipleIssues(t *testing.T) {
 
 	// Should detect all 7 issues
 	require.Equal(t, len(results), 7, "Should detect all configuration issues")
+}
+
+func Test_VacuumSettings_WarnDetailsAreSingleLine(t *testing.T) {
+	t.Parallel()
+
+	// Each scenario triggers one WARN whose Details must be a single line and
+	// whose Debug carries the moved math breakdown (and per-node caveat for work_mem).
+	tests := []struct {
+		name        string
+		rows        []db.VacuumSettingsRow
+		id          string
+		wantDetails string
+		wantDebug   []string
+		wantCaveat  bool
+	}{
+		{
+			// work_mem 48MB × 100 = 4800MB = 58.6% of 8GB (>50%, <=80%).
+			name:        "risky work_mem",
+			rows:        overrideOptimalWith("work_mem", "49152"),
+			id:          "work_mem",
+			wantDetails: "work_mem 48MB × max_connections 100 ≈ 4800MB baseline worst-case",
+			wantDebug:   []string{"Worst-case RAM usage: 4800MB", "Current active connections: 10 using"},
+			wantCaveat:  true,
+		},
+		{
+			// work_mem 40MB × 100 = 4000MB = 48.8% (<=50%); 40MB × 90 = 3600MB = 43.9% (>40%).
+			name: "high current work_mem usage",
+			rows: mapToVacuumSettingsRows(map[string]string{
+				"autovacuum_analyze_scale_factor": "0.05",
+				"autovacuum_vacuum_scale_factor":  "0.1",
+				"autovacuum_max_workers":          "4",
+				"maintenance_work_mem":            "131072",
+				"vacuum_cost_delay":               "5",
+				"vacuum_cost_limit":               "300",
+				"work_mem":                        "40960", // 40MB
+				"max_connections":                 "100",
+				"active_connections":              "90",
+			}),
+			id:          "work_mem",
+			wantDetails: "work_mem 40MB × 90 active connections ≈ 3600MB in use",
+			wantDebug:   []string{"Current RAM usage: ~3600MB", "Worst-case with max connections (100): 4000MB"},
+			wantCaveat:  true,
+		},
+		{
+			// maintenance_work_mem 384MB × 4 = 1536MB = 18.75% of 8GB (>12.5%, <=25%).
+			name:        "high maintenance_work_mem total budget",
+			rows:        overrideOptimalWith("maintenance_work_mem", "393216"), // 384MB
+			id:          "maintenance_work_mem",
+			wantDetails: "maintenance_work_mem 384MB × autovacuum_max_workers 4 ≈ 1536MB total budget",
+			wantDebug:   []string{"Total autovacuum RAM budget: 1536MB", "Your config: 384MB × 4 workers = 1536MB"},
+			wantCaveat:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockVacuumSettingsQueries{rows: tt.rows}
+			checker := vacuumsettings.New(queryer)
+
+			ctx := check.ContextWithInstanceMetadata(context.Background(), mockMetadata())
+			report, err := checker.Check(ctx)
+			require.NoError(t, err)
+
+			finding, ok := findResult(report.Results, tt.id, check.SeverityWarn)
+			require.True(t, ok, "expected a WARN finding for %s", tt.id)
+
+			assert.NotContains(t, finding.Details, "\n", "WARN Details must be a single line")
+			assert.Contains(t, finding.Details, tt.wantDetails)
+
+			require.NotEmpty(t, finding.Debug, "WARN Debug must carry the math breakdown")
+			for _, want := range tt.wantDebug {
+				assert.Contains(t, finding.Debug, want)
+			}
+
+			if tt.wantCaveat {
+				assert.Contains(t, finding.Debug,
+					"Note: Each query operation (sort/hash) can use work_mem multiple times.")
+			}
+		})
+	}
 }
 
 func Test_VacuumSettings_DefaultsUsedOnParseError(t *testing.T) {

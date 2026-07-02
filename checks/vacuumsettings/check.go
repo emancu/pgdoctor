@@ -245,12 +245,12 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			Name:     "High maintenance_work_mem total budget",
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityWarn,
-			Details: fmt.Sprintf("maintenance_work_mem is %dMB on %s (%.0fGB RAM) with autovacuum_max_workers=%d\n\n"+
-				"Total autovacuum RAM budget: %dMB (%.1f%% of available RAM)\n\n"+
+			Details: fmt.Sprintf("maintenance_work_mem %dMB × autovacuum_max_workers %d ≈ %dMB total budget "+
+				"(%.0f%% of %.0fGB RAM); consider keeping under 12.5%% RAM (1/8 of total).",
+				maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB, budgetPercent, meta.MemoryGB),
+			Debug: fmt.Sprintf("Total autovacuum RAM budget: %dMB (%.1f%% of available RAM)\n"+
 				"Total RAM = maintenance_work_mem × autovacuum_max_workers\n"+
-				"Your config: %dMB × %d workers = %dMB\n\n"+
-				"While not critical, consider keeping total under 12.5%% RAM (1/8 of total).",
-				maintenanceMemMB, meta.InstanceClass, meta.MemoryGB, autovacuumMaxWorkers,
+				"Your config: %dMB × %d workers = %dMB",
 				totalBudgetMB, budgetPercent,
 				maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB),
 		})
@@ -364,11 +364,13 @@ func checkWorkMem(s dbVacuumSettings, report *check.Report, meta *check.Instance
 			Name:     "Risky work_mem configuration",
 			ID:       "work_mem",
 			Severity: check.SeverityWarn,
-			Details: fmt.Sprintf("work_mem is %dMB on %s (%.0fGB RAM) with max_connections=%d\n\n"+
-				"Worst-case RAM usage: %dMB (%.1f%% of available RAM)\n"+
-				"Current active connections: %d using ~%dMB (%.1f%%)\n\n"+
-				"While currently safe, connection spikes could cause memory pressure.",
-				workMemMB, meta.InstanceClass, meta.MemoryGB, maxConnections,
+			Details: fmt.Sprintf("work_mem %dMB × max_connections %d ≈ %dMB baseline worst-case "+
+				"(%.0f%% of %.0fGB RAM); connection spikes could pressure memory "+
+				"(pooler-capped conns and multi-node queries not modeled).",
+				workMemMB, maxConnections, worstCaseRAMMB, worstCasePercent, meta.MemoryGB),
+			Debug: fmt.Sprintf("Worst-case RAM usage: %dMB (%.1f%% of available RAM)\n"+
+				"Current active connections: %d using ~%dMB (%.1f%%)\n"+
+				"Note: Each query operation (sort/hash) can use work_mem multiple times.",
 				worstCaseRAMMB, worstCasePercent,
 				activeConnections, typicalRAMMB, typicalPercent),
 		})
@@ -380,11 +382,12 @@ func checkWorkMem(s dbVacuumSettings, report *check.Report, meta *check.Instance
 			Name:     "High current work_mem usage",
 			ID:       "work_mem",
 			Severity: check.SeverityWarn,
-			Details: fmt.Sprintf("work_mem is %dMB with %d active connections on %s (%.0fGB RAM)\n\n"+
-				"Current RAM usage: ~%dMB (%.1f%% of available RAM)\n"+
-				"Worst-case with max connections (%d): %dMB (%.1f%%)\n\n"+
-				"High memory usage from current connections. Monitor for memory pressure.",
-				workMemMB, activeConnections, meta.InstanceClass, meta.MemoryGB,
+			Details: fmt.Sprintf("work_mem %dMB × %d active connections ≈ %dMB in use "+
+				"(%.0f%% of %.0fGB RAM); monitor for memory pressure under load.",
+				workMemMB, activeConnections, typicalRAMMB, typicalPercent, meta.MemoryGB),
+			Debug: fmt.Sprintf("Current RAM usage: ~%dMB (%.1f%% of available RAM)\n"+
+				"Worst-case with max connections (%d): %dMB (%.1f%%)\n"+
+				"Note: Each query operation (sort/hash) can use work_mem multiple times.",
 				typicalRAMMB, typicalPercent,
 				maxConnections, worstCaseRAMMB, worstCasePercent),
 		})
