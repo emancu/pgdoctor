@@ -138,16 +138,19 @@ func checkSessionsAbandoned(stats db.SessionStatisticsRow, totalSessions int64, 
 		return
 	}
 
-	severity := check.SeverityWarn
+	// Abandoned sessions are a cumulative historical ratio of already-closed
+	// sessions; they cannot exhaust max_connections (that real-time failure
+	// mode belongs to connection-health), so this finding caps at WARN.
+	details := fmt.Sprintf("Elevated abandonment rate: %.1f%% (%d/%d sessions)", abandonedPercent, sessionsAbandoned, totalSessions)
 	if abandonedPercent > terminationFailPercent {
-		severity = check.SeverityFail
+		details = fmt.Sprintf("Chronic abandonment rate: %.1f%% (%d/%d sessions) points to client behavior, not an outage", abandonedPercent, sessionsAbandoned, totalSessions)
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "sessions-abandoned",
 		Name:     "Abandoned Sessions",
-		Severity: severity,
-		Details:  fmt.Sprintf("High abandonment rate: %.1f%% (%d/%d sessions)", abandonedPercent, sessionsAbandoned, totalSessions),
+		Severity: check.SeverityWarn,
+		Details:  details,
 	})
 }
 

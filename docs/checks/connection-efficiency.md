@@ -56,7 +56,12 @@ These real-time symptoms are detected by the `connection-health` check's `pool-p
 **Thresholds**:
 - `<=1%` - Normal (OK)
 - `>1%` - Elevated abandonment (WARN)
-- `>5%` - Critical abandonment rate (FAIL)
+- `>5%` - Chronic abandonment, likely client behavior (WARN)
+
+This finding caps at WARN by design. Abandonment is a cumulative historical
+ratio of already-closed sessions — it cannot exhaust `max_connections`. That
+real-time failure mode is the `connection-health` check's job, so a high
+abandonment rate never fails this check.
 
 **What it means**:
 - Client closed connection without sending termination message
@@ -66,7 +71,7 @@ These real-time symptoms are detected by the `connection-health` check's `pool-p
 **Example scenarios**:
 - 50 abandoned out of 10,000 sessions (0.5%) - Normal
 - 200 abandoned out of 10,000 sessions (2%) - Check network stability
-- 600 abandoned out of 10,000 sessions (6%) - Critical network issues
+- 7,680 abandoned out of 10,000 sessions (76.8%) - Chronic client behavior worth investigating, but not an outage
 
 ### sessions-fatal
 

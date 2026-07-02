@@ -240,10 +240,16 @@ func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "critical (6%)",
+			name:             "chronic abandonment caps at warn (6%)",
 			totalSessions:    1000,
 			abandoned:        60,
-			expectedSeverity: check.SeverityFail,
+			expectedSeverity: check.SeverityWarn,
+		},
+		{
+			name:             "extreme chronic abandonment caps at warn (76.8%)",
+			totalSessions:    1000,
+			abandoned:        768,
+			expectedSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -406,10 +412,19 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 			name: "one fail",
 			stats: func() db.SessionStatisticsRow {
 				s := healthyStats()
-				s.SessionsAbandoned = int64Val(60) // 6% = fail
+				s.SessionsFatal = int64Val(60) // 6% = fail
 				return s
 			}(),
 			expectedSeverity: check.SeverityFail,
+		},
+		{
+			name: "abandoned never escalates report past warn",
+			stats: func() db.SessionStatisticsRow {
+				s := healthyStats()
+				s.SessionsAbandoned = int64Val(768) // 76.8% chronic, caps at warn
+				return s
+			}(),
+			expectedSeverity: check.SeverityWarn,
 		},
 	}
 
