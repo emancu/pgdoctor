@@ -131,7 +131,7 @@ func checkExcessiveToastRatio(rows []db.ToastStorageRow, report *check.Report) {
 				check.FormatBytes(row.MainTableSize.Int64),
 				check.FormatBytes(row.TotalSize.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -195,7 +195,7 @@ func checkLargeToastTables(rows []db.ToastStorageRow, report *check.Report) {
 				fmt.Sprintf("%.1f%%", getToastPercent(row)),
 				formatWideColumns(row.WideColumns),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -275,7 +275,7 @@ func checkToastBloat(rows []db.ToastStorageRow, report *check.Report) {
 				check.FormatNumber(row.ToastDeadTuples.Int64),
 				check.FormatNumber(row.ToastLiveTuples.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 

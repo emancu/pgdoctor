@@ -72,7 +72,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 				row.ColumnType,
 				check.FormatBytes(row.TableSizeBytes),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 

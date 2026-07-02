@@ -29,19 +29,16 @@ type checker struct {
 
 const (
 	// Large table threshold.
-	largeTableMinRows = 1_000_000  // 1M rows
-	veryLargeTableMin = 10_000_000 // 10M rows
+	largeTableMinRows = 1_000_000 // 1M rows
 
-	// Stale vacuum thresholds.
-	staleVacuumWarnDays = 7  // Warning after 7 days without vacuum/analyze
-	staleVacuumFailDays = 25 // Error after 25 days without vacuum/analyze
+	// Stale vacuum threshold.
+	staleVacuumWarnDays = 7 // Warning after 7 days without vacuum/analyze
 
 	// Minimum rows for staleness checks (avoid noise from tiny tables).
 	staleCheckMinRows = 1000
 
-	// Analyze needed thresholds (modifications since last analyze).
+	// Analyze needed threshold (modifications since last analyze).
 	analyzeNeededWarn = 100_000 // Warning at 100K modifications
-	analyzeNeededFail = 500_000 // Fail at 500K modifications
 )
 
 func Metadata() check.Metadata {
@@ -127,11 +124,6 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 
 	var tableRows []check.TableRow
 	for _, row := range tablesUsingDefaults {
-		severity := check.SeverityWarn
-		if row.EstimatedRows.Int64 >= veryLargeTableMin {
-			severity = check.SeverityFail
-		}
-
 		// Pending work = dead tuples + inserts since vacuum (PG14+)
 		pendingWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
 
@@ -144,7 +136,7 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 				formatTimestamp(row.LastAutovacuum),
 				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
 			},
-			Severity: severity,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -163,7 +155,6 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 	now := time.Now()
 	warnThreshold := now.Add(-time.Duration(staleVacuumWarnDays) * 24 * time.Hour)
-	failThreshold := now.Add(-time.Duration(staleVacuumFailDays) * 24 * time.Hour)
 
 	var staleTables []db.TableVacuumHealthRow
 	for _, row := range rows {
@@ -196,17 +187,6 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 		lastVacuum := getTimestamp(row.LastVacuumAny)
 		lastAnalyze := getTimestamp(row.LastAnalyzeAny)
 
-		// Oldest activity determines severity.
-		oldestActivity := lastVacuum
-		if lastAnalyze.Before(oldestActivity) {
-			oldestActivity = lastAnalyze
-		}
-
-		severity := check.SeverityWarn
-		if oldestActivity.Before(failThreshold) {
-			severity = check.SeverityFail
-		}
-
 		// Pending work = dead tuples + inserts since vacuum (PG14+)
 		pendingWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
 
@@ -219,7 +199,7 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 				formatTimeSince(lastVacuum),
 				formatTimeSince(lastAnalyze),
 			},
-			Severity: severity,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -260,11 +240,6 @@ func checkAnalyzeNeeded(rows []db.TableVacuumHealthRow, report *check.Report) {
 
 	var tableRows []check.TableRow
 	for _, row := range needsAnalyze {
-		severity := check.SeverityWarn
-		if row.NModSinceAnalyze.Int64 >= analyzeNeededFail {
-			severity = check.SeverityFail
-		}
-
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.TableName.String,
@@ -273,7 +248,7 @@ func checkAnalyzeNeeded(rows []db.TableVacuumHealthRow, report *check.Report) {
 				fmt.Sprintf("%d", row.AutoanalyzeCount.Int64),
 				formatTimeSince(getTimestamp(row.LastAnalyzeAny)),
 			},
-			Severity: severity,
+			Severity: check.SeverityWarn,
 		})
 	}
 

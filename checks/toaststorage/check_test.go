@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/toaststorage"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -50,6 +51,25 @@ func makeToastRow(schema, table, toastTable string, mainSize, toastSize, totalSi
 		WideColumns:           []string{},
 		ColumnCompressionInfo: []string{},
 	}
+}
+
+func Test_ToastStorage_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// Ratio critical (>=80%) and size critical (>=100GB) in one row.
+	ratioAndSize := makeToastRow("public", "events", "pg_toast.pg_toast_1", 10*check.GiB, 120*check.GiB, 130*check.GiB, 92.31)
+
+	// Bloat critical: >50% dead tuples in the TOAST table.
+	bloated := makeToastRow("public", "logs", "pg_toast.pg_toast_2", 5*check.GiB, 20*check.GiB, 25*check.GiB, 80.0)
+	bloated.ToastLiveTuples = pgtype.Int8{Int64: 100, Valid: true}
+	bloated.ToastDeadTuples = pgtype.Int8{Int64: 900, Valid: true}
+
+	queryer := &mockQueryer{rows: []db.ToastStorageRow{ratioAndSize, bloated}}
+
+	report, err := toaststorage.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func Test_ToastStorage_NoIssues(t *testing.T) {
@@ -96,7 +116,8 @@ func Test_ToastStorage_ExcessiveRatio_FAIL(t *testing.T) {
 	require.NotNil(t, ratioFinding.Table)
 
 	require.Equal(t, 1, len(ratioFinding.Table.Rows))
-	require.Equal(t, check.SeverityFail, ratioFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	require.Equal(t, check.SeverityWarn, ratioFinding.Table.Rows[0].Severity)
 }
 
 func Test_ToastStorage_ExcessiveRatio_WARN(t *testing.T) {
@@ -153,7 +174,8 @@ func Test_ToastStorage_LargeToast_FAIL(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, largeFinding.Severity)
 	require.Contains(t, largeFinding.Details, "very large TOAST storage")
 	require.NotNil(t, largeFinding.Table)
-	require.Equal(t, check.SeverityFail, largeFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	require.Equal(t, check.SeverityWarn, largeFinding.Table.Rows[0].Severity)
 	require.Contains(t, largeFinding.Table.Rows[0].Cells[3], "content")
 }
 
@@ -209,7 +231,8 @@ func Test_ToastStorage_Bloat_FAIL(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, bloatFinding.Severity)
 	require.Contains(t, bloatFinding.Details, "excessive dead tuples")
 	require.NotNil(t, bloatFinding.Table)
-	require.Equal(t, check.SeverityFail, bloatFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	require.Equal(t, check.SeverityWarn, bloatFinding.Table.Rows[0].Severity)
 }
 
 func Test_ToastStorage_Bloat_WARN(t *testing.T) {

@@ -106,7 +106,7 @@ func checkHighBloatIndexes(rows []db.IndexBloatRow, report *check.Report) {
 				check.FormatBytes(row.BloatBytes.Int64),
 				check.FormatBytes(row.ActualBytes.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -181,7 +181,7 @@ func checkLargeBloatedIndexes(rows []db.IndexBloatRow, report *check.Report) {
 				fmt.Sprintf("%.1f%%", getBloatPercent(row)),
 				check.FormatBytes(row.ActualBytes.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 

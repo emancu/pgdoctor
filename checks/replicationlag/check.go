@@ -304,10 +304,14 @@ func checkReplicationState(rows []db.ReplicationLagRow, report *check.Report) {
 	}
 
 	var tableRows []check.TableRow
+	maxSeverity := check.SeverityOK
 	for _, row := range problematicRows {
 		severity := check.SeverityWarn
 		if row.State.String == "backup" || row.State.String == "stopping" {
 			severity = check.SeverityFail
+		}
+		if severity > maxSeverity {
+			maxSeverity = severity
 		}
 
 		tableRows = append(tableRows, check.TableRow{
@@ -324,7 +328,7 @@ func checkReplicationState(rows []db.ReplicationLagRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "replication-state",
 		Name:     "Replication State",
-		Severity: check.SeverityWarn,
+		Severity: maxSeverity,
 		Details:  fmt.Sprintf("%d of %d replication stream(s) are not in 'streaming' state", len(problematicRows), len(rows)),
 		Table: &check.Table{
 			Headers: []string{"Application", "Type", "State", "Slot"},

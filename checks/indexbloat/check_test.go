@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/indexbloat"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,22 @@ func makeIndexRow(tableName, indexName string, bloatPct float64, bloatBytes, act
 		BloatBytes:   pgtype.Int8{Int64: bloatBytes, Valid: true},
 		ActualBytes:  pgtype.Int8{Int64: actualBytes, Valid: true},
 	}
+}
+
+func TestIndexBloat_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// 80% bloat with 2GB wasted trips the critical tier of both subchecks.
+	queryer := &mockQueryer{
+		rows: []db.IndexBloatRow{
+			makeIndexRow("public.users", "users_email_idx", 80.0, 2*1024*1024*1024, 4*1024*1024*1024),
+		},
+	}
+
+	report, err := indexbloat.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestIndexBloat_AllHealthy(t *testing.T) {
@@ -171,18 +188,12 @@ func TestIndexBloat_MixedSeverity(t *testing.T) {
 	highBloatFinding := report.Results[0]
 	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
 	assert.NotNil(t, highBloatFinding.Table)
-	criticalCount := 0
-	warnCount := 0
+	// Both the >=70% and >=50% indexes are reported; no row may exceed the
+	// enclosing Warn finding, so both render as Warn.
+	assert.Len(t, highBloatFinding.Table.Rows, 2, "should report both high-bloat indexes")
 	for _, row := range highBloatFinding.Table.Rows {
-		switch row.Severity {
-		case check.SeverityFail:
-			criticalCount++
-		case check.SeverityWarn:
-			warnCount++
-		}
+		assert.Equal(t, check.SeverityWarn, row.Severity)
 	}
-	assert.Equal(t, 1, criticalCount, "should have 1 critical high-bloat index")
-	assert.Equal(t, 1, warnCount, "should have 1 warning high-bloat index")
 }
 
 func TestIndexBloat_BelowBloatThreshold(t *testing.T) {

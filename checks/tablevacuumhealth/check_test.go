@@ -9,6 +9,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/tablevacuumhealth"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,6 +111,31 @@ func (b *rowBuilder) withInsSinceVacuum(inserts int64) *rowBuilder {
 
 func (b *rowBuilder) build() db.TableVacuumHealthRow {
 	return b.row
+}
+
+func TestTableVacuumHealth_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// A very large (>10M rows) table on default settings, stale for 30 days, with
+	// >500K modifications since analyze — trips the critical tier of every subcheck.
+	staleTime := time.Now().Add(-30 * 24 * time.Hour)
+	queryer := &mockQueryer{
+		rows: []db.TableVacuumHealthRow{
+			makeRow("public.events").
+				withRows(50_000_000).
+				withSize(11 * 1024 * 1024 * 1024).
+				withDeadTuples(1_000_000).
+				withModSinceAnalyze(600_000).
+				withLastVacuumAny(staleTime).
+				withLastAnalyzeAny(staleTime).
+				build(),
+		},
+	}
+
+	report, err := tablevacuumhealth.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestTableVacuumHealth_AllHealthy(t *testing.T) {
@@ -352,7 +378,8 @@ func TestTableVacuumHealth_LargeTableDefaults_VeryLarge_Fail(t *testing.T) {
 
 	require.NotNil(t, largeFinding)
 	assert.Equal(t, check.SeverityWarn, largeFinding.Severity)
-	assert.Equal(t, check.SeverityFail, largeFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	assert.Equal(t, check.SeverityWarn, largeFinding.Table.Rows[0].Severity)
 }
 
 func TestTableVacuumHealth_LargeTableDefaults_PendingWorkIncludesInserts(t *testing.T) {
@@ -514,7 +541,8 @@ func TestTableVacuumHealth_VacuumStale_Fail(t *testing.T) {
 	require.NotNil(t, staleFinding)
 	assert.Equal(t, check.SeverityWarn, staleFinding.Severity)
 	assert.NotNil(t, staleFinding.Table)
-	assert.Equal(t, check.SeverityFail, staleFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	assert.Equal(t, check.SeverityWarn, staleFinding.Table.Rows[0].Severity)
 }
 
 func TestTableVacuumHealth_VacuumStale_NeverVacuumed(t *testing.T) {
@@ -698,7 +726,8 @@ func TestTableVacuumHealth_AnalyzeNeeded_Fail(t *testing.T) {
 	require.NotNil(t, analyzeFinding)
 	assert.Equal(t, check.SeverityWarn, analyzeFinding.Severity)
 	assert.NotNil(t, analyzeFinding.Table)
-	assert.Equal(t, check.SeverityFail, analyzeFinding.Table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	assert.Equal(t, check.SeverityWarn, analyzeFinding.Table.Rows[0].Severity)
 }
 
 func TestTableVacuumHealth_AnalyzeNeeded_SkipTinyTables(t *testing.T) {

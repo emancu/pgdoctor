@@ -27,9 +27,7 @@ These tables rely entirely on manual maintenance. Common legitimate uses:
 
 Identifies tables with more than 1 million rows using default autovacuum scale factors.
 
-**Severity:**
-- Warning: Tables with 1M-10M rows
-- Fail: Tables with >10M rows
+**Severity:** Warning (tables with more than 1M rows on default settings)
 
 The default `autovacuum_vacuum_scale_factor` is 0.2 (20%), meaning autovacuum triggers when dead tuples exceed 20% of the table size:
 
@@ -52,9 +50,7 @@ ALTER TABLE schema.large_table SET (
 
 Identifies tables that haven't been vacuumed or analyzed recently.
 
-**Severity:**
-- Warning: No vacuum/analyze in 7+ days
-- Fail: No vacuum/analyze in 25+ days
+**Severity:** Warning (no vacuum/analyze in 7+ days)
 
 Tables that go too long without maintenance may have:
 - Outdated statistics leading to poor query plans
@@ -65,9 +61,7 @@ Tables that go too long without maintenance may have:
 
 Identifies tables with many modifications since the last ANALYZE, indicating stale statistics.
 
-**Severity:**
-- Warning: 100,000+ modifications since last analyze
-- Fail: 500,000+ modifications since last analyze
+**Severity:** Warning (100,000+ modifications since last analyze)
 
 Stale statistics can cause:
 - Poor query plans (wrong join orders, missing index usage)

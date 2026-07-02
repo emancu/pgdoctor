@@ -9,6 +9,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/tablebloat"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,6 +53,23 @@ func makeTableRow(
 	}
 
 	return row
+}
+
+func TestTableBloat_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// A single table that trips every subcheck's critical tier: 45% dead tuples,
+	// never vacuumed with >50K dead tuples, and >10GB in size.
+	queryer := &mockQueryer{
+		rows: []db.TableBloatRow{
+			makeTableRow("public.big", 100000, 60000, 45.0, 11*1024*1024*1024, nil, nil, 0),
+		},
+	}
+
+	report, err := tablebloat.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestTableBloat_AllHealthy(t *testing.T) {

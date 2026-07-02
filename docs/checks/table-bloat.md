@@ -5,21 +5,21 @@ Monitors PostgreSQL tables for dead tuple accumulation indicating vacuum issues.
 ## What It Checks
 
 ### High Dead Tuples (`high-dead-tuples`)
-Identifies tables with high dead tuple percentages:
-- **FAIL**: Dead tuples > 40% of total
-- **WARN**: Dead tuples > 20% of total
+Identifies tables with high dead tuple percentages. The finding reports **WARN**; the higher-threshold tables are listed first:
+- Dead tuples > 40% of total (highest priority)
+- Dead tuples > 20% of total
 
 Dead tuples are rows marked for deletion but not yet reclaimed by vacuum.
 
 ### Stale Vacuum (`stale-vacuum`)
-Identifies tables not vacuumed recently despite accumulating dead tuples:
-- **FAIL**: Not vacuumed in >7 days with >50K dead tuples
-- **WARN**: Not vacuumed in >3 days with >100K dead tuples
+Identifies tables not vacuumed recently despite accumulating dead tuples. The finding reports **WARN**; the higher-threshold tables are listed first:
+- Not vacuumed in >7 days with >50K dead tuples (highest priority)
+- Not vacuumed in >3 days with >100K dead tuples
 
 ### Large Bloated Tables (`large-bloated-tables`)
-Identifies large tables where bloat wastes significant disk space:
-- **FAIL**: Tables >10GB with >20% dead tuples
-- **WARN**: Tables >1GB with >10% dead tuples
+Identifies large tables where bloat wastes significant disk space. The finding reports **WARN**; the higher-threshold tables are listed first:
+- Tables >10GB with >20% dead tuples (highest priority)
+- Tables >1GB with >10% dead tuples
 
 ## Why This Matters
 

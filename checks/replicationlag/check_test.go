@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/replicationlag"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,6 +131,26 @@ func walIssue(appName, walStatus string) db.ReplicationLagRow {
 		SlotName:            pgText(fmt.Sprintf("%s_slot", appName)),
 		WalStatus:           pgText(walStatus),
 	}
+}
+
+func TestCheck_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// Exercise every finding that can carry Fail rows, including the promoted
+	// replication-state finding (backup/stopping states).
+	queryer := &mockQueryer{
+		rows: []db.ReplicationLagRow{
+			nonStreamingState("standby1", "backup"),
+			laggingPhysical("standby2", 5.0),
+			laggingLogical("debezium1", 600, 3*1024*1024*1024, capUnlimited),
+			walIssue("debezium2", "lost"),
+		},
+	}
+
+	report, err := replicationlag.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestCheck_NoReplication(t *testing.T) {
@@ -469,7 +490,9 @@ func TestCheck_ReplicationState_BackupStopping(t *testing.T) {
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
-			assert.Equal(t, check.SeverityWarn, report.Severity)
+			// backup/stopping produce Fail rows; the finding severity is derived
+			// from the max row severity, so it promotes to Fail (matching siblings).
+			assert.Equal(t, check.SeverityFail, report.Severity)
 
 			var stateFinding *check.Finding
 			for i := range report.Results {
@@ -480,6 +503,9 @@ func TestCheck_ReplicationState_BackupStopping(t *testing.T) {
 			}
 
 			require.NotNil(t, stateFinding)
+			assert.Equal(t, check.SeverityFail, stateFinding.Severity)
+			require.NotNil(t, stateFinding.Table)
+			assert.Equal(t, check.SeverityFail, stateFinding.Table.Rows[0].Severity)
 			assert.Contains(t, stateFinding.Details, "not in 'streaming' state")
 		})
 	}

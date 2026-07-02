@@ -115,7 +115,7 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 				formatNumber(row.LiveTuples.Int64),
 				check.FormatBytes(row.TotalSizeBytes.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -198,7 +198,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 				formatNumber(row.DeadTuples.Int64),
 				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -268,7 +268,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 				fmt.Sprintf("%.1f%%", pct),
 				check.FormatBytes(wastedBytes),
 			},
-			Severity: check.SeverityFail,
+			Severity: check.SeverityWarn,
 		})
 	}
 

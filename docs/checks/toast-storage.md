@@ -85,9 +85,9 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ### toast-ratio
 
-Identifies tables where TOAST storage dominates total table size:
-- **FAIL**: TOAST >80% of total size (storage severely inefficient)
-- **WARN**: TOAST >50% of total size (storage inefficient)
+Identifies tables where TOAST storage dominates total table size. The finding reports **WARN**; the higher-threshold tables are listed first:
+- TOAST >80% of total size (storage severely inefficient, highest priority)
+- TOAST >50% of total size (storage inefficient)
 
 **Why critical**: When TOAST exceeds 50% of storage, it indicates:
 - Schema design issues (large values that shouldn't be in the database)
@@ -96,9 +96,9 @@ Identifies tables where TOAST storage dominates total table size:
 
 ### large-toast
 
-Identifies tables with absolute TOAST storage exceeding reasonable limits:
-- **FAIL**: TOAST >100GB (major storage and backup impact)
-- **WARN**: TOAST >10GB (significant storage cost)
+Identifies tables with absolute TOAST storage exceeding reasonable limits. The finding reports **WARN**; the higher-threshold tables are listed first:
+- TOAST >100GB (major storage and backup impact, highest priority)
+- TOAST >10GB (significant storage cost)
 
 **Why critical**: Large TOAST tables:
 - Increase cloud storage costs ($10-30 per 100GB/month)
@@ -107,9 +107,9 @@ Identifies tables with absolute TOAST storage exceeding reasonable limits:
 
 ### toast-bloat
 
-Identifies TOAST tables with excessive dead tuples:
-- **FAIL**: Dead tuples >50% (critical bloat, immediate action)
-- **WARN**: Dead tuples >30% (autovacuum not keeping up)
+Identifies TOAST tables with excessive dead tuples. The finding reports **WARN**; the higher-threshold tables are listed first:
+- Dead tuples >50% (severe bloat, highest priority)
+- Dead tuples >30% (autovacuum not keeping up)
 
 **Why critical**: TOAST table bloat occurs when:
 - Rows are updated/deleted but TOAST data isn't vacuumed

@@ -38,9 +38,9 @@ The check identifies columns with **high confidence** they store UUIDs:
 
 ## Validation Threshold
 
-- **FAIL**: Any column matching the pattern (all findings are actionable)
+- **WARN**: Any column matching the pattern (all findings are actionable)
 
-There are no warnings—if a column is named with "uuid" and uses a string type, it should be migrated.
+If a column is named with "uuid" and uses a string type, it should be migrated.
 
 ## Native UUID Benefits
 

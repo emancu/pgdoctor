@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/uuidtypes"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,6 +32,22 @@ func makeUUIDColumn(table, column, colType string, sizeBytes int64) db.UuidColum
 		ColumnType:     colType,
 		TableSizeBytes: sizeBytes,
 	}
+}
+
+func Test_UUIDTypes_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		rows: []db.UuidColumnsAsStringRow{
+			makeUUIDColumn("public.users", "user_uuid", "varchar", 1000000),
+			makeUUIDColumn("public.orders", "order_uuid", "text", 2000000),
+		},
+	}
+
+	report, err := uuidtypes.New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func Test_UUIDTypes_NoIssues(t *testing.T) {
@@ -158,13 +175,14 @@ func Test_UUIDTypes_TableFormatting(t *testing.T) {
 	require.Equal(t, "user_uuid", table.Rows[0].Cells[1])
 	require.Equal(t, "varchar", table.Rows[0].Cells[2])
 	require.NotEmpty(t, table.Rows[0].Cells[3])
-	require.Equal(t, check.SeverityFail, table.Rows[0].Severity)
+	// Row severity must never exceed the enclosing finding's Warn.
+	require.Equal(t, check.SeverityWarn, table.Rows[0].Severity)
 
 	require.Equal(t, "public.orders", table.Rows[1].Cells[0])
 	require.Equal(t, "order_uuid", table.Rows[1].Cells[1])
 	require.Equal(t, "text", table.Rows[1].Cells[2])
 	require.NotEmpty(t, table.Rows[1].Cells[3])
-	require.Equal(t, check.SeverityFail, table.Rows[1].Severity)
+	require.Equal(t, check.SeverityWarn, table.Rows[1].Severity)
 }
 
 func Test_UUIDTypes_DifferentColumnTypes(t *testing.T) {
