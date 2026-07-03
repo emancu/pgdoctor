@@ -9,7 +9,7 @@ Analyzes index usage patterns to identify unused and inefficient indexes that wa
 ### 1. Unused Indexes
 Indexes with zero scans that are larger than 10 MB. These indexes consume disk space and add overhead to INSERT/UPDATE/DELETE operations without providing query benefits.
 
-**Severity**: FAIL
+**Severity**: WARN
 
 **Excludes**:
 - Primary keys (required for constraints)
@@ -21,11 +21,9 @@ Indexes with fewer than 1,000 scans but more than 10,000 table writes. These ind
 **Severity**: WARN
 
 ### 3. Index Cache Efficiency
-Indexes with low buffer cache hit ratios, indicating frequent disk I/O:
-- FAIL: < 90% cache hit ratio on indexes > 100 MB
-- WARN: < 95% cache hit ratio on indexes > 10 MB
+Hot, large indexes with a low buffer cache hit ratio, indicating frequent disk I/O. Reported only when all hold: ≥ 1,000 scans, ≥ 100,000 blocks touched, size > 100 MB, and cache hit ratio < 90%. The gates keep this to hot-path indexes and suppress lifetime-ratio noise on barely-touched ones. No FAIL tier: the metric is confounded by the OS page cache and cumulative-since-stats-reset counters, and remediation (capacity or index-drop decisions) is owned elsewhere.
 
-**Severity**: WARN or FAIL
+**Severity**: WARN
 
 ## Statistics Requirements
 
@@ -99,4 +97,4 @@ SHOW shared_buffers;
 
 ## Query Details
 
-Queries `pg_stat_user_indexes`, `pg_statio_user_indexes`, `pg_stat_user_tables`, and `pg_stat_database` for comprehensive usage analysis.
+Queries `pg_stat_user_indexes`, `pg_statio_user_indexes`, and `pg_stat_user_tables` for comprehensive usage analysis.

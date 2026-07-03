@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -21,10 +20,14 @@ const (
 	unusedSizeThresholdMB  = 10
 	lowUsageScanThreshold  = 1000
 	lowUsageWriteThreshold = 10000
-	cacheLowThreshold      = 90.0
-	cacheWarnThreshold     = 95.0
-	cacheMinSizeMB         = 10
-	cacheFailSizeMB        = 100
+
+	// Cache-hit ratio is only judged on hot, large, well-exercised indexes: the
+	// metric is confounded by the OS page cache and cumulative-since-stats-reset
+	// counters, so cold or tiny indexes produce lifetime-ratio noise.
+	cacheHitThreshold  = 90.0
+	cacheMinScans      = 1000
+	cacheMinSizeMB     = 100
+	cacheMinBlockReads = 100000 // idx_blks_hit + idx_blks_read
 )
 
 type IndexUsageQueries interface {
@@ -80,27 +83,32 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
+func indexSizeMB(row db.IndexUsageStatsRow) float64 {
+	return float64(row.IndexSizeBytes.Int64) / (1024 * 1024)
+}
+
 func checkUnusedIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
-	var unusedIndexes []string
-	unusedCount := 0
+	var tableRows []check.TableRow
 
 	for _, row := range rows {
 		if row.IsPrimary || row.IsUnique {
 			continue
 		}
 
-		sizeBytes := row.IndexSizeBytes
-		sizeMB := float64(sizeBytes.Int64) / (1024 * 1024)
-
-		if row.IdxScan.Int64 == 0 && sizeMB > unusedSizeThresholdMB {
-			unusedCount++
-			if len(unusedIndexes) < 10 {
-				unusedIndexes = append(unusedIndexes, fmt.Sprintf("%s.%s (%.1f MB)", row.TableName.String, row.IndexName.String, sizeMB))
-			}
+		if row.IdxScan.Int64 == 0 && indexSizeMB(row) > unusedSizeThresholdMB {
+			tableRows = append(tableRows, check.TableRow{
+				Cells: []string{
+					row.IndexName.String,
+					row.TableName.String,
+					check.FormatBytes(row.IndexSizeBytes.Int64),
+					row.Indexdef.String,
+				},
+				Severity: check.SeverityWarn,
+			})
 		}
 	}
 
-	if unusedCount == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "unused-indexes",
 			Name:     "Unused Indexes",
@@ -109,26 +117,20 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
 		return
 	}
 
-	details := fmt.Sprintf("Found %d unused indexes (0 scans, size > %d MB):\n%s",
-		unusedCount,
-		unusedSizeThresholdMB,
-		strings.Join(unusedIndexes, "\n"),
-	)
-	if unusedCount > len(unusedIndexes) {
-		details += fmt.Sprintf("\n... and %d more", unusedCount-len(unusedIndexes))
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "unused-indexes",
 		Name:     "Unused Indexes",
 		Severity: check.SeverityWarn,
-		Details:  details,
+		Details:  fmt.Sprintf("Found %d unused indexes (0 scans, size > %d MB)", len(tableRows), unusedSizeThresholdMB),
+		Table: &check.Table{
+			Headers: []string{"Index", "Table", "Size", "Definition"},
+			Rows:    tableRows,
+		},
 	})
 }
 
 func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
-	var lowUsageIndexes []string
-	lowUsageCount := 0
+	var tableRows []check.TableRow
 
 	for _, row := range rows {
 		if row.IsPrimary || row.IsUnique {
@@ -136,15 +138,20 @@ func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
 		}
 
 		if row.IdxScan.Int64 > 0 && row.IdxScan.Int64 < lowUsageScanThreshold && row.TableWrites.Int64 > lowUsageWriteThreshold {
-			lowUsageCount++
-			if len(lowUsageIndexes) < 10 {
-				lowUsageIndexes = append(lowUsageIndexes, fmt.Sprintf("%s.%s (scans: %d, writes: %d)",
-					row.TableName.String, row.IndexName.String, row.IdxScan.Int64, row.TableWrites.Int64))
-			}
+			tableRows = append(tableRows, check.TableRow{
+				Cells: []string{
+					row.IndexName.String,
+					row.TableName.String,
+					check.FormatBytes(row.IndexSizeBytes.Int64),
+					check.FormatNumber(row.IdxScan.Int64),
+					check.FormatNumber(row.TableWrites.Int64),
+				},
+				Severity: check.SeverityWarn,
+			})
 		}
 	}
 
-	if lowUsageCount == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "low-usage-indexes",
 			Name:     "Low Usage Indexes",
@@ -153,53 +160,48 @@ func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
 		return
 	}
 
-	details := fmt.Sprintf("Found %d indexes with low read usage but high write cost:\n%s",
-		lowUsageCount,
-		strings.Join(lowUsageIndexes, "\n"),
-	)
-	if lowUsageCount > len(lowUsageIndexes) {
-		details += fmt.Sprintf("\n... and %d more", lowUsageCount-len(lowUsageIndexes))
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "low-usage-indexes",
 		Name:     "Low Usage Indexes",
 		Severity: check.SeverityWarn,
-		Details:  details,
+		Details:  fmt.Sprintf("Found %d indexes with low read usage but high write cost", len(tableRows)),
+		Table: &check.Table{
+			Headers: []string{"Index", "Table", "Size", "Scans", "Table Writes"},
+			Rows:    tableRows,
+		},
 	})
 }
 
 func checkIndexCacheRatio(rows []db.IndexUsageStatsRow, report *check.Report) {
-	var lowCacheIndexes []string
-	failCount := 0
-	warnCount := 0
+	var tableRows []check.TableRow
 
 	for _, row := range rows {
 		if !row.CacheHitRatio.Valid {
 			continue
 		}
 
-		cacheRatio, _ := row.CacheHitRatio.Float64Value()
-		sizeBytes := row.IndexSizeBytes
-		sizeMB := float64(sizeBytes.Int64) / (1024 * 1024)
+		cacheRatio := check.NumericToFloat64(row.CacheHitRatio)
+		blocksTouched := row.IdxBlksHit.Int64 + row.IdxBlksRead.Int64
 
-		if cacheRatio.Float64 < cacheLowThreshold && sizeMB > cacheFailSizeMB {
-			failCount++
-			if len(lowCacheIndexes) < 10 {
-				lowCacheIndexes = append(lowCacheIndexes, fmt.Sprintf("%s.%s (%.1f%%, %.1f MB)",
-					row.TableName.String, row.IndexName.String, cacheRatio.Float64, sizeMB))
-			}
-		} else if cacheRatio.Float64 < cacheWarnThreshold && sizeMB > cacheMinSizeMB {
-			warnCount++
-			if len(lowCacheIndexes) < 10 {
-				lowCacheIndexes = append(lowCacheIndexes, fmt.Sprintf("%s.%s (%.1f%%, %.1f MB)",
-					row.TableName.String, row.IndexName.String, cacheRatio.Float64, sizeMB))
-			}
+		if row.IdxScan.Int64 >= cacheMinScans &&
+			blocksTouched >= cacheMinBlockReads &&
+			indexSizeMB(row) > cacheMinSizeMB &&
+			cacheRatio < cacheHitThreshold {
+			tableRows = append(tableRows, check.TableRow{
+				Cells: []string{
+					row.IndexName.String,
+					row.TableName.String,
+					check.FormatBytes(row.IndexSizeBytes.Int64),
+					check.FormatNumber(row.IdxScan.Int64),
+					fmt.Sprintf("%.2f", cacheRatio),
+					check.FormatNumber(row.IdxBlksRead.Int64),
+				},
+				Severity: check.SeverityWarn,
+			})
 		}
 	}
 
-	totalIssues := failCount + warnCount
-	if totalIssues == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "index-cache-ratio",
 			Name:     "Index Cache Efficiency",
@@ -208,18 +210,14 @@ func checkIndexCacheRatio(rows []db.IndexUsageStatsRow, report *check.Report) {
 		return
 	}
 
-	details := fmt.Sprintf("Found %d indexes with low cache hit ratios:\n%s",
-		totalIssues,
-		strings.Join(lowCacheIndexes, "\n"),
-	)
-	if totalIssues > len(lowCacheIndexes) {
-		details += fmt.Sprintf("\n... and %d more", totalIssues-len(lowCacheIndexes))
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "index-cache-ratio",
 		Name:     "Index Cache Efficiency",
 		Severity: check.SeverityWarn,
-		Details:  details,
+		Details:  fmt.Sprintf("Found %d hot, large indexes with cache hit ratio < %.0f%%", len(tableRows), cacheHitThreshold),
+		Table: &check.Table{
+			Headers: []string{"Index", "Table", "Size", "Scans", "Cache Hit %", "Blocks Read"},
+			Rows:    tableRows,
+		},
 	})
 }
