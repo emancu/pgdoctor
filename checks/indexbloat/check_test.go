@@ -39,7 +39,7 @@ func makeIndexRow(tableName, indexName string, bloatPct float64, bloatBytes, act
 func TestIndexBloat_SeverityInvariant(t *testing.T) {
 	t.Parallel()
 
-	// 80% bloat with 2GB wasted trips the critical tier of both subchecks.
+	// 80% bloat on a 4GB index qualifies high-bloat and trips large-bloat.
 	queryer := &mockQueryer{
 		rows: []db.IndexBloatRow{
 			makeIndexRow("public.users", "users_email_idx", 80.0, 2*1024*1024*1024, 4*1024*1024*1024),
@@ -74,12 +74,13 @@ func TestIndexBloat_AllHealthy(t *testing.T) {
 	assert.Equal(t, check.SeverityOK, report.Results[1].Severity)
 }
 
-func TestIndexBloat_HighPercentageWarning(t *testing.T) {
+func TestIndexBloat_HighBloatQualifies(t *testing.T) {
 	t.Parallel()
 
+	const oneGB = 1024 * 1024 * 1024
 	queryer := &mockQueryer{
 		rows: []db.IndexBloatRow{
-			makeIndexRow("public.users", "users_email_idx", 55.0, 50*1024*1024, 100*1024*1024),
+			makeIndexRow("public.users", "users_email_idx", 55.0, oneGB, 3*oneGB),
 		},
 	}
 
@@ -98,12 +99,13 @@ func TestIndexBloat_HighPercentageWarning(t *testing.T) {
 	assert.Len(t, highBloatFinding.Table.Rows, 1)
 }
 
-func TestIndexBloat_HighPercentageCritical(t *testing.T) {
+func TestIndexBloat_HighBloatBelowSizeThreshold(t *testing.T) {
 	t.Parallel()
 
+	// High bloat percentage but a small index: not actionable for high-bloat.
 	queryer := &mockQueryer{
 		rows: []db.IndexBloatRow{
-			makeIndexRow("public.users", "users_email_idx", 75.0, 750*1024*1024, 1000*1024*1024),
+			makeIndexRow("public.users", "users_email_idx", 75.0, 50*1024*1024, 200*1024*1024),
 		},
 	}
 
@@ -111,12 +113,11 @@ func TestIndexBloat_HighPercentageCritical(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	highBloatFinding := report.Results[0]
 	assert.Equal(t, "high-bloat", highBloatFinding.ID)
-	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
-	assert.Contains(t, highBloatFinding.Details, "1 index(es)")
+	assert.Equal(t, check.SeverityOK, highBloatFinding.Severity)
+	assert.Nil(t, highBloatFinding.Table)
 }
 
 func TestIndexBloat_LargeAbsoluteWarning(t *testing.T) {
@@ -161,20 +162,20 @@ func TestIndexBloat_LargeAbsoluteCritical(t *testing.T) {
 	assert.Equal(t, check.SeverityWarn, largeBloatFinding.Severity)
 }
 
-func TestIndexBloat_MixedSeverity(t *testing.T) {
+func TestIndexBloat_QualifyingOrderedBeforeTail(t *testing.T) {
 	t.Parallel()
 
 	const oneGB = 1024 * 1024 * 1024
 	queryer := &mockQueryer{
 		rows: []db.IndexBloatRow{
-			// High percentage, critical
-			makeIndexRow("public.users", "users_email_idx", 80.0, 800*1024*1024, 1000*1024*1024),
-			// High percentage, warning
-			makeIndexRow("public.orders", "orders_status_idx", 60.0, 50*1024*1024, 83*1024*1024),
-			// Large absolute, critical
-			makeIndexRow("public.events", "events_idx", 45.0, 2*oneGB, 4*oneGB+500*1024*1024),
-			// Low bloat, should be ignored
+			// Tail: high percentage but a small index.
+			makeIndexRow("public.orders", "orders_status_idx", 65.0, 50*1024*1024, 200*1024*1024),
+			// Qualifying: >50% and >1GB.
+			makeIndexRow("public.users", "users_email_idx", 80.0, 2*oneGB, 3*oneGB),
+			// Tail: low bloat.
 			makeIndexRow("public.products", "products_pkey", 10.0, 10*1024*1024, 100*1024*1024),
+			// Qualifying: >50% and >1GB, lower bloat than users_email_idx.
+			makeIndexRow("public.events", "events_idx", 60.0, oneGB, 4*oneGB),
 		},
 	}
 
@@ -184,13 +185,18 @@ func TestIndexBloat_MixedSeverity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	// Check high-bloat finding
 	highBloatFinding := report.Results[0]
 	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
-	assert.NotNil(t, highBloatFinding.Table)
-	// Both the >=70% and >=50% indexes are reported; no row may exceed the
-	// enclosing Warn finding, so both render as Warn.
-	assert.Len(t, highBloatFinding.Table.Rows, 2, "should report both high-bloat indexes")
+	assert.Contains(t, highBloatFinding.Details, "2 index(es)")
+	require.NotNil(t, highBloatFinding.Table)
+
+	// All bloated indexes appear; qualifying ones come first (worst-first),
+	// then the below-threshold tail. Every row renders as Warn.
+	require.Len(t, highBloatFinding.Table.Rows, 4)
+	assert.Equal(t, "users_email_idx", highBloatFinding.Table.Rows[0].Cells[1])
+	assert.Equal(t, "events_idx", highBloatFinding.Table.Rows[1].Cells[1])
+	assert.Equal(t, "orders_status_idx", highBloatFinding.Table.Rows[2].Cells[1])
+	assert.Equal(t, "products_pkey", highBloatFinding.Table.Rows[3].Cells[1])
 	for _, row := range highBloatFinding.Table.Rows {
 		assert.Equal(t, check.SeverityWarn, row.Severity)
 	}
@@ -230,16 +236,22 @@ func TestIndexBloat_EdgeCases_ExactThresholds(t *testing.T) {
 		expectedLargeBloatSeverity check.Severity
 	}{
 		{
-			name:                       "exactly 50% bloat - warning threshold",
+			name:                       "exactly 50% bloat - below high-bloat threshold",
 			row:                        makeIndexRow("public.t1", "idx1", 50.0, 500*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityWarn,
+			expectedHighBloatSeverity:  check.SeverityOK,   // not > 50%
 			expectedLargeBloatSeverity: check.SeverityWarn, // 500MB >= 100MB and 50% >= 30%
 		},
 		{
-			name:                       "exactly 70% bloat - critical threshold",
+			name:                       "70% bloat but index < 1GB - below high-bloat threshold",
 			row:                        makeIndexRow("public.t2", "idx2", 70.0, 700*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityWarn,
+			expectedHighBloatSeverity:  check.SeverityOK,   // index size not > 1GB
 			expectedLargeBloatSeverity: check.SeverityWarn, // 700MB < 1GB, so warning
+		},
+		{
+			name:                       "60% bloat on a 2GB index - qualifies high-bloat",
+			row:                        makeIndexRow("public.t6", "idx6", 60.0, oneGB, 2*oneGB),
+			expectedHighBloatSeverity:  check.SeverityWarn,
+			expectedLargeBloatSeverity: check.SeverityWarn, // 1GB >= 1GB and 60% >= 30%
 		},
 		{
 			name:                       "exactly 100MB bloat - warning threshold",

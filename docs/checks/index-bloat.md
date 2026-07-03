@@ -5,9 +5,7 @@ Estimates B-tree index bloat using page layout math to identify indexes needing 
 ## What It Checks
 
 ### High Bloat Percentage (`high-bloat`)
-Identifies indexes with high bloat percentage. The finding reports **WARN**; the higher-threshold indexes are listed first:
-- Bloat > 70% (highest priority)
-- Bloat > 50%
+Flags indexes with **bloat > 50% and size > 1 GB** as WARN, listed worst-first.
 
 ### Large Bloated Indexes (`large-bloat`)
 Identifies indexes wasting significant disk space. The finding reports **WARN**; the higher-threshold indexes are listed first:

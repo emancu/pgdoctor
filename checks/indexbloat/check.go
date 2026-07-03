@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -70,47 +71,47 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-// checkHighBloatIndexes identifies indexes with high bloat percentage.
+// checkHighBloatIndexes flags indexes whose bloat exceeds 50% and whose size
+// exceeds 1GB. Qualifying indexes are listed first (worst-first), followed by
+// the remaining bloated-but-below-threshold indexes so brief output (capped at
+// 10 rows) surfaces the actionable ones while verbose reveals the tail.
 func checkHighBloatIndexes(rows []db.IndexBloatRow, report *check.Report) {
-	var critical []db.IndexBloatRow // >70%
-	var warning []db.IndexBloatRow  // >50%
+	const oneGB = int64(1024 * 1024 * 1024)
 
+	qualifies := func(row db.IndexBloatRow) bool {
+		return getBloatPercent(row) > 50 && row.ActualBytes.Int64 > oneGB
+	}
+
+	qualifying := 0
 	for _, row := range rows {
-		pct := getBloatPercent(row)
-		if pct >= 70 {
-			critical = append(critical, row)
-		} else if pct >= 50 {
-			warning = append(warning, row)
+		if qualifies(row) {
+			qualifying++
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if qualifying == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "high-bloat",
 			Name:     "Index Bloat Percentage",
 			Severity: check.SeverityOK,
-			Details:  "No indexes with excessive bloat (>50%) detected",
+			Details:  "No indexes with excessive bloat (>50% and >1GB) detected",
 		})
 		return
 	}
 
+	ordered := make([]db.IndexBloatRow, len(rows))
+	copy(ordered, rows)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		qi, qj := qualifies(ordered[i]), qualifies(ordered[j])
+		if qi != qj {
+			return qi
+		}
+		return getBloatPercent(ordered[i]) > getBloatPercent(ordered[j])
+	})
+
 	headers := []string{"Table", "Index", "Bloat %", "Bloat Size", "Actual Size"}
-	var tableRows []check.TableRow
-
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.Tablename.String,
-				row.Indexname.String,
-				fmt.Sprintf("%.1f%%", getBloatPercent(row)),
-				check.FormatBytes(row.BloatBytes.Int64),
-				check.FormatBytes(row.ActualBytes.Int64),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	for _, row := range warning {
+	tableRows := make([]check.TableRow, 0, len(ordered))
+	for _, row := range ordered {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.Tablename.String,
@@ -127,7 +128,7 @@ func checkHighBloatIndexes(rows []db.IndexBloatRow, report *check.Report) {
 		ID:       "high-bloat",
 		Name:     "Index Bloat Percentage",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d index(es) with high bloat (>50%%)", len(critical)+len(warning)),
+		Details:  fmt.Sprintf("Found %d index(es) with high bloat (>50%% and >1GB)", qualifying),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
