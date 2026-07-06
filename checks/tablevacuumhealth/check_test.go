@@ -18,7 +18,6 @@ import (
 const (
 	findingIDAutovacuumDisabled = "autovacuum-disabled"
 	findingIDLargeTableDefaults = "large-table-defaults"
-	findingIDVacuumStale        = "vacuum-stale"
 	findingIDAnalyzeNeeded      = "analyze-needed"
 )
 
@@ -104,11 +103,6 @@ func (b *rowBuilder) withAnalyzeCount(count int64) *rowBuilder {
 	return b
 }
 
-func (b *rowBuilder) withInsSinceVacuum(inserts int64) *rowBuilder {
-	b.row.NInsSinceVacuum = pgtype.Int8{Int64: inserts, Valid: true}
-	return b
-}
-
 func (b *rowBuilder) build() db.TableVacuumHealthRow {
 	return b.row
 }
@@ -159,7 +153,7 @@ func TestTableVacuumHealth_AllHealthy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityOK, report.Severity)
-	assert.Len(t, report.Results, 4) // 4 subchecks now
+	assert.Len(t, report.Results, 3) // autovacuum-disabled, large-table-defaults, analyze-needed
 
 	for _, finding := range report.Results {
 		assert.Equal(t, check.SeverityOK, finding.Severity)
@@ -340,12 +334,13 @@ func TestTableVacuumHealth_LargeTableDefaults_UsingDefaults_Warning(t *testing.T
 
 	require.NotNil(t, largeFinding)
 	assert.Equal(t, check.SeverityWarn, largeFinding.Severity)
-	assert.Contains(t, largeFinding.Details, "1 large table(s)")
-	assert.NotNil(t, largeFinding.Table)
-	assert.Equal(t, check.SeverityWarn, largeFinding.Table.Rows[0].Severity)
+	assert.Contains(t, largeFinding.Details, "1 table(s)")
+	assert.Contains(t, largeFinding.Details, "autovacuum_vacuum_scale_factor")
+	// Consolidated finding emits a summary only; per-table rows moved to table-bloat/stale-vacuum.
+	assert.Nil(t, largeFinding.Table)
 }
 
-func TestTableVacuumHealth_LargeTableDefaults_VeryLarge_Fail(t *testing.T) {
+func TestTableVacuumHealth_LargeTableDefaults_VeryLarge_NoTable(t *testing.T) {
 	t.Parallel()
 
 	recentTime := time.Now().Add(-1 * time.Hour)
@@ -378,243 +373,9 @@ func TestTableVacuumHealth_LargeTableDefaults_VeryLarge_Fail(t *testing.T) {
 
 	require.NotNil(t, largeFinding)
 	assert.Equal(t, check.SeverityWarn, largeFinding.Severity)
-	// Row severity must never exceed the enclosing finding's Warn.
-	assert.Equal(t, check.SeverityWarn, largeFinding.Table.Rows[0].Severity)
-}
-
-func TestTableVacuumHealth_LargeTableDefaults_PendingWorkIncludesInserts(t *testing.T) {
-	t.Parallel()
-
-	recentTime := time.Now().Add(-1 * time.Hour)
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.events").
-				withRows(2_000_000).
-				withSize(1024 * 1024 * 1024).
-				withDeadTuples(10_000).
-				withInsSinceVacuum(50_000). // PG14+ inserts
-				withVacuumCount(100).
-				withLastAutovacuum(recentTime).
-				withLastVacuumAny(recentTime).
-				withLastAnalyzeAny(recentTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var largeFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDLargeTableDefaults {
-			largeFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, largeFinding)
-	assert.NotNil(t, largeFinding.Table)
-	// Pending Work column should show 60K (10K dead + 50K inserts)
-	assert.Equal(t, "60.0K", largeFinding.Table.Rows[0].Cells[3])
-}
-
-func TestTableVacuumHealth_VacuumStale_AllFresh(t *testing.T) {
-	t.Parallel()
-
-	recentTime := time.Now().Add(-1 * time.Hour)
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.users").
-				withRows(10000).
-				withSize(1024 * 1024).
-				withDeadTuples(100).
-				withLastVacuumAny(recentTime).
-				withLastAnalyzeAny(recentTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var staleFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDVacuumStale {
-			staleFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityOK, staleFinding.Severity)
-	assert.Contains(t, staleFinding.Details, "within the last 7 days")
-}
-
-func TestTableVacuumHealth_VacuumStale_Warning(t *testing.T) {
-	t.Parallel()
-
-	staleTime := time.Now().Add(-10 * 24 * time.Hour) // 10 days ago
-	recentTime := time.Now().Add(-1 * time.Hour)
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.old_table").
-				withRows(50000).
-				withSize(1024 * 1024 * 10).
-				withDeadTuples(5000).
-				withLastVacuumAny(staleTime).
-				withLastAnalyzeAny(staleTime).
-				build(),
-			makeRow("public.fresh_table").
-				withRows(10000).
-				withSize(1024 * 1024).
-				withDeadTuples(100).
-				withLastVacuumAny(recentTime).
-				withLastAnalyzeAny(recentTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	var staleFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDVacuumStale {
-			staleFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityWarn, staleFinding.Severity)
-	assert.Contains(t, staleFinding.Details, "1 table(s)")
-	assert.NotNil(t, staleFinding.Table)
-	assert.Len(t, staleFinding.Table.Rows, 1)
-	assert.Equal(t, check.SeverityWarn, staleFinding.Table.Rows[0].Severity)
-}
-
-func TestTableVacuumHealth_VacuumStale_Fail(t *testing.T) {
-	t.Parallel()
-
-	veryStaleTime := time.Now().Add(-30 * 24 * time.Hour) // 30 days ago
-	recentTime := time.Now().Add(-1 * time.Hour)
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.forgotten_table").
-				withRows(100000).
-				withSize(1024 * 1024 * 100).
-				withDeadTuples(50000).
-				withLastVacuumAny(veryStaleTime).
-				withLastAnalyzeAny(veryStaleTime).
-				build(),
-			makeRow("public.fresh_table").
-				withRows(10000).
-				withSize(1024 * 1024).
-				withDeadTuples(100).
-				withLastVacuumAny(recentTime).
-				withLastAnalyzeAny(recentTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	var staleFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDVacuumStale {
-			staleFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityWarn, staleFinding.Severity)
-	assert.NotNil(t, staleFinding.Table)
-	// Row severity must never exceed the enclosing finding's Warn.
-	assert.Equal(t, check.SeverityWarn, staleFinding.Table.Rows[0].Severity)
-}
-
-func TestTableVacuumHealth_VacuumStale_NeverVacuumed(t *testing.T) {
-	t.Parallel()
-
-	recentTime := time.Now().Add(-1 * time.Hour)
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.never_vacuumed").
-				withRows(100000).
-				withSize(1024 * 1024 * 100).
-				withDeadTuples(50000).
-				build(), // No vacuum times set
-			makeRow("public.fresh_table").
-				withRows(10000).
-				withSize(1024 * 1024).
-				withDeadTuples(100).
-				withLastVacuumAny(recentTime).
-				withLastAnalyzeAny(recentTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	var staleFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDVacuumStale {
-			staleFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityWarn, staleFinding.Severity)
-}
-
-func TestTableVacuumHealth_VacuumStale_SkipTinyTables(t *testing.T) {
-	t.Parallel()
-
-	veryStaleTime := time.Now().Add(-30 * 24 * time.Hour) // 30 days ago
-	queryer := &mockQueryer{
-		rows: []db.TableVacuumHealthRow{
-			makeRow("public.tiny_table").
-				withRows(500). // Below 1000 threshold
-				withSize(1024).
-				withDeadTuples(50).
-				withLastVacuumAny(veryStaleTime).
-				withLastAnalyzeAny(veryStaleTime).
-				build(),
-		},
-	}
-
-	checker := tablevacuumhealth.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var staleFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDVacuumStale {
-			staleFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityOK, staleFinding.Severity)
+	// Even a very large table produces a summary-only finding, never a table.
+	assert.Nil(t, largeFinding.Table)
+	assert.Contains(t, largeFinding.Details, "1 table(s)")
 }
 
 func TestTableVacuumHealth_AnalyzeNeeded_NoTables(t *testing.T) {
@@ -689,6 +450,8 @@ func TestTableVacuumHealth_AnalyzeNeeded_Warning(t *testing.T) {
 	assert.Contains(t, analyzeFinding.Details, "1 table(s)")
 	assert.NotNil(t, analyzeFinding.Table)
 	assert.Equal(t, check.SeverityWarn, analyzeFinding.Table.Rows[0].Severity)
+	// Table column must be schema-qualified.
+	assert.Equal(t, "public.busy_table", analyzeFinding.Table.Rows[0].Cells[0])
 }
 
 func TestTableVacuumHealth_AnalyzeNeeded_Fail(t *testing.T) {

@@ -8,8 +8,9 @@ PostgreSQL's autovacuum maintains table health by removing dead tuples, updating
 
 - Disabled autovacuum settings
 - Default configurations unsuitable for large tables
-- Stale vacuum/analyze activity
 - Excessive modifications without ANALYZE
+
+Vacuum freshness (tables not vacuumed recently despite accumulating dead tuples) is covered by the `table-bloat` check's `stale-vacuum` finding, which gates on actual dead-tuple pressure rather than elapsed time alone.
 
 ## Subchecks
 
@@ -29,6 +30,8 @@ Identifies tables with more than 1 million rows using default autovacuum scale f
 
 **Severity:** Warning (tables with more than 1M rows on default settings)
 
+This finding emits a **summary only** (a count of affected tables) and does not list individual tables. The per-table detail that used to live here largely duplicated `table-bloat`'s output; if a large table on default settings actually accumulates bloat, it surfaces there with actionable dead-tuple metrics.
+
 The default `autovacuum_vacuum_scale_factor` is 0.2 (20%), meaning autovacuum triggers when dead tuples exceed 20% of the table size:
 
 | Table Size | Dead Tuples Before Vacuum |
@@ -46,17 +49,6 @@ ALTER TABLE schema.large_table SET (
 );
 ```
 
-### vacuum-stale
-
-Identifies tables that haven't been vacuumed or analyzed recently.
-
-**Severity:** Warning (no vacuum/analyze in 7+ days)
-
-Tables that go too long without maintenance may have:
-- Outdated statistics leading to poor query plans
-- Accumulated dead tuples causing bloat
-- Increased disk usage from unreclaimed space
-
 ### analyze-needed
 
 Identifies tables with many modifications since the last ANALYZE, indicating stale statistics.
@@ -69,14 +61,6 @@ Stale statistics can cause:
 - Suboptimal parallel query decisions
 
 This check differs from `statistics-freshness` which validates **database-level** stats age. This subcheck identifies **per-table** stats staleness based on actual modification activity.
-
-## Pending Work Column
-
-The "Pending Work" column shown in some subchecks combines:
-- `n_dead_tup`: Dead tuples from updates/deletes
-- `n_ins_since_vacuum`: Inserted rows since last vacuum (PostgreSQL 14+)
-
-This gives a fuller picture of how much work vacuum needs to do on each table.
 
 ## How to Fix
 
@@ -128,37 +112,6 @@ FROM pg_stat_user_tables
 WHERE n_live_tup > 1000000
 ORDER BY n_live_tup DESC;
 ```
-
-### For `vacuum-stale`
-
-Tables that haven't been vacuumed or analyzed recently may have outdated statistics, accumulated dead tuples, and increased disk usage.
-
-**Immediate actions:**
-
-1. Run VACUUM ANALYZE on affected tables:
-```sql
-VACUUM ANALYZE schema.table_name;
-```
-
-2. Check if autovacuum is running:
-```sql
-SELECT * FROM pg_stat_progress_vacuum;
-```
-
-3. Check for long-running transactions blocking vacuum:
-```sql
-SELECT pid, age(backend_xid), state, query
-FROM pg_stat_activity
-WHERE backend_xid IS NOT NULL
-ORDER BY age(backend_xid) DESC;
-```
-
-**If autovacuum is not keeping up:**
-- Increase `autovacuum_max_workers`
-- Lower `autovacuum_vacuum_scale_factor` for busy tables
-- Increase `autovacuum_vacuum_cost_limit`
-
-For tables that are rarely updated, this may be expected behavior.
 
 ### For `analyze-needed`
 

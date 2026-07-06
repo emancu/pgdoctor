@@ -12,9 +12,12 @@ Identifies tables with high dead tuple percentages. The finding reports **WARN**
 Dead tuples are rows marked for deletion but not yet reclaimed by vacuum.
 
 ### Stale Vacuum (`stale-vacuum`)
-Identifies tables not vacuumed recently despite accumulating dead tuples. The finding reports **WARN**; the higher-threshold tables are listed first:
-- Not vacuumed in >7 days with >50K dead tuples (highest priority)
-- Not vacuumed in >3 days with >100K dead tuples
+The single vacuum-freshness finding across the vacuum category. It gates on actual dead-tuple pressure combined with vacuum age (a time-only variant previously lived in `table-vacuum-health` and was retired because elapsed time alone barely correlated with bloat). Tables are listed worst-first (most dead tuples, then oldest vacuum):
+
+- **WARN row:** dead tuples are >10% of the table **or** >100K in absolute terms, **and** the table has not been (auto)vacuumed in >3 days.
+- **FAIL row:** >50K dead tuples **and** not (auto)vacuumed in >25 days (or never vacuumed).
+
+The finding severity is derived from its worst row: it reports **WARN** when every row is WARN, and escalates to **FAIL** as soon as any table trips the FAIL row conditions.
 
 ### Large Bloated Tables (`large-bloated-tables`)
 Identifies large tables where bloat wastes significant disk space. The finding reports **WARN**; the higher-threshold tables are listed first:

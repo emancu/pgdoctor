@@ -145,6 +145,7 @@ func TestTableBloat_HighDeadTuples_Critical(t *testing.T) {
 func TestTableBloat_StaleVacuum_NeverVacuumed(t *testing.T) {
 	t.Parallel()
 
+	// Never vacuumed with >50K dead tuples escalates the finding to FAIL.
 	queryer := &mockQueryer{
 		rows: []db.TableBloatRow{
 			makeTableRow("public.logs", 1000000, 60000, 6.0, 200*1024*1024, nil, nil, 0),
@@ -155,12 +156,58 @@ func TestTableBloat_StaleVacuum_NeverVacuumed(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
+	assert.Equal(t, check.SeverityFail, report.Severity)
 
 	staleVacuumFinding := report.Results[1]
 	assert.Equal(t, "stale-vacuum", staleVacuumFinding.ID)
-	assert.Equal(t, check.SeverityWarn, staleVacuumFinding.Severity)
+	assert.Equal(t, check.SeverityFail, staleVacuumFinding.Severity)
 	assert.Contains(t, staleVacuumFinding.Details, "not vacuumed recently")
+
+	require.NotNil(t, staleVacuumFinding.Table)
+	assert.Equal(t,
+		[]string{"Table", "Size", "Dead %", "Dead Tuples", "Last Vacuum", "Autovacuum Count"},
+		staleVacuumFinding.Table.Headers)
+	// Table column is schema-qualified; row severity matches the escalated finding.
+	assert.Equal(t, "public.logs", staleVacuumFinding.Table.Rows[0].Cells[0])
+	assert.Equal(t, check.SeverityFail, staleVacuumFinding.Table.Rows[0].Severity)
+	checktest.AssertSeverityInvariant(t, report)
+}
+
+func TestTableBloat_StaleVacuum_FailEscalation(t *testing.T) {
+	t.Parallel()
+
+	fourDaysAgo := time.Now().AddDate(0, 0, -4)
+	twentySixDaysAgo := time.Now().AddDate(0, 0, -26)
+
+	// One WARN row (12% dead, 4 days stale) and one FAIL row (>50K dead, >25 days
+	// stale). The finding severity must derive from the worst row (FAIL), and the
+	// worst row must sort first.
+	queryer := &mockQueryer{
+		rows: []db.TableBloatRow{
+			makeTableRow("public.warn_table", 880000, 120000, 12.0, 300*1024*1024, &fourDaysAgo, nil, 8),
+			makeTableRow("public.fail_table", 940000, 200000, 6.0, 500*1024*1024, &twentySixDaysAgo, nil, 2),
+		},
+	}
+
+	checker := tablebloat.New(queryer)
+	report, err := checker.Check(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, check.SeverityFail, report.Severity)
+
+	staleVacuumFinding := report.Results[1]
+	assert.Equal(t, "stale-vacuum", staleVacuumFinding.ID)
+	assert.Equal(t, check.SeverityFail, staleVacuumFinding.Severity)
+
+	require.NotNil(t, staleVacuumFinding.Table)
+	require.Len(t, staleVacuumFinding.Table.Rows, 2)
+	// Worst-first: the FAIL table (more dead tuples) sorts ahead of the WARN table.
+	assert.Equal(t, "public.fail_table", staleVacuumFinding.Table.Rows[0].Cells[0])
+	assert.Equal(t, check.SeverityFail, staleVacuumFinding.Table.Rows[0].Severity)
+	assert.Equal(t, "public.warn_table", staleVacuumFinding.Table.Rows[1].Cells[0])
+	assert.Equal(t, check.SeverityWarn, staleVacuumFinding.Table.Rows[1].Severity)
+
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestTableBloat_StaleVacuum_SevenDaysOld(t *testing.T) {
@@ -292,8 +339,11 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 	const oneGB = 1024 * 1024 * 1024
 	const tenGB = 10 * oneGB
 	recentVacuum := time.Now().Add(-1 * time.Hour)
-	threeDaysAgo := time.Now().AddDate(0, 0, -3)
-	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
+	twoDaysAgo := time.Now().AddDate(0, 0, -2)
+	fourDaysAgo := time.Now().AddDate(0, 0, -4)
+	tenDaysAgo := time.Now().AddDate(0, 0, -10)
+	twentySixDaysAgo := time.Now().AddDate(0, 0, -26)
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
 
 	tests := []struct {
 		name                     string
@@ -303,43 +353,77 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 		expectedLargeSeverity    check.Severity
 	}{
 		{
-			name:                     "exactly 20% dead - warning threshold",
+			name:                     "20% dead, recently vacuumed",
 			row:                      makeTableRow("public.t1", 80000, 20000, 20.0, 100*1024*1024, &recentVacuum, nil, 5),
 			expectedHighDeadSeverity: check.SeverityWarn,
 			expectedStaleSeverity:    check.SeverityOK,
 			expectedLargeSeverity:    check.SeverityOK,
 		},
 		{
-			name:                     "exactly 40% dead - critical threshold",
+			name:                     "40% dead, recently vacuumed",
 			row:                      makeTableRow("public.t2", 60000, 40000, 40.0, 150*1024*1024, &recentVacuum, nil, 3),
 			expectedHighDeadSeverity: check.SeverityWarn,
 			expectedStaleSeverity:    check.SeverityOK,
 			expectedLargeSeverity:    check.SeverityOK,
 		},
 		{
-			name:                     "exactly 3 days stale + 100K dead",
-			row:                      makeTableRow("public.t3", 900000, 100000, 11.0, 200*1024*1024, &threeDaysAgo, nil, 5),
+			// Dead pressure present (11%) but only 2 days stale: under the 3-day WARN gate.
+			name:                     "11% dead, vacuumed 2 days ago - within window",
+			row:                      makeTableRow("public.t3", 900000, 100000, 11.0, 200*1024*1024, &twoDaysAgo, nil, 5),
 			expectedHighDeadSeverity: check.SeverityOK,
-			expectedStaleSeverity:    check.SeverityOK, // Must be BEFORE 3 days ago
+			expectedStaleSeverity:    check.SeverityOK,
 			expectedLargeSeverity:    check.SeverityOK,
 		},
 		{
-			name:                     "exactly 7 days stale + 50K dead",
-			row:                      makeTableRow("public.t4", 450000, 50000, 11.0, 250*1024*1024, &sevenDaysAgo, nil, 2),
+			// WARN via ratio arm: >10% dead AND >3 days stale.
+			name:                     "12% dead, vacuumed 4 days ago - warn ratio",
+			row:                      makeTableRow("public.t4", 880000, 120000, 12.0, 300*1024*1024, &fourDaysAgo, nil, 2),
 			expectedHighDeadSeverity: check.SeverityOK,
-			expectedStaleSeverity:    check.SeverityOK, // Must be BEFORE 7 days ago
+			expectedStaleSeverity:    check.SeverityWarn,
 			expectedLargeSeverity:    check.SeverityOK,
 		},
 		{
-			name:                     "exactly 1GB + 10% dead - warning",
-			row:                      makeTableRow("public.t5", 9000000, 1000000, 10.0, oneGB, &recentVacuum, nil, 10),
+			// WARN via absolute arm: >100K dead AND >3 days stale, even at low ratio.
+			name:                     "5% dead but 150K dead, vacuumed 4 days ago - warn absolute",
+			row:                      makeTableRow("public.t5", 2850000, 150000, 5.0, 300*1024*1024, &fourDaysAgo, nil, 4),
+			expectedHighDeadSeverity: check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityWarn,
+			expectedLargeSeverity:    check.SeverityOK,
+		},
+		{
+			// Neither dead-pressure arm met (8% ratio, 60K dead < 100K): stays OK.
+			name:                     "8% dead, 60K dead, vacuumed 10 days ago - below gates",
+			row:                      makeTableRow("public.t6", 690000, 60000, 8.0, 100*1024*1024, &tenDaysAgo, nil, 3),
+			expectedHighDeadSeverity: check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityOK,
+			expectedLargeSeverity:    check.SeverityOK,
+		},
+		{
+			// FAIL: >50K dead AND >25 days stale.
+			name:                     "60K dead, vacuumed 26 days ago - fail",
+			row:                      makeTableRow("public.t7", 940000, 60000, 6.0, 100*1024*1024, &twentySixDaysAgo, nil, 2),
+			expectedHighDeadSeverity: check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityFail,
+			expectedLargeSeverity:    check.SeverityOK,
+		},
+		{
+			// 50K dead is not > 50K: the FAIL dead gate is strict, so stays OK.
+			name:                     "exactly 50K dead, vacuumed 30 days ago - below fail gate",
+			row:                      makeTableRow("public.t8", 780000, 50000, 6.0, 100*1024*1024, &thirtyDaysAgo, nil, 2),
+			expectedHighDeadSeverity: check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityOK,
+			expectedLargeSeverity:    check.SeverityOK,
+		},
+		{
+			name:                     "1GB + 10% dead, recently vacuumed - large warn",
+			row:                      makeTableRow("public.t9", 9000000, 1000000, 10.0, oneGB, &recentVacuum, nil, 10),
 			expectedHighDeadSeverity: check.SeverityOK,
 			expectedStaleSeverity:    check.SeverityOK,
 			expectedLargeSeverity:    check.SeverityWarn,
 		},
 		{
-			name:                     "exactly 10GB + 20% dead - critical",
-			row:                      makeTableRow("public.t6", 40000000, 10000000, 20.0, tenGB, &recentVacuum, nil, 15),
+			name:                     "10GB + 20% dead, recently vacuumed",
+			row:                      makeTableRow("public.t10", 40000000, 10000000, 20.0, tenGB, &recentVacuum, nil, 15),
 			expectedHighDeadSeverity: check.SeverityWarn, // 20% triggers high-dead too
 			expectedStaleSeverity:    check.SeverityOK,
 			expectedLargeSeverity:    check.SeverityWarn,
@@ -358,6 +442,7 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 			assert.Equal(t, tt.expectedHighDeadSeverity, report.Results[0].Severity, "high-dead-tuples severity")
 			assert.Equal(t, tt.expectedStaleSeverity, report.Results[1].Severity, "stale-vacuum severity")
 			assert.Equal(t, tt.expectedLargeSeverity, report.Results[2].Severity, "large-bloated-tables severity")
+			checktest.AssertSeverityInvariant(t, report)
 		})
 	}
 }

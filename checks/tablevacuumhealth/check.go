@@ -31,9 +31,6 @@ const (
 	// Large table threshold.
 	largeTableMinRows = 1_000_000 // 1M rows
 
-	// Stale vacuum threshold.
-	staleVacuumWarnDays = 7 // Warning after 7 days without vacuum/analyze
-
 	// Minimum rows for staleness checks (avoid noise from tiny tables).
 	staleCheckMinRows = 1000
 
@@ -72,7 +69,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	checkAutovacuumDisabled(rows, report)
 	checkLargeTableDefaults(rows, report)
-	checkVacuumStale(rows, report)
 	checkAnalyzeNeeded(rows, report)
 
 	return report, nil
@@ -105,14 +101,14 @@ func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Repor
 }
 
 func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Report) {
-	var tablesUsingDefaults []db.TableVacuumHealthRow
+	var count int
 	for _, row := range rows {
 		if row.EstimatedRows.Int64 >= largeTableMinRows && isUsingDefaultSettings(row.Reloptions.String) {
-			tablesUsingDefaults = append(tablesUsingDefaults, row)
+			count++
 		}
 	}
 
-	if len(tablesUsingDefaults) == 0 {
+	if count == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "large-table-defaults",
 			Name:     "Large Table Vacuum Defaults",
@@ -122,96 +118,11 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 		return
 	}
 
-	var tableRows []check.TableRow
-	for _, row := range tablesUsingDefaults {
-		// Pending work = dead tuples + inserts since vacuum (PG14+)
-		pendingWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
-
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				formatRowCount(row.EstimatedRows.Int64),
-				check.FormatBytes(row.TableSizeBytes.Int64),
-				formatRowCount(pendingWork),
-				formatTimestamp(row.LastAutovacuum),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "large-table-defaults",
 		Name:     "Large Table Vacuum Defaults",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d large table(s) using default autovacuum settings", len(tablesUsingDefaults)),
-		Table: &check.Table{
-			Headers: []string{"Table", "Rows", "Size", "Pending Work", "Last Autovacuum", "Vacuum Count"},
-			Rows:    tableRows,
-		},
-	})
-}
-
-func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
-	now := time.Now()
-	warnThreshold := now.Add(-time.Duration(staleVacuumWarnDays) * 24 * time.Hour)
-
-	var staleTables []db.TableVacuumHealthRow
-	for _, row := range rows {
-		// Skip tiny tables to avoid noise.
-		if row.EstimatedRows.Int64 < staleCheckMinRows {
-			continue
-		}
-
-		lastVacuum := getTimestamp(row.LastVacuumAny)
-		lastAnalyze := getTimestamp(row.LastAnalyzeAny)
-
-		// Consider stale if either vacuum or analyze is old.
-		if lastVacuum.Before(warnThreshold) || lastAnalyze.Before(warnThreshold) {
-			staleTables = append(staleTables, row)
-		}
-	}
-
-	if len(staleTables) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "vacuum-stale",
-			Name:     "Stale Vacuum Activity",
-			Severity: check.SeverityOK,
-			Details:  "All tables have been vacuumed and analyzed within the last 7 days",
-		})
-		return
-	}
-
-	var tableRows []check.TableRow
-	for _, row := range staleTables {
-		lastVacuum := getTimestamp(row.LastVacuumAny)
-		lastAnalyze := getTimestamp(row.LastAnalyzeAny)
-
-		// Pending work = dead tuples + inserts since vacuum (PG14+)
-		pendingWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
-
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				formatRowCount(row.EstimatedRows.Int64),
-				check.FormatBytes(row.TableSizeBytes.Int64),
-				formatRowCount(pendingWork),
-				formatTimeSince(lastVacuum),
-				formatTimeSince(lastAnalyze),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "vacuum-stale",
-		Name:     "Stale Vacuum Activity",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with stale vacuum or analyze activity", len(tableRows)),
-		Table: &check.Table{
-			Headers: []string{"Table", "Rows", "Size", "Pending Work", "Last Vacuum", "Last Analyze"},
-			Rows:    tableRows,
-		},
+		Details:  fmt.Sprintf("%d table(s) >1M rows use default autovacuum settings; consider per-table autovacuum_vacuum_scale_factor.", count),
 	})
 }
 
@@ -288,13 +199,6 @@ func formatRowCount(count int64) string {
 		return fmt.Sprintf("%.1fK", float64(count)/1_000)
 	}
 	return fmt.Sprintf("%d", count)
-}
-
-func formatTimestamp(ts pgtype.Timestamptz) string {
-	if ts.Valid {
-		return ts.Time.Format("2006-01-02 15:04")
-	}
-	return "never"
 }
 
 func getTimestamp(ts pgtype.Timestamptz) time.Time {

@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/emancu/pgdoctor/check"
@@ -144,40 +145,78 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	})
 }
 
-// checkStaleVacuum identifies tables not vacuumed recently despite dead tuples.
+// Stale-vacuum thresholds. This is the single vacuum-freshness finding across the
+// vacuum-category checks (the time-only table-vacuum-health/vacuum-stale finding was
+// retired because it fired without any dead-tuple gate and barely correlated with bloat).
+const (
+	staleWarnDeadPercent = 10.0    // WARN when >10% of the table is dead tuples
+	staleWarnDeadTuples  = 100_000 // ...or >100K dead tuples in absolute terms
+	staleWarnDays        = 3       // ...and not (auto)vacuumed in >3 days
+
+	staleFailDeadTuples = 50_000 // FAIL when >50K dead tuples
+	staleFailDays       = 25     // ...and not (auto)vacuumed in >25 days (or never)
+)
+
+// lastVacuumTime returns the most recent (auto)vacuum time, preferring autovacuum,
+// or the zero time when the table has never been vacuumed.
+func lastVacuumTime(row db.TableBloatRow) time.Time {
+	if row.LastAutovacuum.Valid {
+		return row.LastAutovacuum.Time
+	}
+	if row.LastVacuum.Valid {
+		return row.LastVacuum.Time
+	}
+	return time.Time{}
+}
+
+// staleVacuumSeverity derives a row's severity from dead-tuple pressure and vacuum age.
+// A never-vacuumed table is treated as maximally stale.
+func staleVacuumSeverity(row db.TableBloatRow, now time.Time) check.Severity {
+	deadTuples := row.DeadTuples.Int64
+	deadPercent := getDeadTuplePercent(row)
+
+	lastVacuum := lastVacuumTime(row)
+	neverVacuumed := lastVacuum.IsZero()
+
+	failStale := neverVacuumed || lastVacuum.Before(now.AddDate(0, 0, -staleFailDays))
+	if deadTuples > staleFailDeadTuples && failStale {
+		return check.SeverityFail
+	}
+
+	warnStale := neverVacuumed || lastVacuum.Before(now.AddDate(0, 0, -staleWarnDays))
+	deadPressure := deadPercent > staleWarnDeadPercent || deadTuples > staleWarnDeadTuples
+	if deadPressure && warnStale {
+		return check.SeverityWarn
+	}
+
+	return check.SeverityOK
+}
+
+// checkStaleVacuum identifies tables not vacuumed recently despite dead tuples. The
+// finding severity is derived from the worst row (FAIL when any table is severely
+// stale), keeping the presentation invariant that no row outranks its finding.
 func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	now := time.Now()
-	sevenDaysAgo := now.AddDate(0, 0, -7)
-	threeDaysAgo := now.AddDate(0, 0, -3)
 
-	var critical []db.TableBloatRow // >7 days, >50K dead
-	var warning []db.TableBloatRow  // >3 days, >100K dead
+	type staleRow struct {
+		row      db.TableBloatRow
+		severity check.Severity
+	}
 
+	var stale []staleRow
+	maxSeverity := check.SeverityOK
 	for _, row := range rows {
-		deadTuples := row.DeadTuples.Int64
-
-		// Get last vacuum time (prefer autovacuum)
-		var lastVacuum time.Time
-		if row.LastAutovacuum.Valid {
-			lastVacuum = row.LastAutovacuum.Time
-		} else if row.LastVacuum.Valid {
-			lastVacuum = row.LastVacuum.Time
-		}
-
-		if lastVacuum.IsZero() && deadTuples > 50000 {
-			// Never vacuumed with significant dead tuples
-			critical = append(critical, row)
+		severity := staleVacuumSeverity(row, now)
+		if severity == check.SeverityOK {
 			continue
 		}
-
-		if lastVacuum.Before(sevenDaysAgo) && deadTuples > 50000 {
-			critical = append(critical, row)
-		} else if lastVacuum.Before(threeDaysAgo) && deadTuples > 100000 {
-			warning = append(warning, row)
+		stale = append(stale, staleRow{row: row, severity: severity})
+		if severity > maxSeverity {
+			maxSeverity = severity
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if len(stale) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "stale-vacuum",
 			Name:     "Vacuum Freshness",
@@ -187,40 +226,37 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 		return
 	}
 
-	headers := []string{"Table", "Last Vacuum", "Dead Tuples", "Autovacuum Count"}
+	// Worst first: most dead tuples, then oldest vacuum.
+	sort.Slice(stale, func(i, j int) bool {
+		di, dj := stale[i].row.DeadTuples.Int64, stale[j].row.DeadTuples.Int64
+		if di != dj {
+			return di > dj
+		}
+		return lastVacuumTime(stale[i].row).Before(lastVacuumTime(stale[j].row))
+	})
+
 	var tableRows []check.TableRow
-
-	for _, row := range critical {
+	for _, s := range stale {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.TableName.String,
-				formatLastVacuum(row),
-				formatNumber(row.DeadTuples.Int64),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
+				s.row.TableName.String,
+				check.FormatBytes(s.row.TotalSizeBytes.Int64),
+				fmt.Sprintf("%.1f%%", getDeadTuplePercent(s.row)),
+				formatNumber(s.row.DeadTuples.Int64),
+				formatLastVacuum(s.row),
+				fmt.Sprintf("%d", s.row.AutovacuumCount.Int64),
 			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	for _, row := range warning {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				formatLastVacuum(row),
-				formatNumber(row.DeadTuples.Int64),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
-			},
-			Severity: check.SeverityWarn,
+			Severity: s.severity,
 		})
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "stale-vacuum",
 		Name:     "Vacuum Freshness",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(critical)+len(warning)),
+		Severity: maxSeverity,
+		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(stale)),
 		Table: &check.Table{
-			Headers: headers,
+			Headers: []string{"Table", "Size", "Dead %", "Dead Tuples", "Last Vacuum", "Autovacuum Count"},
 			Rows:    tableRows,
 		},
 	})
