@@ -95,7 +95,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		Severity: maxSeverity,
 		Details:  formatDetails(criticalCount, warningCount),
 		Table: &check.Table{
-			Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
+			Headers: []string{"Table", "Column", "Type", "Usage %", "Est. Rows"},
 			Rows:    tableRows,
 		},
 	})
@@ -119,7 +119,7 @@ func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
 			usageStr,
 			check.FormatNumber(row.EstimatedRows.Int64),
 		},
-		severity: determineSeverity(usagePct, row.EstimatedRows.Int64),
+		severity: determineSeverity(usagePct),
 	}
 }
 
@@ -134,7 +134,7 @@ func calculateUsage(row db.InvalidPrimaryKeyTypesRow) (string, float64) {
 	return fmt.Sprintf("~%.1f%%", pct), pct
 }
 
-func determineSeverity(usagePct float64, estRows int64) check.Severity {
+func determineSeverity(usagePct float64) check.Severity {
 	if usagePct >= usagePercentFail {
 		return check.SeverityFail
 	}

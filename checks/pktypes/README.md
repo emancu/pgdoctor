@@ -24,7 +24,9 @@ Integer (int4) primary keys create a ticking time bomb for growing tables:
 
 ## What This Check Does
 
-This check identifies **ALL** tables using `int4` (integer) or `int2` (smallint) for primary keys, which violates architecture standards.
+This check identifies tables using `int4` (integer) or `int2` (smallint) for primary keys, which violates architecture standards.
+
+**Reporting floor**: only PKs that have consumed **≥10%** of their type's value range are reported. Below that, the migration is not yet urgent and the noise crowds out the tables that matter. Every reported table is still non-compliant and must eventually move to bigint or UUID.
 
 **Key information provided:**
 - **Table and column identification**: Which tables have non-compliant PK types
@@ -50,8 +52,8 @@ All tables with int4/int2 primary keys are flagged. Severity indicates migration
 
 **Usage % calculation:**
 - Uses actual sequence value when available (most accurate)
-- Falls back to estimated row count vs type max value
-- Always available (only NULL for empty tables)
+- Falls back to estimated row count vs type max value for PKs without a backing sequence — this is a row-count *proxy*, not true sequence position, and understates usage on tables with deletes or gappy IDs
+- Rows below the 10% reporting floor are filtered out in SQL
 
 ## Architecture Rationale
 

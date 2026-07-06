@@ -77,6 +77,7 @@ SELECT
   , type_max_value
   , usage_pct
 FROM pk_with_usage
+WHERE usage_pct >= 0.10
 ORDER BY
   usage_pct DESC NULLS LAST
   , estimated_rows DESC NULLS LAST;

@@ -7,6 +7,7 @@ import (
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,7 +226,7 @@ func TestPKTypes_TableFormatting(t *testing.T) {
 	require.NotNil(t, report.Results[0].Table)
 
 	table := report.Results[0].Table
-	require.Equal(t, []string{"Table", "Column", "Type", "Usage %", "Rows"}, table.Headers)
+	require.Equal(t, []string{"Table", "Column", "Type", "Usage %", "Est. Rows"}, table.Headers)
 	require.Equal(t, 2, len(table.Rows))
 
 	require.Equal(t, "public.bookings", table.Rows[0].Cells[0])
@@ -258,6 +259,23 @@ func TestPKTypes_UsageDisplay(t *testing.T) {
 
 	usageCell := report.Results[0].Table.Rows[0].Cells[3]
 	assert.Contains(t, usageCell, "~0.1%")
+}
+
+func TestPKTypes_SeverityInvariant(t *testing.T) {
+	t.Parallel()
+
+	// Rows reaching the check are already past the 10% SQL floor; severity
+	// tiers must still be assigned correctly and no row may outrank the finding.
+	rows := []db.InvalidPrimaryKeyTypesRow{
+		makePKRowWithUsage("public.bookings", "id", "int4", 1_400_000_000, 1_495_000_000, 2_147_483_647, 0.696),
+		makePKRowWithUsage("public.appointments", "id", "int4", 300_000_000, 322_000_000, 2_147_483_647, 0.15),
+	}
+
+	queryer := &mockQueryer{rows: rows}
+	report, err := New(queryer).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func TestFormatDetails(t *testing.T) {
