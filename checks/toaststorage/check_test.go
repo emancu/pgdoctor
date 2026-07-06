@@ -22,8 +22,10 @@ const (
 )
 
 type mockQueryer struct {
-	rows []db.ToastStorageRow
-	err  error
+	rows       []db.ToastStorageRow
+	err        error
+	summary    db.ToastCompressionSummaryRow
+	summaryErr error
 }
 
 func (m *mockQueryer) ToastStorage(context.Context) ([]db.ToastStorageRow, error) {
@@ -31,6 +33,20 @@ func (m *mockQueryer) ToastStorage(context.Context) ([]db.ToastStorageRow, error
 		return nil, m.err
 	}
 	return m.rows, nil
+}
+
+func (m *mockQueryer) ToastCompressionSummary(context.Context) (db.ToastCompressionSummaryRow, error) {
+	if m.summaryErr != nil {
+		return db.ToastCompressionSummaryRow{}, m.summaryErr
+	}
+	return m.summary, nil
+}
+
+func makeCompressionSummary(columns, tables int64) db.ToastCompressionSummaryRow {
+	return db.ToastCompressionSummaryRow{
+		PglzColumnCount: pgtype.Int8{Int64: columns, Valid: true},
+		PglzTableCount:  pgtype.Int8{Int64: tables, Valid: true},
+	}
 }
 
 func makeToastRow(schema, table, toastTable string, mainSize, toastSize, totalSize int64, toastPercent float64) db.ToastStorageRow {
@@ -338,7 +354,7 @@ func Test_ToastStorage_CompressionAlgorithm_DefaultCompression(t *testing.T) {
 		EngineVersion: "14.8",
 	})
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}, summary: makeCompressionSummary(2, 1)}
 	checker := toaststorage.New(queryer)
 
 	report, err := checker.Check(ctx)
@@ -355,12 +371,14 @@ func Test_ToastStorage_CompressionAlgorithm_DefaultCompression(t *testing.T) {
 
 	require.NotNil(t, compressionFinding, "compression-algorithm subcheck should be present")
 	require.Equal(t, check.SeverityWarn, compressionFinding.Severity)
-	require.Contains(t, compressionFinding.Details, "suboptimal compression")
+	require.Contains(t, compressionFinding.Details, "pglz/default compression")
+	require.Contains(t, compressionFinding.Details, "new data only")
 	require.NotNil(t, compressionFinding.Table)
+	require.Equal(t, []string{"Table", "Column", "Type", "Current", "Storage", "Fix"}, compressionFinding.Table.Headers)
 	require.Equal(t, 2, len(compressionFinding.Table.Rows))
 	require.Contains(t, compressionFinding.Table.Rows[0].Cells[1], "payload")
 	require.Contains(t, compressionFinding.Table.Rows[0].Cells[3], "default")
-	require.Contains(t, compressionFinding.Table.Rows[0].Cells[5], "lz4")
+	require.Equal(t, "lz4", compressionFinding.Table.Rows[0].Cells[5])
 }
 
 func Test_ToastStorage_CompressionAlgorithm_PglzCompression(t *testing.T) {
@@ -375,7 +393,7 @@ func Test_ToastStorage_CompressionAlgorithm_PglzCompression(t *testing.T) {
 		EngineVersion: "15.2",
 	})
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}, summary: makeCompressionSummary(1, 1)}
 	checker := toaststorage.New(queryer)
 
 	report, err := checker.Check(ctx)
@@ -428,6 +446,39 @@ func Test_ToastStorage_CompressionAlgorithm_OptimalLZ4(t *testing.T) {
 	require.Contains(t, compressionFinding.Details, "optimal compression")
 }
 
+func Test_ToastStorage_CompressionAlgorithm_CountsFullPopulationWhileItemizingGated(t *testing.T) {
+	t.Parallel()
+
+	// Only one column survives the >1 GiB itemization gate (present in the row),
+	// but the summary reflects the full pglz/default population.
+	row := makeToastRow("public", "events", "pg_toast.pg_toast_55555", 10*check.GiB, 15*check.GiB, 25*check.GiB, 60.0)
+	row.ColumnCompressionInfo = []string{"payload:default:EXTENDED:jsonb"}
+
+	ctx := check.ContextWithInstanceMetadata(context.Background(), &check.InstanceMetadata{
+		EngineVersion: "16.2",
+	})
+
+	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}, summary: makeCompressionSummary(9, 4)}
+	report, err := toaststorage.New(queryer).Check(ctx)
+
+	require.NoError(t, err)
+
+	var compressionFinding *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == findingIDCompressionAlgorithm {
+			compressionFinding = &report.Results[i]
+			break
+		}
+	}
+
+	require.NotNil(t, compressionFinding)
+	require.Equal(t, check.SeverityWarn, compressionFinding.Severity)
+	// Headline counts come from the summary, not the gated itemization.
+	require.Contains(t, compressionFinding.Details, "9 TOAST-able column(s) across 4 table(s)")
+	require.NotNil(t, compressionFinding.Table)
+	require.Equal(t, 1, len(compressionFinding.Table.Rows))
+}
+
 func Test_ToastStorage_CompressionAlgorithm_SkipsOnPG13(t *testing.T) {
 	t.Parallel()
 
@@ -467,7 +518,7 @@ func Test_ToastStorage_CompressionAlgorithm_ByteaExternal(t *testing.T) {
 		EngineVersion: "14.8",
 	})
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}, summary: makeCompressionSummary(1, 1)}
 	checker := toaststorage.New(queryer)
 
 	report, err := checker.Check(ctx)
@@ -484,8 +535,8 @@ func Test_ToastStorage_CompressionAlgorithm_ByteaExternal(t *testing.T) {
 
 	require.NotNil(t, compressionFinding)
 	require.Equal(t, check.SeverityWarn, compressionFinding.Severity)
-	// For bytea + EXTENDED, should suggest considering EXTERNAL
-	require.Contains(t, compressionFinding.Table.Rows[0].Cells[5], "EXTERNAL")
+	// For bytea + EXTENDED, the fix token is the "external" storage strategy.
+	require.Equal(t, "external", compressionFinding.Table.Rows[0].Cells[5])
 }
 
 func Test_ToastStorage_MultipleTables_MultipleSeverities(t *testing.T) {

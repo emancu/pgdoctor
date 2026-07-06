@@ -100,17 +100,60 @@ SELECT
     )
     , ARRAY[]::text []
   ) AS wide_columns
-  , coalesce(
-    (
-      SELECT
-        array_agg(
-          cc.column_name || ':' || cc.compression_algorithm || ':' || cc.storage_strategy || ':' || cc.column_type
-          ORDER BY cc.column_name
+  -- Itemize compression only for tables whose TOAST already exceeds 1 GiB;
+  -- below that the per-column recommendation is noise. Population counts for
+  -- the finding come from ToastCompressionSummary, not this gated list.
+  , CASE
+    WHEN ti.toast_size > 1073741824
+      THEN coalesce(
+        (
+          SELECT
+            array_agg(
+              cc.column_name || ':' || cc.compression_algorithm || ':' || cc.storage_strategy || ':' || cc.column_type
+              ORDER BY cc.column_name
+            )
+          FROM column_compression AS cc
+          WHERE cc.schema_name = ti.schema_name AND cc.table_name = ti.table_name
         )
-      FROM column_compression AS cc
-      WHERE cc.schema_name = ti.schema_name AND cc.table_name = ti.table_name
-    )
-    , ARRAY[]::text []
-  ) AS column_compression_info
+        , ARRAY[]::text []
+      )
+    ELSE ARRAY[]::text []
+  END AS column_compression_info
 FROM toast_info AS ti
 ORDER BY ti.toast_size DESC;
+
+-- name: ToastCompressionSummary :one
+-- Counts the full population of TOAST-able columns still on pglz/default
+-- compression across tables with meaningful (>1 MiB) TOAST storage. Used for
+-- the compression-algorithm finding's headline counts, independent of the
+-- 1 GiB itemization gate applied in ToastStorage.
+WITH toast_tables AS (
+  SELECT c.oid AS table_oid
+  FROM pg_class AS c
+  INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
+  WHERE
+    c.relkind IN ('r', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    AND c.reltoastrelid != 0
+    AND pg_relation_size(c.reltoastrelid) > 1048576
+)
+
+, pglz_columns AS (
+  SELECT
+    a.attrelid AS table_oid
+    , a.attname
+  FROM pg_attribute AS a
+  INNER JOIN toast_tables AS tt ON a.attrelid = tt.table_oid
+  INNER JOIN pg_type AS t ON a.atttypid = t.oid
+  WHERE
+    a.attnum > 0
+    AND NOT a.attisdropped
+    AND a.attstorage IN ('x', 'e', 'm')
+    AND t.typname IN ('text', 'varchar', 'bpchar', 'json', 'jsonb', 'bytea')
+    AND a.attcompression != 'l'  -- 'l' = lz4; 'p' (pglz) and default (0) both need attention
+)
+
+SELECT
+  count(*)::bigint AS pglz_column_count
+  , count(DISTINCT table_oid)::bigint AS pglz_table_count
+FROM pglz_columns;

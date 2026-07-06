@@ -158,6 +158,18 @@ This check looks at columns with `EXTENDED` or `MAIN` storage (where compression
 
 See "Storage strategies" section above for detailed explanations of each strategy.
 
+**LZ4 applies to new data only**: switching compression is a catalog-only change.
+Existing TOAST datums keep their original method (pglz), and VACUUM FULL / CLUSTER
+do NOT reliably recompress them — reclaiming existing TOAST requires pg_repack or
+dump/restore. See the remediation section below for the full explanation.
+
+**Reporting**: the headline counts cover every TOAST-able column still on
+pglz/default. To keep the itemized table actionable, only columns whose table
+already holds **>1 GiB** of TOAST are listed row-by-row — smaller tables are
+counted but not itemized. The `Fix` column shows the recommended action token:
+`lz4` (switch compression) or `external` (drop compression for pre-compressed
+binary).
+
 **This subcheck only runs on PostgreSQL 14+** (where lz4 is available)
 
 ## How to Fix
@@ -278,23 +290,35 @@ CREATE TRIGGER strip_nulls_before_insert
 Columns using default/pglz compression should use lz4 (PostgreSQL 14+):
 
 ```sql
--- Change compression algorithm to lz4
+-- Change the column's compression algorithm to lz4.
 ALTER TABLE events ALTER COLUMN payload SET COMPRESSION lz4;
 ALTER TABLE logs ALTER COLUMN message SET COMPRESSION lz4;
+```
 
--- Existing rows still use old compression
--- Force recompression (requires rewrite, use during maintenance window)
-VACUUM FULL events;  -- Exclusive lock! Plan carefully.
+**`SET COMPRESSION` is catalog-only — it affects NEW data only.** The
+compression method is stored per value, so datums already TOASTed with pglz keep
+pglz until they are rewritten.
 
--- Or use pg_repack for minimal locking
+**The VACUUM FULL / CLUSTER trap:** neither reliably recompresses existing TOAST.
+When a table is rewritten this way, out-of-line TOAST datums are copied as opaque
+pointers, not re-toasted, so the old pglz values survive the rewrite. Do not rely
+on them to reclaim compression.
+
+**Guaranteed backfill of existing TOAST** requires a full re-insert of the value:
+
+```sql
+-- pg_repack rebuilds the table (and re-toasts values) with minimal locking.
 pg_repack --table events --no-order
+
+-- Or dump/restore the table. A no-op UPDATE that rewrites the TOASTed column
+-- (e.g. SET payload = payload) also forces re-toasting under the new method.
 ```
 
 **For already-compressed data (images, videos, gzipped content):**
 ```sql
--- Disable compression, use EXTERNAL storage
+-- Disable compression, use EXTERNAL storage (the "external" Fix token).
 ALTER TABLE media ALTER COLUMN file_data SET STORAGE EXTERNAL;
--- Stores out-of-line without compression, saving CPU
+-- Stores out-of-line without compression, saving CPU on incompressible data.
 ```
 
 ## Decision Tree: Which Issue to Fix First?
@@ -455,15 +479,14 @@ VACUUM documents;
 
 **Solution: Use LZ4 compression (PostgreSQL 14+)**
 ```sql
--- LZ4 is faster and compresses better than pglz for most workloads
+-- LZ4 is faster and compresses better than pglz for most workloads.
+-- Catalog-only change: applies to NEW data, existing TOAST stays pglz.
 ALTER TABLE events ALTER COLUMN payload SET COMPRESSION lz4;
 ALTER TABLE logs ALTER COLUMN message SET COMPRESSION lz4;
 
--- Existing rows still use old compression
--- Force recompression (requires rewrite, use during maintenance window)
-VACUUM FULL events;  -- Exclusive lock! Plan carefully.
-
--- Or use pg_repack for minimal locking
+-- VACUUM FULL / CLUSTER do NOT reliably recompress: they copy out-of-line
+-- TOAST datums as opaque pointers, leaving old pglz values in place.
+-- Use pg_repack (or dump/restore) to actually re-toast existing data.
 pg_repack --table events --no-order
 ```
 
