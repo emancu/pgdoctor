@@ -20,11 +20,6 @@ Indexes with fewer than 1,000 scans but more than 10,000 table writes. These ind
 
 **Severity**: WARN
 
-### 3. Index Cache Efficiency
-Hot, large indexes with a low buffer cache hit ratio, indicating frequent disk I/O. Reported only when all hold: ≥ 1,000 scans, ≥ 100,000 blocks touched, size > 100 MB, and cache hit ratio < 90%. The gates keep this to hot-path indexes and suppress lifetime-ratio noise on barely-touched ones. No FAIL tier: the metric is confounded by the OS page cache and cumulative-since-stats-reset counters, and remediation (capacity or index-drop decisions) is owned elsewhere.
-
-**Severity**: WARN
-
 ## Statistics Requirements
 
 This check requires at least **7 days** of statistics history for accurate results. If statistics were recently reset (PostgreSQL restart, manual reset), the check will warn about insufficient data.
@@ -53,25 +48,29 @@ Review index purpose before dropping.
 
 Unused indexes waste disk space and slow down writes.
 
-**IMPORTANT**: Check usage on ALL instances (primary + replicas) before dropping! An index unused on primary may be critical for read replica queries.
+**IMPORTANT**: `idx_scan` is per-instance and resets on failover/restart. Verify usage on EVERY replica (and check `pg_stat_database.stats_reset`) before dropping. An index unused on the primary may be critical for read-replica queries.
 
 ```sql
--- Verify usage on all instances
+-- Run on the primary AND every replica; confirm the counter is meaningful.
 SELECT idx_scan FROM pg_stat_user_indexes WHERE indexrelname = 'index_name';
+SELECT stats_reset FROM pg_stat_database WHERE datname = current_database();
 
--- Drop unused index
+-- Drop only once idle everywhere.
 DROP INDEX CONCURRENTLY schema.index_name;
 ```
 
 **Before dropping:**
-1. Verify the index isn't used on read replicas
-2. Check application code for references
-3. Consider creating the index conditionally in migrations for rollback safety
-4. Monitor query performance after dropping
+1. Verify the index is idle on the primary and on every read replica
+2. Check `pg_stat_database.stats_reset` so you are not reading a freshly-reset counter
+3. Check application code for references
+4. Consider creating the index conditionally in migrations for rollback safety
+5. Monitor query performance after dropping
 
 ### For `low-usage-indexes`
 
 These indexes are rarely used for queries but maintained on every write.
+
+**IMPORTANT**: `idx_scan` is per-instance and resets on failover/restart. Verify usage on EVERY replica (and check `pg_stat_database.stats_reset`) before dropping — an index barely read on the primary may be hot on a replica.
 
 Consider if these indexes are:
 1. For rarely-run reports (keep)
@@ -80,21 +79,6 @@ Consider if these indexes are:
 
 Evaluate index value vs maintenance cost for your workload.
 
-### For `index-cache-ratio`
-
-Low cache hit ratio means frequent disk I/O.
-
-**Options to improve:**
-1. Increase `shared_buffers` (if memory available)
-2. Consider partial indexes to reduce size
-3. Review query patterns - may be scanning too much data
-4. If index is unused, consider dropping it
-
-```sql
--- Check current shared_buffers
-SHOW shared_buffers;
-```
-
 ## Query Details
 
-Queries `pg_stat_user_indexes`, `pg_statio_user_indexes`, and `pg_stat_user_tables` for comprehensive usage analysis.
+Queries `pg_stat_user_indexes` and `pg_stat_user_tables` for usage analysis.
