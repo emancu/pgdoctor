@@ -103,15 +103,16 @@ func checkNearExhaustion(rows []db.SequenceHealthRow, report *check.Report) {
 		return
 	}
 
-	headers := []string{"Sequence", "Table.Column", "Usage", "Remaining", "Type"}
+	headers := []string{"Sequence", "Table", "Column", "Usage %", "Remaining", "Type"}
 	var tableRows []check.TableRow
 
 	for _, row := range critical {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.SequenceName.String,
-				formatTableColumn(row.TableName.String, row.ColumnName.String),
-				fmt.Sprintf("%.1f%%", getUsagePercent(row)),
+				qualifyTable(row.SchemaName.String, row.TableName.String),
+				row.ColumnName.String,
+				fmt.Sprintf("%.1f", getUsagePercent(row)),
 				check.FormatNumber(formatRemaining(row.RemainingValues.Int64)),
 				row.SeqDataType.String,
 			},
@@ -123,8 +124,9 @@ func checkNearExhaustion(rows []db.SequenceHealthRow, report *check.Report) {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.SequenceName.String,
-				formatTableColumn(row.TableName.String, row.ColumnName.String),
-				fmt.Sprintf("%.1f%%", getUsagePercent(row)),
+				qualifyTable(row.SchemaName.String, row.TableName.String),
+				row.ColumnName.String,
+				fmt.Sprintf("%.1f", getUsagePercent(row)),
 				check.FormatNumber(formatRemaining(row.RemainingValues.Int64)),
 				row.SeqDataType.String,
 			},
@@ -170,7 +172,7 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 		return
 	}
 
-	headers := []string{"Table", "Column", "Type", "Usage", "Current Value"}
+	headers := []string{"Table", "Column", "Type", "Usage %", "Current Value"}
 	var tableRows []check.TableRow
 	severity := check.SeverityWarn
 
@@ -184,10 +186,10 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.TableName.String,
+				qualifyTable(row.SchemaName.String, row.TableName.String),
 				row.ColumnName.String,
 				row.ColumnType.String,
-				fmt.Sprintf("%.1f%%", usage),
+				fmt.Sprintf("%.1f", usage),
 				check.FormatNumber(row.CurrentValue.Int64),
 			},
 			Severity: rowSeverity,
@@ -225,14 +227,15 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 		return
 	}
 
-	headers := []string{"Sequence", "Table.Column", "Column Type", "Seq Max", "Column Max"}
+	headers := []string{"Sequence", "Table", "Column", "Type", "Seq Max", "Col Max"}
 	var tableRows []check.TableRow
 
 	for _, row := range mismatched {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.SequenceName.String,
-				formatTableColumn(row.TableName.String, row.ColumnName.String),
+				qualifyTable(row.SchemaName.String, row.TableName.String),
+				row.ColumnName.String,
 				row.ColumnType.String,
 				check.FormatNumber(row.MaxValue.Int64),
 				check.FormatNumber(row.ColumnMaxValue.Int64),
@@ -257,11 +260,14 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 
 // Helper functions
 
-func formatTableColumn(table, column string) string {
-	if table == "" || column == "" {
+func qualifyTable(schema, table string) string {
+	if table == "" {
 		return "-"
 	}
-	return fmt.Sprintf("%s.%s", table, column)
+	if schema == "" {
+		return table
+	}
+	return fmt.Sprintf("%s.%s", schema, table)
 }
 
 func formatRemaining(remaining int64) int64 {

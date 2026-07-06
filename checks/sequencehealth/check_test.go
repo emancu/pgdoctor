@@ -611,14 +611,15 @@ func TestSequenceHealth_TableFormatting_NearExhaustion(t *testing.T) {
 	require.NotNil(t, exhaustionFinding.Table)
 
 	table := exhaustionFinding.Table
-	require.Equal(t, []string{"Sequence", "Table.Column", "Usage", "Remaining", "Type"}, table.Headers)
+	require.Equal(t, []string{"Sequence", "Table", "Column", "Usage %", "Remaining", "Type"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
 	require.Equal(t, "bookings_id_seq", table.Rows[0].Cells[0])
-	require.Equal(t, "bookings.id", table.Rows[0].Cells[1])
-	require.Contains(t, table.Rows[0].Cells[2], "90.0%")
-	require.NotEmpty(t, table.Rows[0].Cells[3]) // Remaining values (formatted)
-	require.Equal(t, "integer", table.Rows[0].Cells[4])
+	require.Equal(t, "public.bookings", table.Rows[0].Cells[1])
+	require.Equal(t, "id", table.Rows[0].Cells[2])
+	require.Equal(t, "90.0", table.Rows[0].Cells[3])
+	require.NotEmpty(t, table.Rows[0].Cells[4]) // Remaining values (formatted)
+	require.Equal(t, "integer", table.Rows[0].Cells[5])
 }
 
 func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
@@ -652,13 +653,13 @@ func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
 	require.NotNil(t, integerFinding.Table)
 
 	table := integerFinding.Table
-	require.Equal(t, []string{"Table", "Column", "Type", "Usage", "Current Value"}, table.Headers)
+	require.Equal(t, []string{"Table", "Column", "Type", "Usage %", "Current Value"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
-	require.Equal(t, "users", table.Rows[0].Cells[0])
+	require.Equal(t, "public.users", table.Rows[0].Cells[0])
 	require.Equal(t, "id", table.Rows[0].Cells[1])
 	require.Equal(t, "integer", table.Rows[0].Cells[2])
-	require.Contains(t, table.Rows[0].Cells[3], "50.0%")
+	require.Equal(t, "50.0", table.Rows[0].Cells[3])
 	require.NotEmpty(t, table.Rows[0].Cells[4]) // Current value (formatted)
 }
 
@@ -693,14 +694,15 @@ func TestSequenceHealth_TableFormatting_TypeMismatch(t *testing.T) {
 	require.NotNil(t, mismatchFinding.Table)
 
 	table := mismatchFinding.Table
-	require.Equal(t, []string{"Sequence", "Table.Column", "Column Type", "Seq Max", "Column Max"}, table.Headers)
+	require.Equal(t, []string{"Sequence", "Table", "Column", "Type", "Seq Max", "Col Max"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
 	require.Equal(t, "problem_seq", table.Rows[0].Cells[0])
-	require.Equal(t, "problem_table.id", table.Rows[0].Cells[1])
-	require.Equal(t, "integer", table.Rows[0].Cells[2])
-	require.NotEmpty(t, table.Rows[0].Cells[3]) // Seq Max (formatted)
-	require.NotEmpty(t, table.Rows[0].Cells[4]) // Column Max (formatted)
+	require.Equal(t, "public.problem_table", table.Rows[0].Cells[1])
+	require.Equal(t, "id", table.Rows[0].Cells[2])
+	require.Equal(t, "integer", table.Rows[0].Cells[3])
+	require.NotEmpty(t, table.Rows[0].Cells[4]) // Seq Max (formatted)
+	require.NotEmpty(t, table.Rows[0].Cells[5]) // Column Max (formatted)
 }
 
 func TestSequenceHealth_SequenceWithoutColumn(t *testing.T) {

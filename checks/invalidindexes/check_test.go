@@ -138,10 +138,10 @@ func Test_InvalidIndexes_ClassifiesRowsByType(t *testing.T) {
 
 	// Table carries the broken/leftover distinction in a Type column.
 	require.NotNil(t, finding.Table)
-	require.Equal(t, []string{"Schema", "Table", "Index", "Type"}, finding.Table.Headers)
+	require.Equal(t, []string{"Table", "Index", "Type"}, finding.Table.Headers)
 	require.Len(t, finding.Table.Rows, 3)
-	require.Equal(t, []string{"public", "users", "idx_users_email", "broken"}, finding.Table.Rows[0].Cells)
-	require.Equal(t, []string{"app", "posts", "idx_posts_created_at_ccnew", "leftover"}, finding.Table.Rows[2].Cells)
+	require.Equal(t, []string{"public.users", "idx_users_email", "broken"}, finding.Table.Rows[0].Cells)
+	require.Equal(t, []string{"app.posts", "idx_posts_created_at_ccnew", "leftover"}, finding.Table.Rows[2].Cells)
 	for _, row := range finding.Table.Rows {
 		require.Equal(t, check.SeverityWarn, row.Severity)
 	}

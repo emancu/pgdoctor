@@ -77,7 +77,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			broken++
 		}
 		tableRows = append(tableRows, check.TableRow{
-			Cells:    []string{row.SchemaName, row.TableName, row.IndexName, kind},
+			Cells:    []string{row.SchemaName + "." + row.TableName, row.IndexName, kind},
 			Severity: check.SeverityWarn,
 		})
 	}
@@ -88,7 +88,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("%s (%d broken, %d leftover)", pluralIndexes(len(rows)), broken, leftover),
 		Table: &check.Table{
-			Headers: []string{"Schema", "Table", "Index", "Type"},
+			Headers: []string{"Table", "Index", "Type"},
 			Rows:    tableRows,
 		},
 	})
