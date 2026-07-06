@@ -4,13 +4,8 @@ Estimates B-tree index bloat using page layout math to identify indexes needing 
 
 ## What It Checks
 
-### High Bloat Percentage (`high-bloat`)
-Flags indexes with **bloat > 50% and size > 1 GB** as WARN, listed worst-first.
-
-### Large Bloated Indexes (`large-bloat`)
-Identifies indexes wasting significant disk space. The finding reports **WARN**; the higher-threshold indexes are listed first:
-- Bloat > 1 GB (with >30% bloat) (highest priority)
-- Bloat > 100 MB (with >30% bloat)
+### Bloated Indexes (`bloated-indexes`)
+Flags indexes with **≥30% bloat AND ≥100 MiB wasted** as WARN, listed worst-first (most wasted space first). Bloat is elective REINDEX maintenance, so this finding never escalates to FAIL.
 
 ## How It Works
 
@@ -48,9 +43,7 @@ Bloated indexes cause:
 
 ## How to Fix
 
-### For `high-bloat`
-
-Bloated indexes waste disk space and slow down queries.
+Bloated indexes waste disk space and slow down queries. Rebuild the largest bloated indexes (most wasted space) first.
 
 ```sql
 -- Rebuild single index (no locks)
@@ -62,22 +55,9 @@ REINDEX TABLE CONCURRENTLY schema.table_name;
 
 > **Note**: `REINDEX CONCURRENTLY` was introduced in PostgreSQL 12. For PostgreSQL 13 and earlier (EOL versions), you must drop and recreate indexes manually.
 
-Regular VACUUM does NOT reclaim index bloat - only REINDEX does.
-
-### For `large-bloat`
-
-Large bloated indexes significantly impact:
-- Disk usage and backup times
-- Query performance (more pages to scan)
-- Buffer cache efficiency
-
-**Priority**: Rebuild the largest bloated indexes first.
-
-```sql
-REINDEX INDEX CONCURRENTLY schema.index_name;
-```
-
 For very large indexes, schedule during low-traffic periods. REINDEX CONCURRENTLY builds a new index without blocking writes, but requires additional disk space temporarily.
+
+Regular VACUUM does NOT reclaim index bloat - only REINDEX does.
 
 ## Estimation Accuracy
 

@@ -87,6 +87,24 @@ WITH index_info AS (
   WHERE tuple_size > 0 AND usable_space > (4 + tuple_size)
 )
 
+, bloat_result AS (
+  SELECT
+    schemaname
+    , tablename
+    , indexname
+    , actual_pages
+    , est_pages
+    , actual_bytes
+    , ((actual_pages - est_pages)::bigint * bs) AS bloat_bytes
+    , CASE
+      WHEN actual_pages > 0 AND actual_pages > est_pages
+        THEN ROUND(100.0 * (actual_pages - est_pages) / actual_pages, 1)
+      ELSE 0
+    END AS bloat_percent
+  FROM bloat_estimate
+  WHERE actual_pages > est_pages
+)
+
 SELECT
   schemaname
   , tablename
@@ -94,12 +112,8 @@ SELECT
   , actual_pages
   , est_pages
   , actual_bytes
-  , ((actual_pages - est_pages)::bigint * bs) AS bloat_bytes
-  , CASE
-    WHEN actual_pages > 0 AND actual_pages > est_pages
-      THEN ROUND(100.0 * (actual_pages - est_pages) / actual_pages, 1)
-    ELSE 0
-  END AS bloat_percent
-FROM bloat_estimate
-WHERE actual_pages > est_pages
-ORDER BY bloat_percent DESC, bloat_bytes DESC;
+  , bloat_bytes
+  , bloat_percent
+FROM bloat_result
+WHERE bloat_percent >= 30 AND bloat_bytes >= 104857600  -- ≥30% bloat AND ≥100 MiB wasted
+ORDER BY bloat_bytes DESC;

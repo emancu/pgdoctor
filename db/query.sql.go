@@ -578,6 +578,24 @@ WITH index_info AS (
   WHERE tuple_size > 0 AND usable_space > (4 + tuple_size)
 )
 
+, bloat_result AS (
+  SELECT
+    schemaname
+    , tablename
+    , indexname
+    , actual_pages
+    , est_pages
+    , actual_bytes
+    , ((actual_pages - est_pages)::bigint * bs) AS bloat_bytes
+    , CASE
+      WHEN actual_pages > 0 AND actual_pages > est_pages
+        THEN ROUND(100.0 * (actual_pages - est_pages) / actual_pages, 1)
+      ELSE 0
+    END AS bloat_percent
+  FROM bloat_estimate
+  WHERE actual_pages > est_pages
+)
+
 SELECT
   schemaname
   , tablename
@@ -585,15 +603,11 @@ SELECT
   , actual_pages
   , est_pages
   , actual_bytes
-  , ((actual_pages - est_pages)::bigint * bs) AS bloat_bytes
-  , CASE
-    WHEN actual_pages > 0 AND actual_pages > est_pages
-      THEN ROUND(100.0 * (actual_pages - est_pages) / actual_pages, 1)
-    ELSE 0
-  END AS bloat_percent
-FROM bloat_estimate
-WHERE actual_pages > est_pages
-ORDER BY bloat_percent DESC, bloat_bytes DESC
+  , bloat_bytes
+  , bloat_percent
+FROM bloat_result
+WHERE bloat_percent >= 30 AND bloat_bytes >= 104857600  -- ≥30% bloat AND ≥100 MiB wasted
+ORDER BY bloat_bytes DESC
 `
 
 type IndexBloatRow struct {
@@ -650,23 +664,12 @@ SELECT
   , coalesce(psai.idx_tup_read, 0) AS idx_tup_read
   , coalesce(psai.idx_tup_fetch, 0) AS idx_tup_fetch
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
-  , coalesce(psaio.idx_blks_hit, 0) AS idx_blks_hit
-  , coalesce(psaio.idx_blks_read, 0) AS idx_blks_read
-  , CASE
-    WHEN coalesce(psaio.idx_blks_hit, 0) + coalesce(psaio.idx_blks_read, 0) = 0 THEN NULL
-    ELSE round(
-      100.0 * psaio.idx_blks_hit / (psaio.idx_blks_hit + psaio.idx_blks_read)
-      , 2
-    )
-  END AS cache_hit_ratio
-  , pg_get_indexdef(psai.indexrelid) AS indexdef
 FROM pg_stat_user_indexes AS psai
 INNER JOIN pg_index AS x ON psai.indexrelid = x.indexrelid
 INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_class AS c ON psai.relid = c.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
-LEFT JOIN pg_statio_user_indexes AS psaio ON psai.indexrelid = psaio.indexrelid
 WHERE
   n.nspname = 'public'
 ORDER BY
@@ -684,15 +687,11 @@ type IndexUsageStatsRow struct {
 	IdxTupRead     pgtype.Int8
 	IdxTupFetch    pgtype.Int8
 	TableWrites    pgtype.Int8
-	IdxBlksHit     pgtype.Int8
-	IdxBlksRead    pgtype.Int8
-	CacheHitRatio  pgtype.Numeric
-	Indexdef       pgtype.Text
 }
 
 // Identifies indexes with usage statistics for health analysis.
 // Excludes: system schemas.
-// Returns data for subchecks: unused-indexes, low-usage-indexes, index-cache-ratio.
+// Returns data for subchecks: unused-indexes, low-usage-indexes.
 func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, error) {
 	rows, err := q.db.Query(ctx, indexUsageStats)
 	if err != nil {
@@ -713,10 +712,6 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 			&i.IdxTupRead,
 			&i.IdxTupFetch,
 			&i.TableWrites,
-			&i.IdxBlksHit,
-			&i.IdxBlksRead,
-			&i.CacheHitRatio,
-			&i.Indexdef,
 		); err != nil {
 			return nil, err
 		}
@@ -806,6 +801,7 @@ SELECT
   , type_max_value
   , usage_pct
 FROM pk_with_usage
+WHERE usage_pct >= 0.10
 ORDER BY
   usage_pct DESC NULLS LAST
   , estimated_rows DESC NULLS LAST
@@ -2187,6 +2183,55 @@ func (q *Queries) TempUsage(ctx context.Context) (TempUsageRow, error) {
 	return i, err
 }
 
+const toastCompressionSummary = `-- name: ToastCompressionSummary :one
+WITH toast_tables AS (
+  SELECT c.oid AS table_oid
+  FROM pg_class AS c
+  INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
+  WHERE
+    c.relkind IN ('r', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    AND c.reltoastrelid != 0
+    AND pg_relation_size(c.reltoastrelid) > 1048576
+)
+
+, pglz_columns AS (
+  SELECT
+    a.attrelid AS table_oid
+    , a.attname
+  FROM pg_attribute AS a
+  INNER JOIN toast_tables AS tt ON a.attrelid = tt.table_oid
+  INNER JOIN pg_type AS t ON a.atttypid = t.oid
+  WHERE
+    a.attnum > 0
+    AND NOT a.attisdropped
+    AND a.attstorage IN ('x', 'e', 'm')
+    AND t.typname IN ('text', 'varchar', 'bpchar', 'json', 'jsonb', 'bytea')
+    AND a.attcompression != 'l'  -- 'l' = lz4; 'p' (pglz) and default (0) both need attention
+)
+
+SELECT
+  count(*)::bigint AS pglz_column_count
+  , count(DISTINCT table_oid)::bigint AS pglz_table_count
+FROM pglz_columns
+`
+
+type ToastCompressionSummaryRow struct {
+	PglzColumnCount pgtype.Int8
+	PglzTableCount  pgtype.Int8
+}
+
+// Counts the full population of TOAST-able columns still on pglz/default
+// compression across tables with meaningful (>1 MiB) TOAST storage. Used for
+// the compression-algorithm finding's headline counts, independent of the
+// 1 GiB itemization gate applied in ToastStorage.
+func (q *Queries) ToastCompressionSummary(ctx context.Context) (ToastCompressionSummaryRow, error) {
+	row := q.db.QueryRow(ctx, toastCompressionSummary)
+	var i ToastCompressionSummaryRow
+	err := row.Scan(&i.PglzColumnCount, &i.PglzTableCount)
+	return i, err
+}
+
 const toastStorage = `-- name: ToastStorage :many
 WITH toast_info AS (
   SELECT
@@ -2288,18 +2333,25 @@ SELECT
     )
     , ARRAY[]::text []
   ) AS wide_columns
-  , coalesce(
-    (
-      SELECT
-        array_agg(
-          cc.column_name || ':' || cc.compression_algorithm || ':' || cc.storage_strategy || ':' || cc.column_type
-          ORDER BY cc.column_name
+  -- Itemize compression only for tables whose TOAST already exceeds 1 GiB;
+  -- below that the per-column recommendation is noise. Population counts for
+  -- the finding come from ToastCompressionSummary, not this gated list.
+  , CASE
+    WHEN ti.toast_size > 1073741824
+      THEN coalesce(
+        (
+          SELECT
+            array_agg(
+              cc.column_name || ':' || cc.compression_algorithm || ':' || cc.storage_strategy || ':' || cc.column_type
+              ORDER BY cc.column_name
+            )
+          FROM column_compression AS cc
+          WHERE cc.schema_name = ti.schema_name AND cc.table_name = ti.table_name
         )
-      FROM column_compression AS cc
-      WHERE cc.schema_name = ti.schema_name AND cc.table_name = ti.table_name
-    )
-    , ARRAY[]::text []
-  ) AS column_compression_info
+        , ARRAY[]::text []
+      )
+    ELSE ARRAY[]::text []
+  END AS column_compression_info
 FROM toast_info AS ti
 ORDER BY ti.toast_size DESC
 `
