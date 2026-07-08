@@ -86,6 +86,7 @@ Choose severity carefully — it determines how users prioritize their work:
 
 - **FAIL**: Requires action. Security risk, data loss potential, or imminent outage.
 - **WARN**: Should address. Performance issue, technical debt, or best practice violation.
+- **INFO**: Worth knowing. Relevant information with no expected action; never escalates the report severity.
 - **OK**: Passing. Always include at least one OK finding when no issues are detected.
 
 When in doubt, prefer WARN over FAIL. A noisy tool that cries wolf loses trust.

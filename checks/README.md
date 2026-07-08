@@ -359,6 +359,20 @@ report.AddFinding(check.Finding{
 })
 ```
 
+## Severity Criteria
+
+Pick the severity by what you expect the reader to do with the finding:
+
+- **FAIL** - Imminent incident risk (hours/days), with one specific corrective action. Must not be a false positive by construction: no unguarded point-in-time snapshots or cumulative-since-stats-reset counters.
+- **WARN** - Clear corrective action for a chronic risk or resource waste. Tolerates workload-dependent signals or age-gated counters.
+- **INFO** - Relevant information with no expected action: correct-by-design states, contextual-judgment calls, or structurally confounded metrics. INFO never escalates the report severity, and renderers may hide it by default.
+- **OK** - The check ran and found nothing above threshold.
+- **SKIP** - The check could not run (timeout, permission error).
+
+When in doubt, downgrade — false alarms cost more trust than a missed WARN.
+
+Row severity must never exceed its finding's severity (enforced by `internal/checktest.AssertSeverityInvariant`).
+
 ## CLI Output Format
 
 The CLI displays checks grouped by category:

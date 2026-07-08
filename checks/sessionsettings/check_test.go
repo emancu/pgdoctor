@@ -7,6 +7,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -252,6 +253,7 @@ func Test_SessionSettings(t *testing.T) {
 			checker := sessionsettings.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
 			results := report.Results
 			require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -292,6 +294,7 @@ func Test_SessionSettings_MultipleIssues(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -328,6 +331,7 @@ func Test_SessionSettings_BothRolesCheckedEqually(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -404,6 +408,7 @@ func Test_SessionSettings_SpecificDetailChecks(t *testing.T) {
 			checker := sessionsettings.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
 			results := report.Results
 			require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -437,6 +442,7 @@ func Test_SessionSettings_EmptyRoles(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -469,6 +475,7 @@ func Test_SessionSettings_ArbitraryRoleNames(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -496,6 +503,7 @@ func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -541,6 +549,7 @@ func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity, "3000ms should WARN when threshold is 2000")
@@ -583,6 +592,7 @@ func Test_SessionSettings_CustomThresholds_Fail(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityFail, result.Severity, "7000ms should FAIL when threshold is 5000")
@@ -616,6 +626,7 @@ func Test_SessionSettings_DefaultThresholds(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms should WARN with default thresholds (5000/10000)")
@@ -655,6 +666,7 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")

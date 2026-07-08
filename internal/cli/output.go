@@ -212,7 +212,7 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 }
 
 func printSummary(w io.Writer, reports []*check.Report) {
-	okCount, warnCount, failCount, skipCount := 0, 0, 0, 0
+	okCount, warnCount, failCount, skipCount, infoCount := 0, 0, 0, 0, 0
 	var totalDuration time.Duration
 	for _, report := range reports {
 		totalDuration += report.Duration
@@ -225,6 +225,8 @@ func printSummary(w io.Writer, reports []*check.Report) {
 			failCount++
 		case check.SeveritySkip:
 			skipCount++
+		case check.SeverityInfo:
+			infoCount++
 		}
 	}
 
@@ -240,6 +242,9 @@ func printSummary(w io.Writer, reports []*check.Report) {
 	if okCount > 0 {
 		summaryParts = append(summaryParts, colorForSeverity(check.SeverityOK)(fmt.Sprintf("%d passed", okCount)))
 	}
+	if infoCount > 0 {
+		summaryParts = append(summaryParts, colorForSeverity(check.SeverityInfo)(fmt.Sprintf("%d info", infoCount)))
+	}
 	if skipCount > 0 {
 		summaryParts = append(summaryParts, colorForSeverity(check.SeveritySkip)(fmt.Sprintf("%d skipped", skipCount)))
 	}
@@ -252,6 +257,8 @@ func printSummary(w io.Writer, reports []*check.Report) {
 
 func severityDisplay(severity check.Severity) (string, func(string) string) {
 	switch severity {
+	case check.SeverityInfo:
+		return "INFO", colorForSeverity(severity)
 	case check.SeverityOK:
 		return "PASS", colorForSeverity(severity)
 	case check.SeverityWarn:
@@ -269,6 +276,9 @@ func colorForSeverity(severity check.Severity) func(string) string {
 	}
 
 	switch severity {
+	case check.SeverityInfo:
+		fn := color.New(color.Faint).SprintFunc()
+		return func(s string) string { return fn(s) }
 	case check.SeverityOK:
 		fn := color.New(color.FgGreen).SprintFunc()
 		return func(s string) string { return fn(s) }

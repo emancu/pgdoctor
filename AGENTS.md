@@ -191,7 +191,7 @@ pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
 report.AddFinding(check.Finding{
     ID:       "specific-validation",
     Name:     "Human-readable name",
-    Severity: check.SeverityFail,    // OK|Warn|Fail
+    Severity: check.SeverityFail,    // Info|OK|Warn|Fail
     Details:  "What's wrong",
     Table:    &check.Table{...},     // Optional structured data
     Debug:    "Debug info",          // Only shown with --detail debug
@@ -287,12 +287,13 @@ Five categories:
 
 ### Severity
 
+- `check.SeverityInfo` - Relevant information, no action expected
 - `check.SeveritySkip` - Check could not run (timeout, permission error)
 - `check.SeverityOK` - Check passed, no action needed
 - `check.SeverityWarn` - Issue found, non-urgent action
 - `check.SeverityFail` - Issue found, urgent action required
 
-Report severity is automatically the maximum across all findings. `SeveritySkip` is ordered below `SeverityOK` so it doesn't affect severity comparisons.
+Report severity is automatically the maximum across all findings. `SeverityInfo` and `SeveritySkip` are ordered below `SeverityOK` so they don't affect severity comparisons.
 
 ### Presets
 
@@ -474,6 +475,7 @@ Each contrib check creates its own sqlc queries internally, using the `check.DBT
 |----------|------------|---------|
 | FAIL | Data loss risk, security issue, imminent outage | No backups, publicly accessible, sequence at 90%+ |
 | WARN | Should fix but not urgent, performance degradation | Old storage type, high bloat, outdated minor version |
+| INFO | Relevant information with no expected action | Correct-by-design states, contextual-judgment calls |
 | OK | Everything is fine | Always report at least one OK finding per check |
 
 **Rule of thumb:** If a DBA would page someone at 3am, it's a FAIL. If it should go in the sprint backlog, it's a WARN.
