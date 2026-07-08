@@ -71,6 +71,15 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
+// findingSeverity keeps the finding at least as severe as its worst row, so
+// the report escalates to FAIL when critical rows exist.
+func findingSeverity(critical []db.TableBloatRow) check.Severity {
+	if len(critical) > 0 {
+		return check.SeverityFail
+	}
+	return check.SeverityWarn
+}
+
 func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	if !row.DeadTuplePercent.Valid {
 		return 0
@@ -135,7 +144,7 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "high-dead-tuples",
 		Name:     "Dead Tuple Percentage",
-		Severity: check.SeverityWarn,
+		Severity: findingSeverity(critical),
 		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
@@ -147,14 +156,15 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 // checkStaleVacuum identifies tables not vacuumed recently despite dead tuples.
 func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	now := time.Now()
-	sevenDaysAgo := now.AddDate(0, 0, -7)
-	threeDaysAgo := now.AddDate(0, 0, -3)
+	failCutoff := now.AddDate(0, 0, -12)
+	warnCutoff := now.AddDate(0, 0, -3)
 
-	var critical []db.TableBloatRow // >7 days, >50K dead
-	var warning []db.TableBloatRow  // >3 days, >100K dead
+	var critical []db.TableBloatRow
+	var warning []db.TableBloatRow
 
 	for _, row := range rows {
-		deadTuples := row.DeadTuples.Int64
+		dead := row.DeadTuples.Int64
+		pct := getDeadTuplePercent(row)
 
 		// Get last vacuum time (prefer autovacuum)
 		var lastVacuum time.Time
@@ -164,15 +174,17 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 			lastVacuum = row.LastVacuum.Time
 		}
 
-		if lastVacuum.IsZero() && deadTuples > 50000 {
-			// Never vacuumed with significant dead tuples
-			critical = append(critical, row)
-			continue
-		}
+		// A zero lastVacuum means the table was never vacuumed: its vacuum age is
+		// effectively infinite, and the zero time being before every cutoff makes
+		// it satisfy both age gates below.
+		neverVacuumed := lastVacuum.IsZero()
 
-		if lastVacuum.Before(sevenDaysAgo) && deadTuples > 50000 {
+		switch {
+		case neverVacuumed && dead >= 250_000:
 			critical = append(critical, row)
-		} else if lastVacuum.Before(threeDaysAgo) && deadTuples > 100000 {
+		case ((pct >= 10 && dead >= 400_000) || dead >= 1_000_000) && lastVacuum.Before(failCutoff):
+			critical = append(critical, row)
+		case ((pct >= 10 && dead >= 10_000) || dead >= 100_000) && lastVacuum.Before(warnCutoff):
 			warning = append(warning, row)
 		}
 	}
@@ -217,7 +229,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "stale-vacuum",
 		Name:     "Vacuum Freshness",
-		Severity: check.SeverityWarn,
+		Severity: findingSeverity(critical),
 		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
@@ -289,7 +301,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "large-bloated-tables",
 		Name:     "Large Table Bloat",
-		Severity: check.SeverityWarn,
+		Severity: findingSeverity(critical),
 		Details:  fmt.Sprintf("Found %d large table(s) with significant bloat, wasting disk space", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,

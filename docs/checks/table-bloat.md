@@ -13,8 +13,11 @@ Dead tuples are rows marked for deletion but not yet reclaimed by vacuum.
 
 ### Stale Vacuum (`stale-vacuum`)
 Identifies tables not vacuumed recently despite accumulating dead tuples:
-- **FAIL**: Not vacuumed in >7 days with >50K dead tuples
-- **WARN**: Not vacuumed in >3 days with >100K dead tuples
+- **FAIL**: Not vacuumed in >12 days with ≥1M dead tuples, or ≥400K dead tuples at ≥10% dead
+- **FAIL**: Never vacuumed with ≥250K dead tuples
+- **WARN**: Not vacuumed in >3 days with ≥100K dead tuples, or ≥10K dead tuples at ≥10% dead
+
+The 10% cutoff sits below autovacuum's default trigger (~20% dead via `autovacuum_vacuum_scale_factor`): sustained ≥10% dead with a large absolute count and no vacuum for days means autovacuum is falling behind.
 
 ### Large Bloated Tables (`large-bloated-tables`)
 Identifies large tables where bloat wastes significant disk space:
