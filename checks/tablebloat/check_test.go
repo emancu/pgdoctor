@@ -9,6 +9,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/tablebloat"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,7 @@ func TestTableBloat_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 3)
 	assert.Equal(t, "high-dead-tuples", report.Results[0].ID)
@@ -93,6 +95,7 @@ func TestTableBloat_HighDeadTuples_Warning(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	highDeadFinding := report.Results[0]
@@ -118,6 +121,7 @@ func TestTableBloat_HighDeadTuples_ExtremeStaysWarn(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	highDeadFinding := report.Results[0]
@@ -140,6 +144,7 @@ func TestTableBloat_StaleVacuum_NeverVacuumed(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityPass, report.Severity)
 
 	staleVacuumFinding := report.Results[1]
@@ -161,6 +166,7 @@ func TestTableBloat_StaleVacuum_SevenDaysOld(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	staleVacuumFinding := report.Results[1]
@@ -181,6 +187,7 @@ func TestTableBloat_StaleVacuum_ThreeDaysOld(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	staleVacuumFinding := report.Results[1]
@@ -204,6 +211,7 @@ func TestTableBloat_LargeBloated_Warning(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	largeBloatFinding := report.Results[2]
@@ -228,6 +236,7 @@ func TestTableBloat_LargeBloated_Critical(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
 	largeBloatFinding := report.Results[2]
@@ -263,6 +272,7 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 	assert.Len(t, report.Results, 3)
 
@@ -352,6 +362,7 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 			assert.Equal(t, tt.expectedHighDeadSeverity, report.Results[0].Severity, "high-dead-tuples severity")
 			assert.Equal(t, tt.expectedStaleSeverity, report.Results[1].Severity, "stale-vacuum severity")
 			assert.Equal(t, tt.expectedLargeSeverity, report.Results[2].Severity, "large-bloated-tables severity")
@@ -434,6 +445,7 @@ func TestTableBloat_StaleVacuum_Thresholds(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 			staleVacuumFinding := report.Results[1]
 			assert.Equal(t, "stale-vacuum", staleVacuumFinding.ID)
 			assert.Equal(t, tt.severity, staleVacuumFinding.Severity)
@@ -523,6 +535,7 @@ func TestTableBloat_FindingSeverityEscalation(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 			finding := report.Results[tt.findingIdx]
 			assert.Equal(t, tt.severity, finding.Severity)
 			assert.Equal(t, tt.severity, report.Severity)
@@ -544,6 +557,7 @@ func TestTableBloat_EmptyResult(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 1)
 	assert.Equal(t, "table-bloat", report.Results[0].ID)
