@@ -82,7 +82,7 @@ func TestTempUsage_StatsResetTooRecent(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
-			assert.Equal(t, check.SeverityOK, report.Severity)
+			assert.Equal(t, check.SeverityPass, report.Severity)
 			assert.Len(t, report.Results, 1)
 			assert.Equal(t, "temp-usage", report.Results[0].ID)
 			assert.Contains(t, report.Results[0].Details, "Statistics reset too recently")
@@ -113,16 +113,16 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 2)
 
 	// Both subchecks should be OK
 	assert.Equal(t, "temp-file-rate", report.Results[0].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	assert.Contains(t, report.Results[0].Details, "acceptable")
 
 	assert.Equal(t, "temp-volume-rate", report.Results[1].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[1].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
 	assert.Contains(t, report.Results[1].Details, "acceptable")
 }
 
@@ -298,42 +298,42 @@ func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {
 			filesPerHour:               5.0,
 			bytesPerHour:               100 * 1024 * 1024, // 100MB
 			expectedFileRateSeverity:   check.SeverityWarn,
-			expectedVolumeRateSeverity: check.SeverityOK,
+			expectedVolumeRateSeverity: check.SeverityPass,
 		},
 		{
 			name:                       "exactly 20 files/hour - critical threshold",
 			filesPerHour:               20.0,
 			bytesPerHour:               100 * 1024 * 1024,
 			expectedFileRateSeverity:   check.SeverityFail,
-			expectedVolumeRateSeverity: check.SeverityOK,
+			expectedVolumeRateSeverity: check.SeverityPass,
 		},
 		{
 			name:                       "exactly 1GB/hour - warning threshold",
 			filesPerHour:               4.0,
 			bytesPerHour:               float64(oneGB),
-			expectedFileRateSeverity:   check.SeverityOK,
+			expectedFileRateSeverity:   check.SeverityPass,
 			expectedVolumeRateSeverity: check.SeverityWarn,
 		},
 		{
 			name:                       "exactly 5GB/hour - critical threshold",
 			filesPerHour:               4.0,
 			bytesPerHour:               float64(5 * oneGB),
-			expectedFileRateSeverity:   check.SeverityOK,
+			expectedFileRateSeverity:   check.SeverityPass,
 			expectedVolumeRateSeverity: check.SeverityFail,
 		},
 		{
 			name:                       "just below 5 files/hour - OK",
 			filesPerHour:               4.99,
 			bytesPerHour:               100 * 1024 * 1024,
-			expectedFileRateSeverity:   check.SeverityOK,
-			expectedVolumeRateSeverity: check.SeverityOK,
+			expectedFileRateSeverity:   check.SeverityPass,
+			expectedVolumeRateSeverity: check.SeverityPass,
 		},
 		{
 			name:                       "just below 1GB/hour - OK",
 			filesPerHour:               4.0,
 			bytesPerHour:               float64(oneGB) - 1,
-			expectedFileRateSeverity:   check.SeverityOK,
-			expectedVolumeRateSeverity: check.SeverityOK,
+			expectedFileRateSeverity:   check.SeverityPass,
+			expectedVolumeRateSeverity: check.SeverityPass,
 		},
 	}
 
@@ -384,7 +384,7 @@ func TestTempUsage_InvalidNumeric(t *testing.T) {
 
 	require.NoError(t, err)
 	// Should treat invalid numerics as 0 and report stats too recent
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 1)
 	assert.Contains(t, report.Results[0].Details, "Statistics reset too recently")
 }

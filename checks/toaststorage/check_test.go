@@ -61,7 +61,7 @@ func Test_ToastStorage_NoIssues(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "No tables with significant TOAST storage")
 }
@@ -401,7 +401,7 @@ func Test_ToastStorage_CompressionAlgorithm_OptimalLZ4(t *testing.T) {
 	}
 
 	require.NotNil(t, compressionFinding)
-	require.Equal(t, check.SeverityOK, compressionFinding.Severity)
+	require.Equal(t, check.SeverityPass, compressionFinding.Severity)
 	require.Contains(t, compressionFinding.Details, "optimal compression")
 }
 

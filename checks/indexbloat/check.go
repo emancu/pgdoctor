@@ -57,7 +57,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No significant index bloat detected",
 		})
 		return report, nil
@@ -88,7 +88,7 @@ func checkHighBloatIndexes(rows []db.IndexBloatRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "high-bloat",
 			Name:     "Index Bloat Percentage",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No indexes with excessive bloat (>50%) detected",
 		})
 		return
@@ -163,7 +163,7 @@ func checkLargeBloatedIndexes(rows []db.IndexBloatRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "large-bloat",
 			Name:     "Large Bloated Indexes",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No large bloated indexes (>100MB wasted) detected",
 		})
 		return

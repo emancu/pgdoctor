@@ -45,7 +45,7 @@ func Test_UUIDDefaults_NoIssues(t *testing.T) {
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "No indexed UUID")
 }
@@ -64,7 +64,7 @@ func Test_UUIDDefaults_NoIndex(t *testing.T) {
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_UUIDDefaults_NotRandomUUID(t *testing.T) {
@@ -81,7 +81,7 @@ func Test_UUIDDefaults_NotRandomUUID(t *testing.T) {
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_UUIDDefaults_RandomUUIDIndexed(t *testing.T) {
@@ -239,7 +239,7 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 				makeUUIDDefault("t1", "id", "gen_random_uuid()", false),
 				makeUUIDDefault("t2", "id", "gen_random_uuid()", false),
 			},
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedCount:    0,
 		},
 		{
@@ -248,7 +248,7 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 				makeUUIDDefault("t1", "id", "uuid_generate_v7()", true),
 				makeUUIDDefault("t2", "id", "uuidv7()", true),
 			},
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedCount:    0,
 		},
 		{

@@ -38,7 +38,7 @@ func printCheckSummary(w io.Writer, report *check.Report, opts *runOptions) {
 
 	okCount := 0
 	for _, result := range report.Results {
-		if result.Severity == check.SeverityOK {
+		if result.Severity == check.SeverityPass {
 			okCount++
 		}
 	}
@@ -82,7 +82,7 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 			report.Name,
 			dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 			timingStr)
-		if result.Severity != check.SeverityOK && result.Details != "" {
+		if result.Severity != check.SeverityPass && result.Details != "" {
 			fmt.Fprintf(w, "%s\n", indent(result.Details, 2))
 		}
 		if result.Table != nil {
@@ -136,7 +136,7 @@ func printSubcheck(w io.Writer, report *check.Report, result check.Finding, opts
 		result.Name,
 		dimFunc(fmt.Sprintf("(%s)", fullID)))
 
-	if result.Severity != check.SeverityOK && result.Details != "" {
+	if result.Severity != check.SeverityPass && result.Details != "" {
 		fmt.Fprintf(w, "%s\n", indent(result.Details, 2))
 	}
 
@@ -217,7 +217,7 @@ func printSummary(w io.Writer, reports []*check.Report) {
 	for _, report := range reports {
 		totalDuration += report.Duration
 		switch report.Severity {
-		case check.SeverityOK:
+		case check.SeverityPass:
 			okCount++
 		case check.SeverityWarn:
 			warnCount++
@@ -240,7 +240,7 @@ func printSummary(w io.Writer, reports []*check.Report) {
 		summaryParts = append(summaryParts, colorForSeverity(check.SeverityWarn)(fmt.Sprintf("%d warnings", warnCount)))
 	}
 	if okCount > 0 {
-		summaryParts = append(summaryParts, colorForSeverity(check.SeverityOK)(fmt.Sprintf("%d passed", okCount)))
+		summaryParts = append(summaryParts, colorForSeverity(check.SeverityPass)(fmt.Sprintf("%d passed", okCount)))
 	}
 	if infoCount > 0 {
 		summaryParts = append(summaryParts, colorForSeverity(check.SeverityInfo)(fmt.Sprintf("%d info", infoCount)))
@@ -259,7 +259,7 @@ func severityDisplay(severity check.Severity) (string, func(string) string) {
 	switch severity {
 	case check.SeverityInfo:
 		return "INFO", colorForSeverity(severity)
-	case check.SeverityOK:
+	case check.SeverityPass:
 		return "PASS", colorForSeverity(severity)
 	case check.SeverityWarn:
 		return "WARN", colorForSeverity(severity)
@@ -279,7 +279,7 @@ func colorForSeverity(severity check.Severity) func(string) string {
 	case check.SeverityInfo:
 		fn := color.New(color.Faint).SprintFunc()
 		return func(s string) string { return fn(s) }
-	case check.SeverityOK:
+	case check.SeverityPass:
 		fn := color.New(color.FgGreen).SprintFunc()
 		return func(s string) string { return fn(s) }
 	case check.SeverityWarn:

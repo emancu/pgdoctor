@@ -122,7 +122,7 @@ func addConnectionOverview(stats db.ConnectionStatsRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "connection-overview",
 		Name:     "Connection Overview",
-		Severity: check.SeverityOK,
+		Severity: check.SeverityPass,
 		Details:  details,
 	})
 }
@@ -140,7 +140,7 @@ func checkConnectionSaturation(stats db.ConnectionStatsRow, report *check.Report
 		report.AddFinding(check.Finding{
 			ID:       "connection-saturation",
 			Name:     "Connection Saturation",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Connection usage at %.1f%% (%d/%d available)", saturationPercent, used, available),
 		})
 		return
@@ -172,7 +172,7 @@ func checkPoolPressure(stats db.ConnectionStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "pool-pressure",
 			Name:     "Connection Pool Pressure",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Only %d connections, pool pressure check skipped", total),
 		})
 		return
@@ -185,7 +185,7 @@ func checkPoolPressure(stats db.ConnectionStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "pool-pressure",
 			Name:     "Connection Pool Pressure",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Pool has capacity: %d active (%.1f%%), %d idle connections available", active, activePercent, idle),
 		})
 		return
@@ -215,7 +215,7 @@ func checkIdleRatio(stats db.ConnectionStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "idle-ratio",
 			Name:     "Idle Connection Ratio",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Only %d total connections, idle ratio check skipped", total),
 		})
 		return
@@ -227,7 +227,7 @@ func checkIdleRatio(stats db.ConnectionStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "idle-ratio",
 			Name:     "Idle Connection Ratio",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Idle ratio at %.1f%% (%d/%d connections idle)", idlePercent, idle, total),
 		})
 		return
@@ -246,7 +246,7 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 		report.AddFinding(check.Finding{
 			ID:       "idle-in-transaction",
 			Name:     "Idle In Transaction",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No connections stuck in 'idle in transaction' state",
 		})
 		return
@@ -272,7 +272,7 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 		report.AddFinding(check.Finding{
 			ID:       "idle-in-transaction",
 			Name:     "Idle In Transaction",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No connections stuck in 'idle in transaction' state",
 		})
 		return
@@ -321,7 +321,7 @@ func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, report *chec
 		report.AddFinding(check.Finding{
 			ID:       "long-idle",
 			Name:     "Long Idle Connections",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("%d connections idle >30 minutes (threshold: %d)", count, longIdleWarnCount),
 		})
 		return

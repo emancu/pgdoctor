@@ -112,7 +112,7 @@ func Test_PartitionUsage_NoPartitionedTables(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "No partitioned tables found")
 }
 
@@ -131,7 +131,7 @@ func Test_PartitionUsage_NoQueryStats(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "No query statistics available")
 }
 
@@ -152,7 +152,7 @@ func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "properly use partition keys")
 }
 
@@ -217,7 +217,7 @@ func Test_PartitionUsage_QueryBelowThreshold_Ignored(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 }
 
 func Test_PartitionUsage_QueryNotReferencingTable_Ignored(t *testing.T) {
@@ -238,7 +238,7 @@ func Test_PartitionUsage_QueryNotReferencingTable_Ignored(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 }
 
 func Test_PartitionUsage_ExpressionBasedKey_Skipped(t *testing.T) {
@@ -260,7 +260,7 @@ func Test_PartitionUsage_ExpressionBasedKey_Skipped(t *testing.T) {
 
 	// Should be OK because expression-based keys are skipped
 	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 }
 
 func Test_PartitionUsage_MultipleTables(t *testing.T) {
@@ -450,9 +450,9 @@ func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 
 			require.Equal(t, 1, len(report.Results))
 			if tc.shouldBeOK {
-				require.Equal(t, check.SeverityOK, report.Results[0].Severity, "Expected OK for: %s", tc.name)
+				require.Equal(t, check.SeverityPass, report.Results[0].Severity, "Expected OK for: %s", tc.name)
 			} else {
-				require.NotEqual(t, check.SeverityOK, report.Results[0].Severity, "Expected not OK for: %s", tc.name)
+				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity, "Expected not OK for: %s", tc.name)
 			}
 		})
 	}

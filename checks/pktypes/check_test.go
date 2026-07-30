@@ -61,7 +61,7 @@ func TestPKTypes(t *testing.T) {
 		{
 			name:     "no issues",
 			data:     []db.InvalidPrimaryKeyTypesRow{},
-			severity: check.SeverityOK,
+			severity: check.SeverityPass,
 			wantOK:   true,
 		},
 		{
@@ -161,11 +161,11 @@ func TestPKTypes(t *testing.T) {
 
 			if tt.wantOK {
 				require.Len(t, report.Results, 1)
-				assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
+				assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 				assert.Contains(t, report.Results[0].Details, "All tables use bigint or UUID primary keys")
 			} else {
 				require.Len(t, report.Results, 1)
-				assert.NotEqual(t, check.SeverityOK, report.Results[0].Severity)
+				assert.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
 				assert.NotNil(t, report.Results[0].Table)
 				if tt.wantTableRows > 0 {
 					assert.Len(t, report.Results[0].Table.Rows, tt.wantTableRows)

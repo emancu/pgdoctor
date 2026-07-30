@@ -57,7 +57,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No UUID columns stored as string types detected",
 		})
 		return report, nil

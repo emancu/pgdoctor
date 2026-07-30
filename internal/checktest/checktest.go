@@ -10,7 +10,7 @@ import (
 
 // AssertSeverityInvariant verifies the severity contract established by
 // check.NewReport and check.Report.AddFinding: the report severity is the
-// maximum finding severity (never below SeverityOK), and no table row is
+// maximum finding severity (never below SeverityPass), and no table row is
 // more severe than the finding that contains it.
 //
 // It covers reports built through AddFinding; runner-injected SKIP reports
@@ -26,7 +26,7 @@ func AssertSeverityInvariant(t *testing.T, report *check.Report) {
 func severityViolations(report *check.Report) []string {
 	var violations []string
 
-	want := check.SeverityOK
+	want := check.SeverityPass
 	for _, finding := range report.Results {
 		if finding.Severity > want {
 			want = finding.Severity
@@ -35,7 +35,7 @@ func severityViolations(report *check.Report) []string {
 	if report.Severity != want {
 		violations = append(violations, fmt.Sprintf(
 			"report %q severity is %q, want %q (max finding severity, floored at %q)",
-			report.CheckID, report.Severity, want, check.SeverityOK))
+			report.CheckID, report.Severity, want, check.SeverityPass))
 	}
 
 	for _, finding := range report.Results {

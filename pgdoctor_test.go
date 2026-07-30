@@ -113,7 +113,7 @@ func TestRun_ContinuesAfterStatementTimeout(t *testing.T) {
 	pgErr := &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}
 
 	fastReport := check.NewReport(check.Metadata{CheckID: "fast-check", Name: "Fast", Category: check.CategoryConfigs})
-	fastReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityOK, Details: "all good"})
+	fastReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityPass, Details: "all good"})
 
 	var reports []*check.Report
 	Run(context.Background(), nil, Options{
@@ -130,7 +130,7 @@ func TestRun_ContinuesAfterStatementTimeout(t *testing.T) {
 	require.Len(t, reports[0].Results, 1)
 	assert.Contains(t, reports[0].Results[0].Details, "statement_timeout")
 
-	assert.Equal(t, check.SeverityOK, reports[1].Severity)
+	assert.Equal(t, check.SeverityPass, reports[1].Severity)
 	assert.Equal(t, "fast-check", reports[1].CheckID)
 }
 
@@ -138,7 +138,7 @@ func TestRun_ContinuesAfterCheckError(t *testing.T) {
 	t.Parallel()
 
 	goodReport := check.NewReport(check.Metadata{CheckID: "good-check", Name: "Good", Category: check.CategoryConfigs})
-	goodReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityOK})
+	goodReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityPass})
 
 	var reports []*check.Report
 	Run(context.Background(), nil, Options{
@@ -155,6 +155,6 @@ func TestRun_ContinuesAfterCheckError(t *testing.T) {
 	require.Len(t, reports[0].Results, 1)
 	assert.Contains(t, reports[0].Results[0].Details, "connection refused")
 
-	assert.Equal(t, check.SeverityOK, reports[1].Severity)
+	assert.Equal(t, check.SeverityPass, reports[1].Severity)
 	assert.Equal(t, "good-check", reports[1].CheckID)
 }

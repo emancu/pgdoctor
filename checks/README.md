@@ -137,7 +137,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
         report.AddFinding(check.Finding{
             ID:       report.CheckID,
             Name:     report.Name,
-            Severity: check.SeverityOK,
+            Severity: check.SeverityPass,
         })
         return report, nil
     }
@@ -159,7 +159,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 - Embed SQL with `//go:embed query.sql`
 - Use `check.NewReport(Metadata())` to create reports
 - Access check info via promoted fields: `report.CheckID`, `report.Name`, `report.Category`
-- Always report `SeverityOK` when no issues found
+- Always report `SeverityPass` when no issues found
 
 ### 6. Write Tests
 Create `checks/mycheck/check_test.go`:
@@ -174,7 +174,7 @@ func TestMyCheck(t *testing.T) {
         {
             name:     "all good",
             data:     []MyQueryRow{},
-            severity: check.SeverityOK,
+            severity: check.SeverityPass,
         },
         {
             name:     "issue found",
@@ -260,7 +260,7 @@ func TestMyCheck(t *testing.T) {
         {
             name:     "optimal configuration",
             data:     []MyQueryRow{},
-            severity: check.SeverityOK,
+            severity: check.SeverityPass,
         },
         {
             name:     "issue detected",
@@ -312,7 +312,7 @@ If your check has only one validation:
 report.AddFinding(check.Finding{
     ID:       report.CheckID,  // Same as check
     Name:     report.Name,
-    Severity: check.SeverityOK,
+    Severity: check.SeverityPass,
 })
 ```
 
@@ -414,5 +414,5 @@ Summary: 1 failure, 1 warning, 1 passed
 - Checks: `[Severity] Name (check-id)`
 - Subchecks: indented 2 spaces with `[Severity] Name (finding-id)`
 - Details: indented 4 spaces
-- WARN/FAIL lines fully colored for emphasis, OK only colors the label
-- Subchecks sorted ascending by severity (OK first, FAIL last)
+- WARN/FAIL lines fully colored for emphasis, PASS only colors the label
+- Subchecks sorted ascending by severity (PASS first, FAIL last)

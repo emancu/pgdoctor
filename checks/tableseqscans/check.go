@@ -65,7 +65,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return report, nil
 	}
@@ -149,7 +149,7 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "high-seq-scans",
 			Name:     "High Sequential Scans",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 	}
 }

@@ -51,7 +51,7 @@ func Test_DuplicateIndexes(t *testing.T) {
 		{
 			Name:             "no duplicate indexes - OK",
 			Rows:             []db.DuplicateIndexesRow{},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedFindings: 1,
 		},
 		{
@@ -387,7 +387,7 @@ func Test_DuplicateIndexes_OKResult(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have 1 result when no duplicates")
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Result should be OK")
+	require.Equal(t, check.SeverityPass, result.Severity, "Result should be OK")
 	require.Equal(t, "duplicate-indexes", result.ID, "ID should be duplicate-indexes")
 	require.Empty(t, result.Details, "Details should be empty for OK result")
 }

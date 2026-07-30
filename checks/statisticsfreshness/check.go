@@ -64,7 +64,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "Statistics have never been reset (optimal for usage-based analysis)",
 		})
 		return report, nil
@@ -76,7 +76,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Statistics are %d days old (mature enough for analysis)", ageDays),
 		})
 		return report, nil

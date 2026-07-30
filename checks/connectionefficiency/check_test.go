@@ -88,10 +88,10 @@ func Test_ConnectionEfficiency_AllOK(t *testing.T) {
 
 	// All 4 subchecks should report OK.
 	require.Len(t, report.Results, 4)
-	require.True(t, hasResult(report.Results, "busy-ratio", check.SeverityOK))
-	require.True(t, hasResult(report.Results, "sessions-abandoned", check.SeverityOK))
-	require.True(t, hasResult(report.Results, "sessions-fatal", check.SeverityOK))
-	require.True(t, hasResult(report.Results, "sessions-killed", check.SeverityOK))
+	require.True(t, hasResult(report.Results, "busy-ratio", check.SeverityPass))
+	require.True(t, hasResult(report.Results, "sessions-abandoned", check.SeverityPass))
+	require.True(t, hasResult(report.Results, "sessions-fatal", check.SeverityPass))
+	require.True(t, hasResult(report.Results, "sessions-killed", check.SeverityPass))
 }
 
 func Test_ConnectionEfficiency_PostgreSQL13_Skipped(t *testing.T) {
@@ -106,7 +106,7 @@ func Test_ConnectionEfficiency_PostgreSQL13_Skipped(t *testing.T) {
 
 	// Should return single OK finding explaining PG13 doesn't support session stats.
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "Does not support session statistics")
 	require.Contains(t, report.Results[0].Details, "requires PG14+")
 }
@@ -122,7 +122,7 @@ func Test_ConnectionEfficiency_NoMetadata_Skipped(t *testing.T) {
 	require.NotNil(t, report)
 
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "Does not support session statistics")
 }
 
@@ -142,7 +142,7 @@ func Test_ConnectionEfficiency_NoSessions(t *testing.T) {
 
 	// Should return single OK finding explaining no stats yet.
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	require.Contains(t, report.Results[0].Details, "No session statistics")
 }
 
@@ -171,7 +171,7 @@ func Test_ConnectionEfficiency_BusyRatio(t *testing.T) {
 		{
 			name:             "good utilization (30%)",
 			busyRatio:        30.0,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "low utilization warning (3%)",
@@ -181,7 +181,7 @@ func Test_ConnectionEfficiency_BusyRatio(t *testing.T) {
 		{
 			name:             "at warn threshold (20%)",
 			busyRatio:        20.0,
-			expectedSeverity: check.SeverityOK, // 5% is acceptable, <5% is warn
+			expectedSeverity: check.SeverityPass, // 5% is acceptable, <5% is warn
 		},
 		{
 			name:             "just below warn threshold (19.9%)",
@@ -191,7 +191,7 @@ func Test_ConnectionEfficiency_BusyRatio(t *testing.T) {
 		{
 			name:             "high utilization is OK (93%)",
 			busyRatio:        93.0,
-			expectedSeverity: check.SeverityOK, // High utilization is not a problem - pool pressure is checked by connection-health
+			expectedSeverity: check.SeverityPass, // High utilization is not a problem - pool pressure is checked by connection-health
 		},
 	}
 
@@ -225,13 +225,13 @@ func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 			name:             "healthy (0.5%)",
 			totalSessions:    1000,
 			abandoned:        5,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "at warn threshold (1%)",
 			totalSessions:    1000,
 			abandoned:        10,
-			expectedSeverity: check.SeverityOK, // <= 1% is OK
+			expectedSeverity: check.SeverityPass, // <= 1% is OK
 		},
 		{
 			name:             "warning (2%)",
@@ -278,7 +278,7 @@ func Test_ConnectionEfficiency_SessionsFatal(t *testing.T) {
 			name:             "healthy (0.2%)",
 			totalSessions:    1000,
 			fatal:            2,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "warning (2%)",
@@ -325,7 +325,7 @@ func Test_ConnectionEfficiency_SessionsKilled(t *testing.T) {
 			name:             "healthy (0.3%)",
 			totalSessions:    1000,
 			killed:           3,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "warning (2%)",
@@ -391,7 +391,7 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 		{
 			name:             "all OK",
 			stats:            healthyStats(),
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name: "one warning",

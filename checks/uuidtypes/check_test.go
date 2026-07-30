@@ -42,7 +42,7 @@ func Test_UUIDTypes_NoIssues(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "No UUID columns")
 }

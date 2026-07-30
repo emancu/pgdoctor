@@ -36,7 +36,7 @@ func TestAssertSeverityInvariant_Passing(t *testing.T) {
 	}{
 		{
 			name:   "single OK finding",
-			report: reportWith(check.Finding{ID: "sample-check", Severity: check.SeverityOK}),
+			report: reportWith(check.Finding{ID: "sample-check", Severity: check.SeverityPass}),
 		},
 		{
 			name: "info finding with info rows keeps report at OK",
@@ -55,14 +55,14 @@ func TestAssertSeverityInvariant_Passing(t *testing.T) {
 		{
 			name: "warn finding with mixed rows at or below warn",
 			report: reportWith(
-				check.Finding{ID: "healthy", Severity: check.SeverityOK},
+				check.Finding{ID: "healthy", Severity: check.SeverityPass},
 				check.Finding{
 					ID:       "chronic",
 					Severity: check.SeverityWarn,
 					Table: &check.Table{
 						Headers: []string{"Item"},
 						Rows: []check.TableRow{
-							{Cells: []string{"a"}, Severity: check.SeverityOK},
+							{Cells: []string{"a"}, Severity: check.SeverityPass},
 							{Cells: []string{"b"}, Severity: check.SeverityWarn},
 						},
 					},
@@ -85,7 +85,7 @@ func TestSeverityViolations(t *testing.T) {
 	t.Parallel()
 
 	understatedReport := reportWith(check.Finding{ID: "issue", Severity: check.SeverityWarn})
-	understatedReport.Severity = check.SeverityOK
+	understatedReport.Severity = check.SeverityPass
 
 	tests := []struct {
 		name   string

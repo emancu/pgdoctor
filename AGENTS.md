@@ -113,7 +113,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
         report.AddFinding(check.Finding{
             ID:       report.CheckID,
             Name:     report.Name,
-            Severity: check.SeverityOK,
+            Severity: check.SeverityPass,
         })
         return report, nil
     }
@@ -191,7 +191,7 @@ pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
 report.AddFinding(check.Finding{
     ID:       "specific-validation",
     Name:     "Human-readable name",
-    Severity: check.SeverityFail,    // Info|OK|Warn|Fail
+    Severity: check.SeverityFail,    // Info|Pass|Warn|Fail (Skip is runner-injected on error, never set by a check)
     Details:  "What's wrong",
     Table:    &check.Table{...},     // Optional structured data
     Debug:    "Debug info",          // Only shown with --detail debug
@@ -288,12 +288,12 @@ Five categories:
 ### Severity
 
 - `check.SeverityInfo` - Relevant information, no action expected
-- `check.SeveritySkip` - Check could not run (timeout, permission error)
-- `check.SeverityOK` - Check passed, no action needed
+- `check.SeveritySkip` - Check could not run (timeout, permission error); runner-injected on error, never set by a check
+- `check.SeverityPass` - Check passed, no action needed
 - `check.SeverityWarn` - Issue found, non-urgent action
 - `check.SeverityFail` - Issue found, urgent action required
 
-Report severity is automatically the maximum across all findings. `SeverityInfo` and `SeveritySkip` are ordered below `SeverityOK` so they don't affect severity comparisons.
+Report severity is automatically the maximum across all findings. `SeverityInfo` and `SeveritySkip` are ordered below `SeverityPass` so they don't affect severity comparisons.
 
 ### Presets
 
@@ -340,7 +340,7 @@ If a check doesn't appear in `list` or `explain`:
 - Embed README with `//go:embed README.md` and include in `Metadata.Readme`
 - Use `check.NewReport(Metadata())` to create reports
 - Access check info via promoted fields: `report.CheckID`, `report.Name`
-- Report `SeverityOK` when no issues found
+- Report `SeverityPass` when no issues found
 - Keep checks self-contained
 - Use sqlc for all database queries
 - Define query interfaces for testability
@@ -349,7 +349,7 @@ If a check doesn't appear in `list` or `explain`:
 
 - Edit generated files (`db/`, `checks.go`)
 - Create local `id` or `name` variables (use promoted fields)
-- Skip reporting SeverityOK findings
+- Skip reporting SeverityPass findings
 - Hardcode check metadata in CLI
 - Create new categories without discussion
 
@@ -369,7 +369,7 @@ func TestMyCheck(t *testing.T) {
         {
             name:     "all good",
             data:     []db.MyQueryRow{},
-            severity: check.SeverityOK,
+            severity: check.SeverityPass,
         },
         {
             name:     "issue found",
@@ -475,8 +475,10 @@ Each contrib check creates its own sqlc queries internally, using the `check.DBT
 |----------|------------|---------|
 | FAIL | Data loss risk, security issue, imminent outage | No backups, publicly accessible, sequence at 90%+ |
 | WARN | Should fix but not urgent, performance degradation | Old storage type, high bloat, outdated minor version |
-| INFO | Relevant information with no expected action | Correct-by-design states, contextual-judgment calls |
-| OK | Everything is fine | Always report at least one OK finding per check |
+| INFO | A signal worth surfacing that demands no action — inventory-style findings renderers hide by default | Tables with FULL replica identity (inventory), per-index cache hit ratios (confounded by OS page cache), extension version inventory |
+| PASS | Everything is fine | Always report at least one PASS finding per check |
+
+`SKIP` is never author-assigned: the runner injects it when a check errors (timeout, permission, missing extension), so it is absent from this authoring guide.
 
 **Rule of thumb:** If a DBA would page someone at 3am, it's a FAIL. If it should go in the sprint backlog, it's a WARN.
 

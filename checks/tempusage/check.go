@@ -60,7 +60,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Statistics reset too recently (%.0f minutes ago). Need at least 1 hour of data.", secondsSinceReset/60),
 		})
 		return report, nil
@@ -109,7 +109,7 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "temp-file-rate",
 			Name:     "Temp File Creation Rate",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Temp file creation rate is acceptable: %.1f files/hour", rate),
 		})
 		return
@@ -155,7 +155,7 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "temp-volume-rate",
 			Name:     "Temp Data Volume Rate",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Temp data volume is acceptable: %s/hour", check.FormatBytes(int64(bytesPerHour))),
 		})
 		return

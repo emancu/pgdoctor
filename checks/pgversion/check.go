@@ -57,7 +57,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			Name:     report.Name,
 			ID:       report.CheckID,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 
 		return report, nil

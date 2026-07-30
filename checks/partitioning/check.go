@@ -163,7 +163,7 @@ func checkLargeUnpartitioned(rows []db.LargeTablesRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "large-unpartitioned",
 			Name:     "Large Unpartitioned Tables",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All large tables are properly partitioned (if any)",
 		})
 		return
@@ -220,7 +220,7 @@ func checkTransientUnpartitioned(rows []db.LargeTablesRow, report *check.Report)
 		report.AddFinding(check.Finding{
 			ID:       "transient-unpartitioned",
 			Name:     "Transient Tables Partitioning",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All large transient tables are properly partitioned (if any)",
 		})
 		return

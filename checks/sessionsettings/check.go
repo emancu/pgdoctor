@@ -102,7 +102,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No application roles found",
 		})
 		return report, nil
@@ -138,7 +138,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	// Determine overall severity
-	overallSeverity := check.SeverityOK
+	overallSeverity := check.SeverityPass
 	for _, sc := range checks {
 		if sc.Severity > overallSeverity {
 			overallSeverity = sc.Severity
@@ -152,11 +152,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		Severity: overallSeverity,
 	}
 
-	if overallSeverity != check.SeverityOK {
+	if overallSeverity != check.SeverityPass {
 		// Create table with only non-OK entries
 		tableRows := []check.TableRow{}
 		for _, sc := range checks {
-			if sc.Severity != check.SeverityOK {
+			if sc.Severity != check.SeverityPass {
 				tableRows = append(tableRows, check.TableRow{
 					Cells: []string{
 						sc.Role,
@@ -235,7 +235,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 			Current:   fmt.Sprintf("%dms", stmtTimeout),
 			Expected:  expectedTimeout,
 			Status:    "OK",
-			Severity:  check.SeverityOK,
+			Severity:  check.SeverityPass,
 		})
 	}
 
@@ -256,7 +256,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 			Current:   fmt.Sprintf("%dms", idleTimeout),
 			Expected:  "60000ms",
 			Status:    "OK",
-			Severity:  check.SeverityOK,
+			Severity:  check.SeverityPass,
 		})
 	}
 
@@ -298,7 +298,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 				Current:   fmt.Sprintf("%dms", txTimeout),
 				Expected:  expectedTimeout,
 				Status:    "OK",
-				Severity:  check.SeverityOK,
+				Severity:  check.SeverityPass,
 			})
 		}
 	}
@@ -339,7 +339,7 @@ func checkLogStatements(s dbSessionSettings, user string) ([]settingCheck, error
 			Current:   fmt.Sprintf("%dms", minDuration),
 			Expected:  "2000ms",
 			Status:    "OK",
-			Severity:  check.SeverityOK,
+			Severity:  check.SeverityPass,
 		})
 	}
 

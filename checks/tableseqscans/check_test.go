@@ -57,7 +57,7 @@ func Test_TableSeqScans(t *testing.T) {
 		{
 			Name:             "no high seq scan tables - OK",
 			Rows:             []db.HighSeqScanTablesRow{},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedFindings: 1,
 		},
 		{
@@ -105,7 +105,7 @@ func Test_TableSeqScans(t *testing.T) {
 					IndexCount:     pgtype.Int8{Int64: 0, Valid: true},
 				},
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedFindings: 1,
 		},
 		{
@@ -297,7 +297,7 @@ func Test_TableSeqScans_ThresholdBoundaries(t *testing.T) {
 			var foundExpected bool
 			for _, result := range report.Results {
 				if result.ID == tc.ExpectedFinding {
-					if result.Severity != check.SeverityOK {
+					if result.Severity != check.SeverityPass {
 						foundExpected = true
 					}
 					break
@@ -334,7 +334,7 @@ func Test_TableSeqScans_NoIndexCount(t *testing.T) {
 	require.Equal(t, 1, len(results))
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Tables without indexes should not be flagged")
+	require.Equal(t, check.SeverityPass, result.Severity, "Tables without indexes should not be flagged")
 }
 
 func Test_TableSeqScans_InvalidRatio(t *testing.T) {
@@ -478,7 +478,7 @@ func Test_TableSeqScans_OKResult(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Should be OK when no high seq scan tables")
+	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when no high seq scan tables")
 	require.Equal(t, "table-seq-scans", result.ID, "ID should be table-seq-scans when no rows")
 	require.Empty(t, result.Details, "Details should be empty for OK result")
 }

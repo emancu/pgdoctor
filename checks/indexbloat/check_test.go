@@ -49,12 +49,12 @@ func TestIndexBloat_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 2)
 	assert.Equal(t, "high-bloat", report.Results[0].ID)
 	assert.Equal(t, "large-bloat", report.Results[1].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
-	assert.Equal(t, check.SeverityOK, report.Results[1].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
 }
 
 func TestIndexBloat_HighPercentageWarning(t *testing.T) {
@@ -199,10 +199,10 @@ func TestIndexBloat_BelowBloatThreshold(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	assert.Equal(t, "high-bloat", report.Results[0].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[1].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
 	assert.Equal(t, "large-bloat", report.Results[1].ID)
 }
 
@@ -233,19 +233,19 @@ func TestIndexBloat_EdgeCases_ExactThresholds(t *testing.T) {
 		{
 			name:                       "exactly 100MB bloat - warning threshold",
 			row:                        makeIndexRow("public.t3", "idx3", 40.0, hundredMB, 250*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityOK,
+			expectedHighBloatSeverity:  check.SeverityPass,
 			expectedLargeBloatSeverity: check.SeverityWarn,
 		},
 		{
 			name:                       "exactly 1GB bloat - critical threshold",
 			row:                        makeIndexRow("public.t4", "idx4", 35.0, oneGB, 3*oneGB),
-			expectedHighBloatSeverity:  check.SeverityOK,
+			expectedHighBloatSeverity:  check.SeverityPass,
 			expectedLargeBloatSeverity: check.SeverityWarn,
 		},
 		{
 			name:                       "just below 50% - OK for high-bloat",
 			row:                        makeIndexRow("public.t5", "idx5", 49.9, 499*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityOK,
+			expectedHighBloatSeverity:  check.SeverityPass,
 			expectedLargeBloatSeverity: check.SeverityWarn, // 499MB >= 100MB and 49.9% >= 30%
 		},
 	}
@@ -273,10 +273,10 @@ func TestIndexBloat_EmptyResult(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 1)
 	assert.Equal(t, "index-bloat", report.Results[0].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	assert.Contains(t, report.Results[0].Details, "No significant index bloat detected")
 }
 

@@ -56,7 +56,7 @@ func Test_IndexUsage(t *testing.T) {
 		{
 			Name:             "no issues - OK",
 			Rows:             []db.IndexUsageStatsRow{},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedFindings: 1,
 		},
 		{
@@ -308,7 +308,7 @@ func Test_IndexUsage_SkipPrimaryAndUnique(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, result := range report.Results {
-		require.Equal(t, check.SeverityOK, result.Severity, "Primary/unique indexes should not be flagged")
+		require.Equal(t, check.SeverityPass, result.Severity, "Primary/unique indexes should not be flagged")
 	}
 }
 
@@ -383,14 +383,14 @@ func Test_IndexUsage_SizeThresholds(t *testing.T) {
 					if tc.ShouldBeUnused {
 						require.Equal(t, check.SeverityWarn, result.Severity)
 					} else {
-						require.Equal(t, check.SeverityOK, result.Severity)
+						require.Equal(t, check.SeverityPass, result.Severity)
 					}
 				}
 				if result.ID == "low-usage-indexes" {
 					if tc.ShouldBeLowUsage {
 						require.Equal(t, check.SeverityWarn, result.Severity)
 					} else {
-						require.Equal(t, check.SeverityOK, result.Severity)
+						require.Equal(t, check.SeverityPass, result.Severity)
 					}
 				}
 			}
@@ -413,7 +413,7 @@ func Test_IndexUsage_CacheRatioThresholds(t *testing.T) {
 			Name:             "good cache ratio (>95%) - OK",
 			CacheRatio:       98.0,
 			IndexSizeBytes:   157286400,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "low cache ratio (<95%), small index - WARN",
@@ -431,7 +431,7 @@ func Test_IndexUsage_CacheRatioThresholds(t *testing.T) {
 			Name:             "very small index ignored",
 			CacheRatio:       80.0,
 			IndexSizeBytes:   5242880,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 	}
 
@@ -503,7 +503,7 @@ func Test_IndexUsage_NoCacheData(t *testing.T) {
 	}
 
 	require.NotNil(t, cacheResult)
-	require.Equal(t, check.SeverityOK, cacheResult.Severity, "Should be OK when no cache data")
+	require.Equal(t, check.SeverityPass, cacheResult.Severity, "Should be OK when no cache data")
 }
 
 func Test_IndexUsage_QueryError(t *testing.T) {
@@ -547,7 +547,7 @@ func Test_IndexUsage_OKResult(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have 1 result when no indexes")
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Result should be OK")
+	require.Equal(t, check.SeverityPass, result.Severity, "Result should be OK")
 	require.Equal(t, "index-usage", result.ID, "ID should be index-usage")
 	require.Empty(t, result.Details, "Details should be empty for OK result")
 }

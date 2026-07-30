@@ -69,14 +69,14 @@ func TestTableBloat_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 3)
 	assert.Equal(t, "high-dead-tuples", report.Results[0].ID)
 	assert.Equal(t, "stale-vacuum", report.Results[1].ID)
 	assert.Equal(t, "large-bloated-tables", report.Results[2].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
-	assert.Equal(t, check.SeverityOK, report.Results[1].Severity)
-	assert.Equal(t, check.SeverityOK, report.Results[2].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[2].Severity)
 }
 
 func TestTableBloat_HighDeadTuples_Warning(t *testing.T) {
@@ -263,7 +263,7 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 
 	// All three subchecks should have findings
 	for _, finding := range report.Results {
-		assert.NotEqual(t, check.SeverityOK, finding.Severity)
+		assert.NotEqual(t, check.SeverityPass, finding.Severity)
 		assert.NotNil(t, finding.Table)
 	}
 }
@@ -288,42 +288,42 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 			name:                     "exactly 20% dead - warning threshold",
 			row:                      makeTableRow("public.t1", 80000, 20000, 20.0, 100*1024*1024, &recentVacuum, nil, 5),
 			expectedHighDeadSeverity: check.SeverityWarn,
-			expectedStaleSeverity:    check.SeverityOK,
-			expectedLargeSeverity:    check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityPass,
+			expectedLargeSeverity:    check.SeverityPass,
 		},
 		{
 			name:                     "exactly 40% dead - critical threshold",
 			row:                      makeTableRow("public.t2", 60000, 40000, 40.0, 150*1024*1024, &recentVacuum, nil, 3),
 			expectedHighDeadSeverity: check.SeverityWarn,
-			expectedStaleSeverity:    check.SeverityOK,
-			expectedLargeSeverity:    check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityPass,
+			expectedLargeSeverity:    check.SeverityPass,
 		},
 		{
 			name:                     "exactly 3 days stale + 100K dead",
 			row:                      makeTableRow("public.t3", 900000, 100000, 11.0, 200*1024*1024, &threeDaysAgo, nil, 5),
-			expectedHighDeadSeverity: check.SeverityOK,
-			expectedStaleSeverity:    check.SeverityOK, // Must be BEFORE 3 days ago
-			expectedLargeSeverity:    check.SeverityOK,
+			expectedHighDeadSeverity: check.SeverityPass,
+			expectedStaleSeverity:    check.SeverityPass, // Must be BEFORE 3 days ago
+			expectedLargeSeverity:    check.SeverityPass,
 		},
 		{
 			name:                     "exactly 7 days stale + 50K dead",
 			row:                      makeTableRow("public.t4", 450000, 50000, 11.0, 250*1024*1024, &sevenDaysAgo, nil, 2),
-			expectedHighDeadSeverity: check.SeverityOK,
-			expectedStaleSeverity:    check.SeverityOK, // Must be BEFORE 7 days ago
-			expectedLargeSeverity:    check.SeverityOK,
+			expectedHighDeadSeverity: check.SeverityPass,
+			expectedStaleSeverity:    check.SeverityPass, // Must be BEFORE 7 days ago
+			expectedLargeSeverity:    check.SeverityPass,
 		},
 		{
 			name:                     "exactly 1GB + 10% dead - warning",
 			row:                      makeTableRow("public.t5", 9000000, 1000000, 10.0, oneGB, &recentVacuum, nil, 10),
-			expectedHighDeadSeverity: check.SeverityOK,
-			expectedStaleSeverity:    check.SeverityOK,
+			expectedHighDeadSeverity: check.SeverityPass,
+			expectedStaleSeverity:    check.SeverityPass,
 			expectedLargeSeverity:    check.SeverityWarn,
 		},
 		{
 			name:                     "exactly 10GB + 20% dead - critical",
 			row:                      makeTableRow("public.t6", 40000000, 10000000, 20.0, tenGB, &recentVacuum, nil, 15),
 			expectedHighDeadSeverity: check.SeverityWarn, // 20% triggers high-dead too
-			expectedStaleSeverity:    check.SeverityOK,
+			expectedStaleSeverity:    check.SeverityPass,
 			expectedLargeSeverity:    check.SeverityWarn,
 		},
 	}
@@ -352,10 +352,10 @@ func TestTableBloat_EmptyResult(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 1)
 	assert.Equal(t, "table-bloat", report.Results[0].ID)
-	assert.Equal(t, check.SeverityOK, report.Results[0].Severity)
+	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	assert.Contains(t, report.Results[0].Details, "No tables with significant dead tuples found")
 }
 

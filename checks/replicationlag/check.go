@@ -87,7 +87,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       "no-replication",
 			Name:     "No Replication Configured",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No active replication streams found",
 		})
 		return report, nil
@@ -121,7 +121,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 func checkPhysicalReplicationLag(rows []db.ReplicationLagRow, report *check.Report) {
 	var laggingRows []db.ReplicationLagRow
-	maxSeverity := check.SeverityOK
+	maxSeverity := check.SeverityPass
 
 	for _, row := range rows {
 		// COALESCE in query ensures these are always valid
@@ -140,7 +140,7 @@ func checkPhysicalReplicationLag(rows []db.ReplicationLagRow, report *check.Repo
 		report.AddFinding(check.Finding{
 			ID:       "physical-replication-lag",
 			Name:     "Physical Replication Lag",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All %d physical replication stream(s) are healthy", len(rows)),
 		})
 		return
@@ -205,7 +205,7 @@ func logicalAbsoluteSeverity(timeSec float64, bytes int64) check.Severity {
 	if timeSec >= logicalWarnSeconds && bytes >= logicalWarnBytes {
 		return check.SeverityWarn
 	}
-	return check.SeverityOK
+	return check.SeverityPass
 }
 
 // logicalRelativeSeverity is disabled (always OK) unless capBytes > 0; a cap of -1
@@ -213,7 +213,7 @@ func logicalAbsoluteSeverity(timeSec float64, bytes int64) check.Severity {
 // against. Fractions use float64 to avoid int64 overflow at large caps.
 func logicalRelativeSeverity(bytes, capBytes int64) check.Severity {
 	if capBytes <= 0 {
-		return check.SeverityOK
+		return check.SeverityPass
 	}
 	switch {
 	case float64(bytes) >= float64(capBytes)*logicalRelativeFailFraction:
@@ -221,18 +221,18 @@ func logicalRelativeSeverity(bytes, capBytes int64) check.Severity {
 	case float64(bytes) >= float64(capBytes)*logicalRelativeWarnFraction:
 		return check.SeverityWarn
 	default:
-		return check.SeverityOK
+		return check.SeverityPass
 	}
 }
 
 func checkLogicalReplicationLag(rows []db.ReplicationLagRow, report *check.Report) {
 	var laggingRows []db.ReplicationLagRow
-	maxSeverity := check.SeverityOK
+	maxSeverity := check.SeverityPass
 
 	for _, row := range rows {
 		// COALESCE in query ensures these are always valid
 		severity := logicalLagSeverity(row.ReplayLagSeconds.Float64, row.ReplayLagBytes.Int64, row.MaxSlotWalKeepBytes.Int64)
-		if severity != check.SeverityOK {
+		if severity != check.SeverityPass {
 			laggingRows = append(laggingRows, row)
 			if severity > maxSeverity {
 				maxSeverity = severity
@@ -244,7 +244,7 @@ func checkLogicalReplicationLag(rows []db.ReplicationLagRow, report *check.Repor
 		report.AddFinding(check.Finding{
 			ID:       "logical-replication-lag",
 			Name:     "Logical Replication Lag",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All %d logical replication stream(s) are healthy", len(rows)),
 		})
 		return
@@ -297,7 +297,7 @@ func checkReplicationState(rows []db.ReplicationLagRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "replication-state",
 			Name:     "Replication State",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All %d replication stream(s) are in 'streaming' state", len(rows)),
 		})
 		return
@@ -335,7 +335,7 @@ func checkReplicationState(rows []db.ReplicationLagRow, report *check.Report) {
 
 func checkWALRetention(rows []db.ReplicationLagRow, report *check.Report) {
 	var problematicRows []db.ReplicationLagRow
-	maxSeverity := check.SeverityOK
+	maxSeverity := check.SeverityPass
 
 	for _, row := range rows {
 		walStatus := row.WalStatus.String
@@ -345,7 +345,7 @@ func checkWALRetention(rows []db.ReplicationLagRow, report *check.Report) {
 				maxSeverity = check.SeverityFail
 			} else if maxSeverity != check.SeverityFail && walStatus == walStatusUnreserved {
 				maxSeverity = check.SeverityFail
-			} else if maxSeverity == check.SeverityOK {
+			} else if maxSeverity == check.SeverityPass {
 				maxSeverity = check.SeverityWarn
 			}
 		}
@@ -355,7 +355,7 @@ func checkWALRetention(rows []db.ReplicationLagRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "wal-retention",
 			Name:     "WAL Retention",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All %d replication slot(s) have healthy WAL retention", len(rows)),
 		})
 		return

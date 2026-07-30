@@ -101,9 +101,9 @@ func Test_Partitioning_NoLargeTables(t *testing.T) {
 
 	// Both should be OK
 	for _, result := range report.Results {
-		require.Equal(t, check.SeverityOK, result.Severity)
+		require.Equal(t, check.SeverityPass, result.Severity)
 	}
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_Partitioning_AllPartitioned(t *testing.T) {
@@ -122,7 +122,7 @@ func Test_Partitioning_AllPartitioned(t *testing.T) {
 
 	require.Equal(t, 2, len(report.Results))
 	for _, result := range report.Results {
-		require.Equal(t, check.SeverityOK, result.Severity)
+		require.Equal(t, check.SeverityPass, result.Severity)
 	}
 }
 
@@ -322,7 +322,7 @@ func Test_Partitioning_Thresholds(t *testing.T) {
 		{
 			name:             "below 25M - no finding",
 			rows:             24_999_999,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedStatus:   "",
 		},
 		{
@@ -484,7 +484,7 @@ func Test_Partitioning_ActivityAwareThresholds(t *testing.T) {
 			inserts:          50_000, // 50% inserts - not insert-heavy
 			updates:          40_000,
 			deletes:          10_000, // 20% delete ratio - borderline
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedReason:   "",
 		},
 		{
@@ -493,7 +493,7 @@ func Test_Partitioning_ActivityAwareThresholds(t *testing.T) {
 			inserts:          0,
 			updates:          0,
 			deletes:          0,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedReason:   "",
 		},
 	}

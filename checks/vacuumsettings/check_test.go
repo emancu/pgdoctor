@@ -97,7 +97,7 @@ func Test_VacuumSettings(t *testing.T) {
 			Name: "optimal values",
 			Rows: mapToVacuumSettingsRows(optimalVacuumSettings()),
 			Expected: []ExpectedResult{
-				{"vacuum-settings", check.SeverityOK},
+				{"vacuum-settings", check.SeverityPass},
 			},
 		},
 		// Scale factor tests
@@ -275,5 +275,5 @@ func Test_VacuumSettings_DefaultsUsedOnParseError(t *testing.T) {
 	require.Equal(t, 1, len(results))
 	require.Equal(t, "vacuum-settings", results[0].ID)
 	require.Equal(t, "PostgreSQL Vacuum & Maintenance Configs", results[0].Name)
-	require.Equal(t, check.SeverityOK, results[0].Severity)
+	require.Equal(t, check.SeverityPass, results[0].Severity)
 }

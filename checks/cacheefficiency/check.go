@@ -67,7 +67,7 @@ func checkCacheHitRatio(row db.DatabaseCacheEfficiencyRow, report *check.Report)
 		report.AddFinding(check.Finding{
 			ID:       "cache-hit-ratio",
 			Name:     "Cache Hit Ratio",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "Insufficient cache activity data (no blocks read or hit)",
 		})
 		return
@@ -80,7 +80,7 @@ func checkCacheHitRatio(row db.DatabaseCacheEfficiencyRow, report *check.Report)
 		report.AddFinding(check.Finding{
 			ID:       "cache-hit-ratio",
 			Name:     "Cache Hit Ratio",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("Cache hit ratio: %.2f%% (healthy)", cacheRatio),
 		})
 		return

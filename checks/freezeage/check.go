@@ -105,7 +105,7 @@ func checkDatabaseFreezeAge(rows []db.DatabaseFreezeAgeRow, report *check.Report
 		report.AddFinding(check.Finding{
 			ID:       "database-freeze-age",
 			Name:     "Database Freeze Age",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All databases within safe range. Oldest: %s at %s transactions", oldestDB, formatAge(oldestAge)),
 		})
 		return
@@ -175,7 +175,7 @@ func checkTableFreezeAge(rows []db.TableFreezeAgeRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "table-freeze-age",
 			Name:     "Table Freeze Age",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All tables within safe transaction ID age range",
 		})
 		return

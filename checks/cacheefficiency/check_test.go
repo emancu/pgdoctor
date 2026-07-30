@@ -56,7 +56,7 @@ func Test_CacheEfficiency(t *testing.T) {
 				BlksHit:       pgtype.Int8{Int64: 1000000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 15000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -66,7 +66,7 @@ func Test_CacheEfficiency(t *testing.T) {
 				BlksHit:       pgtype.Int8{Int64: 925000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 75000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -86,7 +86,7 @@ func Test_CacheEfficiency(t *testing.T) {
 				BlksHit:       pgtype.Int8{Int64: 0, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 0, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "cache-hit-ratio",
 		},
 	}
@@ -157,7 +157,7 @@ func Test_CacheEfficiency_OKResult(t *testing.T) {
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Should be OK when cache ratio is healthy")
+	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when cache ratio is healthy")
 	require.Contains(t, result.Details, "healthy", "Details should mention healthy status")
 }
 
@@ -202,17 +202,17 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 		{
 			Name:             "well above threshold - OK",
 			CacheRatio:       95.0,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "mid band now OK - OK",
 			CacheRatio:       92.5,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "exactly 90% - OK",
 			CacheRatio:       90.0,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "just below 90% - WARN",
@@ -265,6 +265,6 @@ func Test_CacheEfficiency_NoActivityHandling(t *testing.T) {
 	require.Equal(t, 1, len(results))
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Should be OK when no cache activity")
+	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when no cache activity")
 	require.Contains(t, result.Details, "Insufficient cache activity", "Details should explain no activity")
 }
