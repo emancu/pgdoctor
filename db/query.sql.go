@@ -579,8 +579,7 @@ WITH index_info AS (
 )
 
 SELECT
-  schemaname
-  , tablename
+  schemaname || '.' || tablename AS table_name
   , indexname
   , actual_pages
   , est_pages
@@ -597,8 +596,7 @@ ORDER BY bloat_percent DESC, bloat_bytes DESC
 `
 
 type IndexBloatRow struct {
-	Schemaname   pgtype.Text
-	Tablename    pgtype.Text
+	TableName    pgtype.Text
 	Indexname    pgtype.Text
 	ActualPages  int32
 	EstPages     pgtype.Int8
@@ -619,8 +617,7 @@ func (q *Queries) IndexBloat(ctx context.Context) ([]IndexBloatRow, error) {
 	for rows.Next() {
 		var i IndexBloatRow
 		if err := rows.Scan(
-			&i.Schemaname,
-			&i.Tablename,
+			&i.TableName,
 			&i.Indexname,
 			&i.ActualPages,
 			&i.EstPages,
