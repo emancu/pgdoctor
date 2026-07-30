@@ -104,7 +104,7 @@ func TestTableBloat_HighDeadTuples_Warning(t *testing.T) {
 	assert.Equal(t, check.SeverityWarn, highDeadFinding.Table.Rows[0].Severity)
 }
 
-func TestTableBloat_HighDeadTuples_Critical(t *testing.T) {
+func TestTableBloat_HighDeadTuples_ExtremeStaysWarn(t *testing.T) {
 	t.Parallel()
 
 	recentVacuum := time.Now().Add(-1 * time.Hour)
@@ -118,13 +118,13 @@ func TestTableBloat_HighDeadTuples_Critical(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityFail, report.Severity)
+	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	highDeadFinding := report.Results[0]
-	assert.Equal(t, check.SeverityFail, highDeadFinding.Severity)
+	assert.Equal(t, check.SeverityWarn, highDeadFinding.Severity)
 	require.NotNil(t, highDeadFinding.Table)
 	require.Len(t, highDeadFinding.Table.Rows, 1)
-	assert.Equal(t, check.SeverityFail, highDeadFinding.Table.Rows[0].Severity)
+	assert.Equal(t, check.SeverityWarn, highDeadFinding.Table.Rows[0].Severity)
 }
 
 func TestTableBloat_StaleVacuum_NeverVacuumed(t *testing.T) {
@@ -246,7 +246,7 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.TableBloatRow{
-			// High dead tuples - critical
+			// High dead tuples - warn (extreme %, but never escalates past WARN)
 			makeTableRow("public.t1", 100000, 80000, 45.0, 200*1024*1024, &recentVacuum, nil, 5),
 			// High dead tuples - warning
 			makeTableRow("public.t2", 100000, 25000, 25.0, 150*1024*1024, &recentVacuum, nil, 3),
@@ -266,7 +266,7 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 	assert.Equal(t, check.SeverityFail, report.Severity)
 	assert.Len(t, report.Results, 3)
 
-	assert.Equal(t, check.SeverityFail, report.Results[0].Severity, "high-dead-tuples severity")
+	assert.Equal(t, check.SeverityWarn, report.Results[0].Severity, "high-dead-tuples severity")
 	assert.Equal(t, check.SeverityWarn, report.Results[1].Severity, "stale-vacuum severity")
 	assert.Equal(t, check.SeverityFail, report.Results[2].Severity, "large-bloated-tables severity")
 
@@ -300,9 +300,9 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 			expectedLargeSeverity:    check.SeverityPass,
 		},
 		{
-			name:                     "exactly 40% dead - critical threshold",
+			name:                     "exactly 40% dead - still WARN, never escalates",
 			row:                      makeTableRow("public.t2", 60000, 40000, 40.0, 150*1024*1024, &recentVacuum, nil, 3),
-			expectedHighDeadSeverity: check.SeverityFail,
+			expectedHighDeadSeverity: check.SeverityWarn,
 			expectedStaleSeverity:    check.SeverityPass,
 			expectedLargeSeverity:    check.SeverityPass,
 		},
@@ -456,14 +456,14 @@ func TestTableBloat_FindingSeverityEscalation(t *testing.T) {
 		rowSeverities []check.Severity
 	}{
 		{
-			name: "high-dead-tuples escalates to fail with a critical row",
+			name: "high-dead-tuples never escalates: extreme rows stay warn",
 			rows: []db.TableBloatRow{
 				makeTableRow("public.t1", 100000, 80000, 45.0, 200*1024*1024, &recentVacuum, nil, 5),
 				makeTableRow("public.t2", 100000, 25000, 25.0, 150*1024*1024, &recentVacuum, nil, 3),
 			},
 			findingIdx:    0,
-			severity:      check.SeverityFail,
-			rowSeverities: []check.Severity{check.SeverityFail, check.SeverityWarn},
+			severity:      check.SeverityWarn,
+			rowSeverities: []check.Severity{check.SeverityWarn, check.SeverityWarn},
 		},
 		{
 			name: "high-dead-tuples stays warn with only warning rows",

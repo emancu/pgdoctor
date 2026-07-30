@@ -6,10 +6,12 @@ Monitors PostgreSQL tables for dead tuple accumulation indicating vacuum issues.
 
 ### High Dead Tuples (`high-dead-tuples`)
 Identifies tables with high dead tuple percentages:
-- **FAIL**: Dead tuples > 40% of total
 - **WARN**: Dead tuples > 20% of total
 
-Dead tuples are rows marked for deletion but not yet reclaimed by vacuum.
+Dead tuples are rows marked for deletion but not yet reclaimed by vacuum. A high
+ratio degrades performance (bloated scans, index bloat) but never stops the
+database, so this finding stays WARN and never pages — vacuum emergencies surface
+via `stale-vacuum`.
 
 ### Stale Vacuum (`stale-vacuum`)
 Identifies tables not vacuumed recently despite accumulating dead tuples:

@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`table-bloat`**: monotonic `stale-vacuum` thresholds — FAIL (≥1M dead, or ≥400K at ≥10% dead, unvacuumed >12 days; never vacuumed with ≥250K dead) is now a strict subset of WARN (≥100K dead, or ≥10K at ≥10% dead, unvacuumed >3 days), replacing tiers where FAIL fired on less bloat than WARN. All three sub-findings now report FAIL when they contain critical rows, so the report severity escalates instead of capping at WARN.
+- **`table-bloat`**: monotonic `stale-vacuum` thresholds — FAIL (≥1M dead, or ≥400K at ≥10% dead, unvacuumed >12 days; never vacuumed with ≥250K dead) is now a strict subset of WARN (≥100K dead, or ≥10K at ≥10% dead, unvacuumed >3 days), replacing tiers where FAIL fired on less bloat than WARN. `stale-vacuum` and `large-bloated-tables` now derive their finding severity from their rows, so the report escalates to FAIL when critical rows exist instead of capping at WARN. `high-dead-tuples` stays WARN-only: a high dead-tuple ratio degrades performance but never stops the database, so it never pages.
 
 ### Changed
 

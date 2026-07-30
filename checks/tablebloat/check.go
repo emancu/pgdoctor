@@ -71,13 +71,21 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-// findingSeverity keeps the finding at least as severe as its worst row, so
-// the report escalates to FAIL when critical rows exist.
-func findingSeverity(critical []db.TableBloatRow) check.Severity {
-	if len(critical) > 0 {
-		return check.SeverityFail
+// maxRowSeverity derives a finding's severity from its own rows: the highest
+// row severity, floored at WARN because these findings only exist once at least
+// one table warrants attention. Severity is classification the library owns —
+// Report.Severity is the max over findings, so if a finding under-reports every
+// consumer (JSON, scorecard, CLI) under-reports. Keeping it a function of the
+// rows guarantees the row ≤ finding invariant and keeps presenters purely
+// display-only.
+func maxRowSeverity(rows []check.TableRow) check.Severity {
+	severity := check.SeverityWarn
+	for _, row := range rows {
+		if row.Severity > severity {
+			severity = row.Severity
+		}
 	}
-	return check.SeverityWarn
+	return severity
 }
 
 func getDeadTuplePercent(row db.TableBloatRow) float64 {
@@ -88,21 +96,19 @@ func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	return f.Float64
 }
 
-// checkHighDeadTuples identifies tables with >20% dead tuples.
+// checkHighDeadTuples identifies tables with >20% dead tuples. High dead-tuple
+// ratios degrade performance but never stop the database, so this stays WARN and
+// never pages — genuine vacuum emergencies surface via stale-vacuum.
 func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
-	var critical []db.TableBloatRow // >40%
-	var warning []db.TableBloatRow  // >20%
+	var bloated []db.TableBloatRow // >20%
 
 	for _, row := range rows {
-		pct := getDeadTuplePercent(row)
-		if pct >= 40 {
-			critical = append(critical, row)
-		} else if pct >= 20 {
-			warning = append(warning, row)
+		if getDeadTuplePercent(row) >= 20 {
+			bloated = append(bloated, row)
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if len(bloated) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "high-dead-tuples",
 			Name:     "Dead Tuple Percentage",
@@ -113,22 +119,9 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	}
 
 	headers := []string{"Table", "Dead %", "Dead Tuples", "Live Tuples", "Size"}
-	var tableRows []check.TableRow
+	tableRows := make([]check.TableRow, 0, len(bloated))
 
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				fmt.Sprintf("%.1f%%", getDeadTuplePercent(row)),
-				formatNumber(row.DeadTuples.Int64),
-				formatNumber(row.LiveTuples.Int64),
-				check.FormatBytes(row.TotalSizeBytes.Int64),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
+	for _, row := range bloated {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.TableName.String,
@@ -144,8 +137,8 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "high-dead-tuples",
 		Name:     "Dead Tuple Percentage",
-		Severity: findingSeverity(critical),
-		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(critical)+len(warning)),
+		Severity: check.SeverityWarn,
+		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(bloated)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
@@ -229,7 +222,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "stale-vacuum",
 		Name:     "Vacuum Freshness",
-		Severity: findingSeverity(critical),
+		Severity: maxRowSeverity(tableRows),
 		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
@@ -301,7 +294,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "large-bloated-tables",
 		Name:     "Large Table Bloat",
-		Severity: findingSeverity(critical),
+		Severity: maxRowSeverity(tableRows),
 		Details:  fmt.Sprintf("Found %d large table(s) with significant bloat, wasting disk space", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
