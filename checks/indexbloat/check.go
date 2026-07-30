@@ -105,8 +105,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	report.AddFinding(check.Finding{
-		ID:       "bloated-indexes",
-		Name:     "Bloated Indexes",
+		ID:       report.CheckID,
+		Name:     report.Name,
 		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("%d bloated index(es) (%d with >=2GiB wasted or >=70%% bloat)", len(bloated), warnCount),
 		Table: &check.Table{

@@ -122,7 +122,7 @@ func TestIndexBloat_RowTiers(t *testing.T) {
 			require.Len(t, report.Results, 1)
 
 			finding := report.Results[0]
-			assert.Equal(t, "bloated-indexes", finding.ID)
+			assert.Equal(t, "index-bloat", finding.ID)
 			assert.Equal(t, check.SeverityWarn, finding.Severity)
 			require.NotNil(t, finding.Table)
 			require.Len(t, finding.Table.Rows, 1)
@@ -142,8 +142,8 @@ func TestIndexBloat_FindingDetailsAndTable(t *testing.T) {
 	require.Len(t, report.Results, 1)
 	finding := report.Results[0]
 
-	assert.Equal(t, "bloated-indexes", finding.ID)
-	assert.Equal(t, "Bloated Indexes", finding.Name)
+	assert.Equal(t, "index-bloat", finding.ID)
+	assert.Equal(t, "Index Bloat", finding.Name)
 	assert.Equal(t, "2 bloated index(es) (1 with >=2GiB wasted or >=70% bloat)", finding.Details)
 
 	require.NotNil(t, finding.Table)

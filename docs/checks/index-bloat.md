@@ -5,7 +5,7 @@ Bloated indexes waste disk space and slow down queries.
 ## What It Checks
 
 Estimates B-tree index bloat using page layout math and reports a single
-`bloated-indexes` finding. An index is listed when:
+finding. An index is listed when:
 
 - Bloat >= 50%, **or**
 - Wasted space >= 2 GiB
