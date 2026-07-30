@@ -88,8 +88,7 @@ WITH index_info AS (
 )
 
 SELECT
-  schemaname
-  , tablename
+  schemaname || '.' || tablename AS table_name
   , indexname
   , actual_pages
   , est_pages

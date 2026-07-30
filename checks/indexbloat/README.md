@@ -1,18 +1,22 @@
 # Index Bloat Check
 
-Estimates B-tree index bloat using page layout math to identify indexes needing maintenance.
+Bloated indexes waste disk space and slow down queries.
 
 ## What It Checks
 
-### High Bloat Percentage (`high-bloat`)
-Identifies indexes with high bloat percentage:
-- **FAIL**: Bloat > 70%
-- **WARN**: Bloat > 50%
+Estimates B-tree index bloat using page layout math and reports a single
+`bloated-indexes` finding. An index is listed when:
 
-### Large Bloated Indexes (`large-bloat`)
-Identifies indexes wasting significant disk space:
-- **FAIL**: Bloat > 1 GB (with >30% bloat)
-- **WARN**: Bloat > 100 MB (with >30% bloat)
+- Bloat >= 50%, **or**
+- Wasted space >= 2 GiB
+
+Listed indexes are tiered by row severity:
+
+- **WARN**: wasted space >= 2 GiB or bloat >= 70%
+- **INFO**: bloat between 50% and 70% with less than 2 GiB wasted (small-waste tail)
+
+The finding itself is at most WARN — index bloat is a chronic maintenance
+issue, never an urgent outage signal.
 
 ## How It Works
 
@@ -50,9 +54,7 @@ Bloated indexes cause:
 
 ## How to Fix
 
-### For `high-bloat`
-
-Bloated indexes waste disk space and slow down queries.
+Rebuild bloated indexes, largest wasted space first:
 
 ```sql
 -- Rebuild single index (no locks)
@@ -62,24 +64,9 @@ REINDEX INDEX CONCURRENTLY schema.index_name;
 REINDEX TABLE CONCURRENTLY schema.table_name;
 ```
 
-> **Note**: `REINDEX CONCURRENTLY` was introduced in PostgreSQL 12. For PostgreSQL 13 and earlier (EOL versions), you must drop and recreate indexes manually.
-
-Regular VACUUM does NOT reclaim index bloat - only REINDEX does.
-
-### For `large-bloat`
-
-Large bloated indexes significantly impact:
-- Disk usage and backup times
-- Query performance (more pages to scan)
-- Buffer cache efficiency
-
-**Priority**: Rebuild the largest bloated indexes first.
-
-```sql
-REINDEX INDEX CONCURRENTLY schema.index_name;
-```
-
-For very large indexes, schedule during low-traffic periods. REINDEX CONCURRENTLY builds a new index without blocking writes, but requires additional disk space temporarily.
+`REINDEX CONCURRENTLY` builds a new index without blocking writes, but
+temporarily requires additional disk space. For very large indexes, schedule
+during low-traffic periods.
 
 ## Estimation Accuracy
 

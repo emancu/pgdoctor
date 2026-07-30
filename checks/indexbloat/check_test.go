@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/indexbloat"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,235 +19,96 @@ type mockQueryer struct {
 	err  error
 }
 
-func (m *mockQueryer) IndexBloat(ctx context.Context) ([]db.IndexBloatRow, error) {
+func (m *mockQueryer) IndexBloat(_ context.Context) ([]db.IndexBloatRow, error) {
 	return m.rows, m.err
 }
 
-func makeIndexRow(tableName, indexName string, bloatPct float64, bloatBytes, actualBytes int64) db.IndexBloatRow {
+func makeIndexRow(schema, table, index string, bloatPct float64, bloatBytes, actualBytes int64) db.IndexBloatRow {
 	var bloatNumeric pgtype.Numeric
 	_ = bloatNumeric.Scan(fmt.Sprintf("%.2f", bloatPct))
 
 	return db.IndexBloatRow{
-		Tablename:    pgtype.Text{String: tableName, Valid: true},
-		Indexname:    pgtype.Text{String: indexName, Valid: true},
+		TableName:    pgtype.Text{String: schema + "." + table, Valid: true},
+		Indexname:    pgtype.Text{String: index, Valid: true},
 		BloatPercent: bloatNumeric,
 		BloatBytes:   pgtype.Int8{Int64: bloatBytes, Valid: true},
 		ActualBytes:  pgtype.Int8{Int64: actualBytes, Valid: true},
 	}
 }
 
-func TestIndexBloat_AllHealthy(t *testing.T) {
-	t.Parallel()
+func runCheck(t *testing.T, rows []db.IndexBloatRow) *check.Report {
+	t.Helper()
 
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			makeIndexRow("public.users", "users_pkey", 10.0, 10*1024*1024, 100*1024*1024),
-			makeIndexRow("public.orders", "orders_pkey", 15.0, 5*1024*1024, 50*1024*1024),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
+	checker := indexbloat.New(&mockQueryer{rows: rows})
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+
+	return report
+}
+
+func TestIndexBloat_EmptyResult(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, []db.IndexBloatRow{})
+
 	assert.Equal(t, check.SeverityPass, report.Severity)
-	assert.Len(t, report.Results, 2)
-	assert.Equal(t, "high-bloat", report.Results[0].ID)
-	assert.Equal(t, "large-bloat", report.Results[1].ID)
+	require.Len(t, report.Results, 1)
+	assert.Equal(t, "index-bloat", report.Results[0].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
+	assert.Contains(t, report.Results[0].Details, "No bloated indexes")
 }
 
-func TestIndexBloat_HighPercentageWarning(t *testing.T) {
+func TestIndexBloat_BelowThresholdsNotListed(t *testing.T) {
 	t.Parallel()
 
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			makeIndexRow("public.users", "users_email_idx", 55.0, 50*1024*1024, 100*1024*1024),
-		},
-	}
+	report := runCheck(t, []db.IndexBloatRow{
+		makeIndexRow("public", "users", "users_pkey", 10.0, 10*check.MiB, 100*check.MiB),
+		makeIndexRow("public", "orders", "orders_pkey", 49.9, 50*check.MiB, 100*check.MiB),
+		// 3GiB index at 20% bloat wastes ~614MiB: below both arms.
+		makeIndexRow("public", "events", "events_created_at_idx", 20.0, 3*check.GiB/5, 3*check.GiB),
+		makeIndexRow("public", "logs", "logs_ts_idx", 30.0, 2*check.GiB-1, 7*check.GiB),
+	})
 
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-	assert.Len(t, report.Results, 2)
-
-	highBloatFinding := report.Results[0]
-	assert.Equal(t, "high-bloat", highBloatFinding.ID)
-	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
-	assert.Contains(t, highBloatFinding.Details, "1 index(es)")
-	assert.NotNil(t, highBloatFinding.Table)
-	assert.Len(t, highBloatFinding.Table.Rows, 1)
-}
-
-func TestIndexBloat_HighPercentageCritical(t *testing.T) {
-	t.Parallel()
-
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			makeIndexRow("public.users", "users_email_idx", 75.0, 750*1024*1024, 1000*1024*1024),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	highBloatFinding := report.Results[0]
-	assert.Equal(t, "high-bloat", highBloatFinding.ID)
-	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
-	assert.Contains(t, highBloatFinding.Details, "1 index(es)")
-}
-
-func TestIndexBloat_LargeAbsoluteWarning(t *testing.T) {
-	t.Parallel()
-
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			makeIndexRow("public.orders", "orders_created_at_idx", 40.0, 150*1024*1024, 375*1024*1024),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	largeBloatFinding := report.Results[1]
-	assert.Equal(t, "large-bloat", largeBloatFinding.ID)
-	assert.Equal(t, check.SeverityWarn, largeBloatFinding.Severity)
-	assert.Contains(t, largeBloatFinding.Details, "1 index(es)")
-}
-
-func TestIndexBloat_LargeAbsoluteCritical(t *testing.T) {
-	t.Parallel()
-
-	const oneGB = 1024 * 1024 * 1024
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			makeIndexRow("public.events", "events_timestamp_idx", 50.0, 2*oneGB, 4*oneGB),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	largeBloatFinding := report.Results[1]
-	assert.Equal(t, "large-bloat", largeBloatFinding.ID)
-	assert.Equal(t, check.SeverityWarn, largeBloatFinding.Severity)
-}
-
-func TestIndexBloat_MixedSeverity(t *testing.T) {
-	t.Parallel()
-
-	const oneGB = 1024 * 1024 * 1024
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			// High percentage, critical
-			makeIndexRow("public.users", "users_email_idx", 80.0, 800*1024*1024, 1000*1024*1024),
-			// High percentage, warning
-			makeIndexRow("public.orders", "orders_status_idx", 60.0, 50*1024*1024, 83*1024*1024),
-			// Large absolute, critical
-			makeIndexRow("public.events", "events_idx", 45.0, 2*oneGB, 4*oneGB+500*1024*1024),
-			// Low bloat, should be ignored
-			makeIndexRow("public.products", "products_pkey", 10.0, 10*1024*1024, 100*1024*1024),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityWarn, report.Severity)
-
-	// Check high-bloat finding
-	highBloatFinding := report.Results[0]
-	assert.Equal(t, check.SeverityWarn, highBloatFinding.Severity)
-	assert.NotNil(t, highBloatFinding.Table)
-	criticalCount := 0
-	warnCount := 0
-	for _, row := range highBloatFinding.Table.Rows {
-		switch row.Severity {
-		case check.SeverityFail:
-			criticalCount++
-		case check.SeverityWarn:
-			warnCount++
-		}
-	}
-	assert.Equal(t, 1, criticalCount, "should have 1 critical high-bloat index")
-	assert.Equal(t, 1, warnCount, "should have 1 warning high-bloat index")
-}
-
-func TestIndexBloat_BelowBloatThreshold(t *testing.T) {
-	t.Parallel()
-
-	queryer := &mockQueryer{
-		rows: []db.IndexBloatRow{
-			// Bloat < 30%, should be ignored by large-bloat check
-			makeIndexRow("public.users", "users_idx", 25.0, 20*1024*1024, 80*1024*1024),
-		},
-	}
-
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
 	assert.Equal(t, check.SeverityPass, report.Severity)
+	require.Len(t, report.Results, 1)
+	assert.Equal(t, "index-bloat", report.Results[0].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Equal(t, "high-bloat", report.Results[0].ID)
-	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
-	assert.Equal(t, "large-bloat", report.Results[1].ID)
 }
 
-func TestIndexBloat_EdgeCases_ExactThresholds(t *testing.T) {
+func TestIndexBloat_RowTiers(t *testing.T) {
 	t.Parallel()
-
-	const hundredMB = 100 * 1024 * 1024
-	const oneGB = 1024 * 1024 * 1024
 
 	tests := []struct {
-		name                       string
-		row                        db.IndexBloatRow
-		expectedHighBloatSeverity  check.Severity
-		expectedLargeBloatSeverity check.Severity
+		name        string
+		row         db.IndexBloatRow
+		rowSeverity check.Severity
 	}{
 		{
-			name:                       "exactly 50% bloat - warning threshold",
-			row:                        makeIndexRow("public.t1", "idx1", 50.0, 500*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityWarn,
-			expectedLargeBloatSeverity: check.SeverityWarn, // 500MB >= 100MB and 50% >= 30%
+			name:        "exactly 50 pct with small waste is INFO",
+			row:         makeIndexRow("public", "t1", "idx1", 50.0, 50*check.MiB, 100*check.MiB),
+			rowSeverity: check.SeverityInfo,
 		},
 		{
-			name:                       "exactly 70% bloat - critical threshold",
-			row:                        makeIndexRow("public.t2", "idx2", 70.0, 700*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityWarn,
-			expectedLargeBloatSeverity: check.SeverityWarn, // 700MB < 1GB, so warning
+			name:        "69.9 pct with small waste is INFO",
+			row:         makeIndexRow("public", "t2", "idx2", 69.9, 70*check.MiB, 100*check.MiB),
+			rowSeverity: check.SeverityInfo,
 		},
 		{
-			name:                       "exactly 100MB bloat - warning threshold",
-			row:                        makeIndexRow("public.t3", "idx3", 40.0, hundredMB, 250*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityPass,
-			expectedLargeBloatSeverity: check.SeverityWarn,
+			name:        "exactly 70 pct with small waste is WARN",
+			row:         makeIndexRow("public", "t3", "idx3", 70.0, 70*check.MiB, 100*check.MiB),
+			rowSeverity: check.SeverityWarn,
 		},
 		{
-			name:                       "exactly 1GB bloat - critical threshold",
-			row:                        makeIndexRow("public.t4", "idx4", 35.0, oneGB, 3*oneGB),
-			expectedHighBloatSeverity:  check.SeverityPass,
-			expectedLargeBloatSeverity: check.SeverityWarn,
+			name:        "exactly 2GiB wasted with low pct is WARN",
+			row:         makeIndexRow("public", "t4", "idx4", 30.0, 2*check.GiB, 7*check.GiB),
+			rowSeverity: check.SeverityWarn,
 		},
 		{
-			name:                       "just below 50% - OK for high-bloat",
-			row:                        makeIndexRow("public.t5", "idx5", 49.9, 499*1024*1024, 1000*1024*1024),
-			expectedHighBloatSeverity:  check.SeverityPass,
-			expectedLargeBloatSeverity: check.SeverityWarn, // 499MB >= 100MB and 49.9% >= 30%
+			name:        "3GiB wasted with low pct is WARN",
+			row:         makeIndexRow("public", "t5", "idx5", 25.0, 3*check.GiB, 12*check.GiB),
+			rowSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -254,43 +116,90 @@ func TestIndexBloat_EdgeCases_ExactThresholds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			queryer := &mockQueryer{rows: []db.IndexBloatRow{tt.row}}
-			checker := indexbloat.New(queryer)
-			report, err := checker.Check(context.Background())
+			report := runCheck(t, []db.IndexBloatRow{tt.row})
 
-			require.NoError(t, err)
-			assert.Equal(t, tt.expectedHighBloatSeverity, report.Results[0].Severity, "high-bloat severity")
-			assert.Equal(t, tt.expectedLargeBloatSeverity, report.Results[1].Severity, "large-bloat severity")
+			assert.Equal(t, check.SeverityWarn, report.Severity)
+			require.Len(t, report.Results, 1)
+
+			finding := report.Results[0]
+			assert.Equal(t, "bloated-indexes", finding.ID)
+			assert.Equal(t, check.SeverityWarn, finding.Severity)
+			require.NotNil(t, finding.Table)
+			require.Len(t, finding.Table.Rows, 1)
+			assert.Equal(t, tt.rowSeverity, finding.Table.Rows[0].Severity)
 		})
 	}
 }
 
-func TestIndexBloat_EmptyResult(t *testing.T) {
+func TestIndexBloat_FindingDetailsAndTable(t *testing.T) {
 	t.Parallel()
 
-	queryer := &mockQueryer{rows: []db.IndexBloatRow{}}
-	checker := indexbloat.New(queryer)
-	report, err := checker.Check(context.Background())
+	report := runCheck(t, []db.IndexBloatRow{
+		makeIndexRow("public", "users", "users_email_idx", 80.0, 800*check.MiB, check.GiB),
+		makeIndexRow("public", "orders", "orders_status_idx", 55.0, 50*check.MiB, 90*check.MiB),
+	})
 
-	require.NoError(t, err)
-	assert.Equal(t, check.SeverityPass, report.Severity)
-	assert.Len(t, report.Results, 1)
-	assert.Equal(t, "index-bloat", report.Results[0].ID)
-	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Contains(t, report.Results[0].Details, "No significant index bloat detected")
+	require.Len(t, report.Results, 1)
+	finding := report.Results[0]
+
+	assert.Equal(t, "bloated-indexes", finding.ID)
+	assert.Equal(t, "Bloated Indexes", finding.Name)
+	assert.Equal(t, "2 bloated index(es) (1 with >=2GiB wasted or >=70% bloat)", finding.Details)
+
+	require.NotNil(t, finding.Table)
+	assert.Equal(t, []string{"Table", "Index", "Size", "Wasted", "Bloat %"}, finding.Table.Headers)
+	require.Len(t, finding.Table.Rows, 2)
+	assert.Equal(t, []string{"public.users", "users_email_idx", "1.0GiB", "800.0MiB", "80.0%"}, finding.Table.Rows[0].Cells)
+	assert.Equal(t, []string{"public.orders", "orders_status_idx", "90.0MiB", "50.0MiB", "55.0%"}, finding.Table.Rows[1].Cells)
+}
+
+func TestIndexBloat_SortsWorstFirst(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, []db.IndexBloatRow{
+		// INFO row with more waste than the WARN pct row: severity still wins.
+		makeIndexRow("public", "small_info", "small_info_idx", 55.0, 300*check.MiB, 600*check.MiB),
+		makeIndexRow("public", "warn_pct", "warn_pct_idx", 75.0, 100*check.MiB, 130*check.MiB),
+		makeIndexRow("public", "warn_big", "warn_big_idx", 40.0, 3*check.GiB, 8*check.GiB),
+		makeIndexRow("public", "tiny_info", "tiny_info_idx", 52.0, 40*check.MiB, 80*check.MiB),
+	})
+
+	require.Len(t, report.Results, 1)
+	finding := report.Results[0]
+	require.NotNil(t, finding.Table)
+	require.Len(t, finding.Table.Rows, 4)
+
+	var order []string
+	for _, row := range finding.Table.Rows {
+		order = append(order, row.Cells[1])
+	}
+	assert.Equal(t, []string{"warn_big_idx", "warn_pct_idx", "small_info_idx", "tiny_info_idx"}, order)
+
+	assert.Equal(t, check.SeverityWarn, finding.Table.Rows[0].Severity)
+	assert.Equal(t, check.SeverityWarn, finding.Table.Rows[1].Severity)
+	assert.Equal(t, check.SeverityInfo, finding.Table.Rows[2].Severity)
+	assert.Equal(t, check.SeverityInfo, finding.Table.Rows[3].Severity)
+}
+
+func TestIndexBloat_QueryError(t *testing.T) {
+	t.Parallel()
+
+	checker := indexbloat.New(&mockQueryer{err: fmt.Errorf("connection refused")})
+	_, err := checker.Check(context.Background())
+
+	require.ErrorContains(t, err, "index-bloat")
+	require.ErrorContains(t, err, "connection refused")
 }
 
 func TestIndexBloat_Metadata(t *testing.T) {
 	t.Parallel()
 
-	queryer := &mockQueryer{rows: []db.IndexBloatRow{}}
-	checker := indexbloat.New(queryer)
+	metadata := indexbloat.Metadata()
 
-	metadata := checker.Metadata()
 	assert.Equal(t, "index-bloat", metadata.CheckID)
 	assert.Equal(t, "Index Bloat", metadata.Name)
 	assert.Equal(t, check.CategoryIndexes, metadata.Category)
+	assert.NotEmpty(t, metadata.Description)
 	assert.NotEmpty(t, metadata.SQL)
 	assert.NotEmpty(t, metadata.Readme)
-	assert.NotEmpty(t, metadata.Description)
 }
