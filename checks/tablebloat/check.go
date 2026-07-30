@@ -71,13 +71,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-// maxRowSeverity derives a finding's severity from its own rows: the highest
-// row severity, floored at WARN because these findings only exist once at least
-// one table warrants attention. Severity is classification the library owns —
-// Report.Severity is the max over findings, so if a finding under-reports every
-// consumer (JSON, scorecard, CLI) under-reports. Keeping it a function of the
-// rows guarantees the row ≤ finding invariant and keeps presenters purely
-// display-only.
+// maxRowSeverity floors at Warn: these findings only exist once a row warrants attention.
 func maxRowSeverity(rows []check.TableRow) check.Severity {
 	severity := check.SeverityWarn
 	for _, row := range rows {
@@ -96,9 +90,7 @@ func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	return f.Float64
 }
 
-// checkHighDeadTuples identifies tables with >20% dead tuples. High dead-tuple
-// ratios degrade performance but never stop the database, so this stays WARN and
-// never pages — genuine vacuum emergencies surface via stale-vacuum.
+// checkHighDeadTuples identifies tables with >20% dead tuples (WARN-only: degrades, never stops the DB).
 func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	var bloated []db.TableBloatRow // >20%
 
@@ -167,9 +159,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 			lastVacuum = row.LastVacuum.Time
 		}
 
-		// A zero lastVacuum means the table was never vacuumed: its vacuum age is
-		// effectively infinite, and the zero time being before every cutoff makes
-		// it satisfy both age gates below.
+		// Never vacuumed: the zero time predates every cutoff, so both age gates pass.
 		neverVacuumed := lastVacuum.IsZero()
 
 		switch {
