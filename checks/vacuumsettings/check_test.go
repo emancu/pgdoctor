@@ -264,6 +264,7 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Severity:  check.SeverityFail,
 			Details:   "work_mem 2048MB × max_connections 100 → worst case 204800MB (2500.0% of 8GB RAM)",
 			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
 				"Worst-case RAM usage: 204800MB (2500.0% of available RAM)",
 				"Current active connections: 10 using ~20480MB (250.0%)",
 				"This configuration can cause out-of-memory errors when connections spike.",
@@ -292,6 +293,7 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Severity:  check.SeverityFail,
 			Details:   "maintenance_work_mem 1024MB × autovacuum_max_workers 4 → total budget 4096MB (50.0% of 8GB RAM)",
 			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
 				"Your config: 1024MB × 4 workers = 4096MB",
 				"This can cause memory pressure. Keep total under 25% RAM.",
 				"Manual VACUUM and CREATE INDEX operations also use this memory.",
