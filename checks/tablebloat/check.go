@@ -71,6 +71,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
+// maxRowSeverity floors at Warn: these findings only exist once a row warrants attention.
+func maxRowSeverity(rows []check.TableRow) check.Severity {
+	severity := check.SeverityWarn
+	for _, row := range rows {
+		if row.Severity > severity {
+			severity = row.Severity
+		}
+	}
+	return severity
+}
+
 func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	if !row.DeadTuplePercent.Valid {
 		return 0
@@ -79,21 +90,17 @@ func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	return f.Float64
 }
 
-// checkHighDeadTuples identifies tables with >20% dead tuples.
+// checkHighDeadTuples identifies tables with >20% dead tuples (WARN-only: degrades, never stops the DB).
 func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
-	var critical []db.TableBloatRow // >40%
-	var warning []db.TableBloatRow  // >20%
+	var bloated []db.TableBloatRow // >20%
 
 	for _, row := range rows {
-		pct := getDeadTuplePercent(row)
-		if pct >= 40 {
-			critical = append(critical, row)
-		} else if pct >= 20 {
-			warning = append(warning, row)
+		if getDeadTuplePercent(row) >= 20 {
+			bloated = append(bloated, row)
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if len(bloated) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "high-dead-tuples",
 			Name:     "Dead Tuple Percentage",
@@ -104,22 +111,9 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	}
 
 	headers := []string{"Table", "Dead %", "Dead Tuples", "Live Tuples", "Size"}
-	var tableRows []check.TableRow
+	tableRows := make([]check.TableRow, 0, len(bloated))
 
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				fmt.Sprintf("%.1f%%", getDeadTuplePercent(row)),
-				formatNumber(row.DeadTuples.Int64),
-				formatNumber(row.LiveTuples.Int64),
-				check.FormatBytes(row.TotalSizeBytes.Int64),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
+	for _, row := range bloated {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.TableName.String,
@@ -136,7 +130,7 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 		ID:       "high-dead-tuples",
 		Name:     "Dead Tuple Percentage",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(critical)+len(warning)),
+		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(bloated)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
@@ -147,14 +141,15 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 // checkStaleVacuum identifies tables not vacuumed recently despite dead tuples.
 func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	now := time.Now()
-	sevenDaysAgo := now.AddDate(0, 0, -7)
-	threeDaysAgo := now.AddDate(0, 0, -3)
+	failCutoff := now.AddDate(0, 0, -12)
+	warnCutoff := now.AddDate(0, 0, -3)
 
-	var critical []db.TableBloatRow // >7 days, >50K dead
-	var warning []db.TableBloatRow  // >3 days, >100K dead
+	var critical []db.TableBloatRow
+	var warning []db.TableBloatRow
 
 	for _, row := range rows {
-		deadTuples := row.DeadTuples.Int64
+		dead := row.DeadTuples.Int64
+		pct := getDeadTuplePercent(row)
 
 		// Get last vacuum time (prefer autovacuum)
 		var lastVacuum time.Time
@@ -164,15 +159,15 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 			lastVacuum = row.LastVacuum.Time
 		}
 
-		if lastVacuum.IsZero() && deadTuples > 50000 {
-			// Never vacuumed with significant dead tuples
-			critical = append(critical, row)
-			continue
-		}
+		// Never vacuumed: the zero time predates every cutoff, so both age gates pass.
+		neverVacuumed := lastVacuum.IsZero()
 
-		if lastVacuum.Before(sevenDaysAgo) && deadTuples > 50000 {
+		switch {
+		case neverVacuumed && dead >= 250_000:
 			critical = append(critical, row)
-		} else if lastVacuum.Before(threeDaysAgo) && deadTuples > 100000 {
+		case ((pct >= 10 && dead >= 400_000) || dead >= 1_000_000) && lastVacuum.Before(failCutoff):
+			critical = append(critical, row)
+		case ((pct >= 10 && dead >= 10_000) || dead >= 100_000) && lastVacuum.Before(warnCutoff):
 			warning = append(warning, row)
 		}
 	}
@@ -217,7 +212,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "stale-vacuum",
 		Name:     "Vacuum Freshness",
-		Severity: check.SeverityWarn,
+		Severity: maxRowSeverity(tableRows),
 		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
@@ -289,7 +284,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "large-bloated-tables",
 		Name:     "Large Table Bloat",
-		Severity: check.SeverityWarn,
+		Severity: maxRowSeverity(tableRows),
 		Details:  fmt.Sprintf("Found %d large table(s) with significant bloat, wasting disk space", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,

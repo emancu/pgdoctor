@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 
+### Fixed
+
+- **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
+
 ### Changed
 
 - **check**: renamed the exported `SeverityOK` constant to `SeverityPass` for consistency with its `"pass"` string and `PASS` CLI label. Breaking for consumers referencing the identifier; the int value (`1`) and string are unchanged ([#19](https://github.com/emancu/pgdoctor/pull/19)).
