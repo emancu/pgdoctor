@@ -142,7 +142,7 @@ func TestCheck_NoReplication(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, report.Results, 1)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Equal(t, "no-replication", report.Results[0].ID)
 	assert.Contains(t, report.Results[0].Details, "No active replication")
 }
@@ -164,11 +164,11 @@ func TestCheck_AllHealthy(t *testing.T) {
 
 	// Should have 4 findings: replication-state, wal-retention, physical-lag, logical-lag (all OK)
 	assert.Len(t, report.Results, 4)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 
 	// Verify all subchecks are OK
 	for _, finding := range report.Results {
-		assert.Equal(t, check.SeverityOK, finding.Severity)
+		assert.Equal(t, check.SeverityPass, finding.Severity)
 	}
 }
 
@@ -240,7 +240,7 @@ func TestCheck_PhysicalReplicationLag_Thresholds(t *testing.T) {
 		lagSeconds     float64
 		expectSeverity check.Severity
 	}{
-		{"under threshold", 0.1, check.SeverityOK},
+		{"under threshold", 0.1, check.SeverityPass},
 		{"exactly at warn threshold", 0.25, check.SeverityWarn},
 		{"over warn threshold", 0.5, check.SeverityWarn},
 		{"exactly at fail threshold", 1.0, check.SeverityFail},
@@ -334,12 +334,12 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 	}{
 		// --- Absolute tier (cap = -1 disables the relative tier) ---
 		// Reported healthy samples: high-ish time but tiny backlog stays OK.
-		{"57.59s with 149.3MiB backlog, no cap", 57.59, 149*mib + 307*1024, capUnlimited, check.SeverityOK},
-		{"20.76s with 34.1MiB backlog, no cap", 20.76, 34 * mib, capUnlimited, check.SeverityOK},
+		{"57.59s with 149.3MiB backlog, no cap", 57.59, 149*mib + 307*1024, capUnlimited, check.SeverityPass},
+		{"20.76s with 34.1MiB backlog, no cap", 20.76, 34 * mib, capUnlimited, check.SeverityPass},
 		// Time alone is not enough — bytes below warn tier.
-		{"warn time but bytes below warn", 130.0, mib, capUnlimited, check.SeverityOK},
+		{"warn time but bytes below warn", 130.0, mib, capUnlimited, check.SeverityPass},
 		// Bytes alone is not enough — time below warn tier.
-		{"warn bytes but time below warn", 10.0, 9 * gib, capUnlimited, check.SeverityOK},
+		{"warn bytes but time below warn", 10.0, 9 * gib, capUnlimited, check.SeverityPass},
 		{"130s with 600MiB AND-gate warn", 130.0, 600 * mib, capUnlimited, check.SeverityWarn},
 		{"350s with 3GiB AND-gate fail", 350.0, 3 * gib, capUnlimited, check.SeverityFail},
 		// Fail time but bytes only in warn tier ⇒ degrades to warn.
@@ -350,7 +350,7 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 		// --- Capacity-relative tier (low time, so the absolute tier is OK) ---
 		{"cap=1GiB backlog 600MiB (>=50%) warn", 5.0, 600 * mib, gib, check.SeverityWarn},
 		{"cap=1GiB backlog 950MiB (>=85%) fail", 5.0, 950 * mib, gib, check.SeverityFail},
-		{"cap=10GiB backlog 100MiB OK", 5.0, 100 * mib, 10 * gib, check.SeverityOK},
+		{"cap=10GiB backlog 100MiB OK", 5.0, 100 * mib, 10 * gib, check.SeverityPass},
 
 		// --- Tiers disagree: max wins ---
 		// Absolute FAIL (350s/3GiB), relative OK (3GiB < 50% of 10GiB) ⇒ FAIL.
@@ -508,7 +508,7 @@ func TestCheck_ReplicationState_AllStreaming(t *testing.T) {
 	}
 
 	require.NotNil(t, stateFinding)
-	assert.Equal(t, check.SeverityOK, stateFinding.Severity)
+	assert.Equal(t, check.SeverityPass, stateFinding.Severity)
 	assert.Contains(t, stateFinding.Details, "All 2 replication stream(s) are in 'streaming' state")
 }
 
@@ -606,7 +606,7 @@ func TestCheck_WALRetention_AllHealthy(t *testing.T) {
 	}
 
 	require.NotNil(t, walFinding)
-	assert.Equal(t, check.SeverityOK, walFinding.Severity)
+	assert.Equal(t, check.SeverityPass, walFinding.Severity)
 	assert.Contains(t, walFinding.Details, "All 2 replication slot(s) have healthy WAL retention")
 }
 
@@ -839,7 +839,7 @@ func TestCheck_SeverityMaxCalculation(t *testing.T) {
 		{
 			name:        "all OK",
 			rows:        []db.ReplicationLagRow{healthyPhysical("standby1")},
-			expectedMax: check.SeverityOK,
+			expectedMax: check.SeverityPass,
 		},
 		{
 			name: "warn trumps OK",

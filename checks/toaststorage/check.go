@@ -70,7 +70,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables with significant TOAST storage found",
 		})
 		return report, nil
@@ -113,7 +113,7 @@ func checkExcessiveToastRatio(rows []db.ToastStorageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "toast-ratio",
 			Name:     "TOAST Storage Ratio",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All tables have acceptable TOAST ratios (<50%)",
 		})
 		return
@@ -178,7 +178,7 @@ func checkLargeToastTables(rows []db.ToastStorageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "large-toast",
 			Name:     "Large TOAST Tables",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables with very large TOAST storage (>10GB)",
 		})
 		return
@@ -254,7 +254,7 @@ func checkToastBloat(rows []db.ToastStorageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "toast-bloat",
 			Name:     "TOAST Table Bloat",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No TOAST tables with excessive dead tuples detected",
 		})
 		return
@@ -353,7 +353,7 @@ func checkWideColumns(rows []db.ToastStorageRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "wide-columns",
 			Name:     "Wide Column Analysis",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No columns with excessive average width detected",
 		})
 		return
@@ -466,7 +466,7 @@ func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, r
 		report.AddFinding(check.Finding{
 			ID:       "compression-algorithm",
 			Name:     "TOAST Compression Algorithm",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All columns are using optimal compression settings (LZ4 or appropriate strategy)",
 		})
 		return

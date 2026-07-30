@@ -132,11 +132,11 @@ func TestTableVacuumHealth_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Len(t, report.Results, 4) // 4 subchecks now
 
 	for _, finding := range report.Results {
-		assert.Equal(t, check.SeverityOK, finding.Severity)
+		assert.Equal(t, check.SeverityPass, finding.Severity)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_NoTables(t *testing.T) {
 	}
 
 	require.NotNil(t, disabledFinding)
-	assert.Equal(t, check.SeverityOK, disabledFinding.Severity)
+	assert.Equal(t, check.SeverityPass, disabledFinding.Severity)
 	assert.Contains(t, disabledFinding.Details, "No tables found")
 }
 
@@ -241,7 +241,7 @@ func TestTableVacuumHealth_LargeTableDefaults_NoTables(t *testing.T) {
 	}
 
 	require.NotNil(t, largeFinding)
-	assert.Equal(t, check.SeverityOK, largeFinding.Severity)
+	assert.Equal(t, check.SeverityPass, largeFinding.Severity)
 	assert.Contains(t, largeFinding.Details, "No large tables")
 }
 
@@ -277,7 +277,7 @@ func TestTableVacuumHealth_LargeTableDefaults_WithCustomSettings(t *testing.T) {
 	}
 
 	require.NotNil(t, largeFinding)
-	assert.Equal(t, check.SeverityOK, largeFinding.Severity)
+	assert.Equal(t, check.SeverityPass, largeFinding.Severity)
 }
 
 func TestTableVacuumHealth_LargeTableDefaults_UsingDefaults_Warning(t *testing.T) {
@@ -423,7 +423,7 @@ func TestTableVacuumHealth_VacuumStale_AllFresh(t *testing.T) {
 	}
 
 	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityOK, staleFinding.Severity)
+	assert.Equal(t, check.SeverityPass, staleFinding.Severity)
 	assert.Contains(t, staleFinding.Details, "within the last 7 days")
 }
 
@@ -586,7 +586,7 @@ func TestTableVacuumHealth_VacuumStale_SkipTinyTables(t *testing.T) {
 	}
 
 	require.NotNil(t, staleFinding)
-	assert.Equal(t, check.SeverityOK, staleFinding.Severity)
+	assert.Equal(t, check.SeverityPass, staleFinding.Severity)
 }
 
 func TestTableVacuumHealth_AnalyzeNeeded_NoTables(t *testing.T) {
@@ -620,7 +620,7 @@ func TestTableVacuumHealth_AnalyzeNeeded_NoTables(t *testing.T) {
 	}
 
 	require.NotNil(t, analyzeFinding)
-	assert.Equal(t, check.SeverityOK, analyzeFinding.Severity)
+	assert.Equal(t, check.SeverityPass, analyzeFinding.Severity)
 	assert.Contains(t, analyzeFinding.Details, "No tables found")
 }
 
@@ -732,7 +732,7 @@ func TestTableVacuumHealth_AnalyzeNeeded_SkipTinyTables(t *testing.T) {
 	}
 
 	require.NotNil(t, analyzeFinding)
-	assert.Equal(t, check.SeverityOK, analyzeFinding.Severity)
+	assert.Equal(t, check.SeverityPass, analyzeFinding.Severity)
 }
 
 func TestTableVacuumHealth_QueryError(t *testing.T) {

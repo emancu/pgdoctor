@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/uuiddefaults"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +44,8 @@ func Test_UUIDDefaults_NoIssues(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	checktest.AssertSeverityInvariant(t, report)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "No indexed UUID")
 }
@@ -61,7 +63,8 @@ func Test_UUIDDefaults_NoIndex(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	checktest.AssertSeverityInvariant(t, report)
+	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_UUIDDefaults_NotRandomUUID(t *testing.T) {
@@ -77,7 +80,8 @@ func Test_UUIDDefaults_NotRandomUUID(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	checktest.AssertSeverityInvariant(t, report)
+	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_UUIDDefaults_RandomUUIDIndexed(t *testing.T) {
@@ -93,6 +97,7 @@ func Test_UUIDDefaults_RandomUUIDIndexed(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "Found 1 indexed UUID column")
@@ -113,6 +118,7 @@ func Test_UUIDDefaults_UUIDGenerateV4(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "random v4 defaults")
@@ -133,6 +139,7 @@ func Test_UUIDDefaults_Multiple(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Contains(t, report.Results[0].Details, "Found 3 indexed UUID column")
 	require.NotNil(t, report.Results[0].Table)
@@ -180,6 +187,7 @@ func Test_UUIDDefaults_PrescriptionContent(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, 1, len(report.Results))
 }
 
@@ -197,6 +205,7 @@ func Test_UUIDDefaults_TableFormatting(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, 1, len(report.Results))
 	require.NotNil(t, report.Results[0].Table)
 
@@ -230,7 +239,7 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 				makeUUIDDefault("t1", "id", "gen_random_uuid()", false),
 				makeUUIDDefault("t2", "id", "gen_random_uuid()", false),
 			},
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedCount:    0,
 		},
 		{
@@ -239,7 +248,7 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 				makeUUIDDefault("t1", "id", "uuid_generate_v7()", true),
 				makeUUIDDefault("t2", "id", "uuidv7()", true),
 			},
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			expectedCount:    0,
 		},
 		{
@@ -265,6 +274,7 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 			require.Equal(t, tt.expectedSeverity, report.Severity)
 			if tt.expectedCount > 0 {
 				require.NotNil(t, report.Results[0].Table)

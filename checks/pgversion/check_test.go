@@ -45,17 +45,17 @@ func Test_Version(t *testing.T) {
 		{
 			Name:             "PG 15 - supported",
 			Row:              db.PGVersionRow{Major: 15, Minor: 0},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "PG 16 - supported",
 			Row:              db.PGVersionRow{Major: 16, Minor: 0},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "PG 17 - current",
 			Row:              db.PGVersionRow{Major: 17, Minor: 0},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 	}
 

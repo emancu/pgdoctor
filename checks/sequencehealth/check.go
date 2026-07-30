@@ -97,7 +97,7 @@ func checkNearExhaustion(rows []db.SequenceHealthRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "near-exhaustion",
 			Name:     "Sequence Exhaustion",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All sequences have sufficient headroom (<75% used)",
 		})
 		return
@@ -164,7 +164,7 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 		report.AddFinding(check.Finding{
 			ID:       "integer-columns",
 			Name:     "Integer Column Safety",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No integer columns with high sequence usage detected",
 		})
 		return
@@ -219,7 +219,7 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 		report.AddFinding(check.Finding{
 			ID:       "type-mismatch",
 			Name:     "Sequence Type Mismatch",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All sequences are properly bounded by their column types",
 		})
 		return

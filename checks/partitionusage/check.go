@@ -73,7 +73,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
 			Name:     "Partition Key Usage Analysis",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No partitioned tables found",
 		})
 		return report, nil
@@ -107,7 +107,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
 			Name:     "Partition Key Usage Analysis",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
 	} else {
@@ -200,7 +200,7 @@ func checkPartitionKeyUsage(
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
 			Name:     "Partition Key Usage Analysis",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All queries on %d partitioned table(s) properly use partition keys", len(tables)),
 		})
 		return

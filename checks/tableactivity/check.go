@@ -57,7 +57,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No table activity data available",
 		})
 		return report, nil
@@ -85,7 +85,7 @@ func checkHighChurnTables(rows []db.TableActivityRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "high-churn-tables",
 			Name:     "High Churn Tables",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables with excessive write activity (>1M writes) detected",
 		})
 		return
@@ -149,7 +149,7 @@ func checkLowHOTRatio(rows []db.TableActivityRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "low-hot-ratio",
 			Name:     "HOT Update Efficiency",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All large tables have acceptable HOT update ratio (>50%)",
 		})
 		return

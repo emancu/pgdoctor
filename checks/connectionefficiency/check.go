@@ -67,7 +67,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "Does not support session statistics (requires PG14+)",
 		})
 		return report, nil
@@ -85,7 +85,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No session statistics available yet (stats may have been recently reset)",
 		})
 		return report, nil
@@ -119,7 +119,7 @@ func checkBusyRatio(stats db.SessionStatisticsRow, totalSessions int64, report *
 	report.AddFinding(check.Finding{
 		ID:       "busy-ratio",
 		Name:     "Session Busy Ratio",
-		Severity: check.SeverityOK,
+		Severity: check.SeverityPass,
 		Details:  fmt.Sprintf("Session busy ratio at %.1f%% (healthy: above %.0f%%)", busyRatio, busyRatioLowerPercent),
 	})
 }
@@ -132,7 +132,7 @@ func checkSessionsAbandoned(stats db.SessionStatisticsRow, totalSessions int64, 
 		report.AddFinding(check.Finding{
 			ID:       "sessions-abandoned",
 			Name:     "Abandoned Sessions",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("%d abandoned sessions (%.1f%% of total) is within normal range", sessionsAbandoned, abandonedPercent),
 		})
 		return
@@ -159,7 +159,7 @@ func checkSessionsFatal(stats db.SessionStatisticsRow, totalSessions int64, repo
 		report.AddFinding(check.Finding{
 			ID:       "sessions-fatal",
 			Name:     "Fatal Session Terminations",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("%d fatal terminations (%.1f%% of total) is within normal range", sessionsFatal, fatalPercent),
 		})
 		return
@@ -189,7 +189,7 @@ func checkSessionsKilled(stats db.SessionStatisticsRow, totalSessions int64, rep
 		report.AddFinding(check.Finding{
 			ID:       "sessions-killed",
 			Name:     "Killed Sessions",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("%d killed sessions (%.1f%% of total) is within normal range", sessionsKilled, killedPercent),
 		})
 		return

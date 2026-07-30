@@ -16,15 +16,19 @@ type DBTX = db.DBTX
 type Severity int
 
 const (
-	SeveritySkip Severity = iota - 1 // Check could not run (timeout, permission error, etc.)
-	SeverityOK   Severity = iota
-	SeverityWarn
-	SeverityFail
+	SeverityInfo Severity = -2 // Informational; never escalates a report's severity
+	SeveritySkip Severity = -1 // Check could not run (timeout, permission error, etc.)
+	// 0 is intentionally unused: the zero value means "unset" and renders as "unknown".
+	SeverityPass Severity = 1
+	SeverityWarn Severity = 2
+	SeverityFail Severity = 3
 )
 
 func (s Severity) String() string {
 	switch s {
-	case SeverityOK:
+	case SeverityInfo:
+		return "info"
+	case SeverityPass:
 		return "pass"
 	case SeverityWarn:
 		return "warn"
@@ -85,7 +89,7 @@ type Report struct {
 func NewReport(metadata Metadata) *Report {
 	return &Report{
 		Metadata: metadata,
-		Severity: SeverityOK, // Start at OK, will be updated as results are added
+		Severity: SeverityPass, // Start at OK, will be updated as results are added
 		Results:  []Finding{},
 	}
 }

@@ -58,7 +58,7 @@ func Test_InvalidIndexes_Severity(t *testing.T) {
 		{
 			Name:     "no invalid indexes - OK",
 			Indexes:  []db.BrokenIndexesRow{},
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		},
 		{
 			Name:     "broken index - WARN",
@@ -107,7 +107,7 @@ func Test_InvalidIndexes_OK_NoDetailsNoTable(t *testing.T) {
 	require.NoError(t, err)
 
 	finding := onlyFinding(t, report)
-	require.Equal(t, check.SeverityOK, finding.Severity)
+	require.Equal(t, check.SeverityPass, finding.Severity)
 	require.Empty(t, finding.Details, "OK finding carries no details")
 	require.Nil(t, finding.Table, "OK finding carries no table")
 }

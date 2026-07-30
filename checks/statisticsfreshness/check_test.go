@@ -59,7 +59,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 				StatsReset: makeTimestamp(10),
 				AgeDays:    makeInt4(10),
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
 		},
 		{
@@ -68,7 +68,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 				StatsReset: makeTimestamp(7),
 				AgeDays:    makeInt4(7),
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
 		},
 		{
@@ -95,7 +95,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 				StatsReset: pgtype.Timestamptz{Valid: false},
 				AgeDays:    pgtype.Int4{Valid: false},
 			},
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
 		},
 	}
@@ -139,7 +139,7 @@ func Test_StatisticsFreshness_MatureStats(t *testing.T) {
 	require.Equal(t, 1, len(results))
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity)
+	require.Equal(t, check.SeverityPass, result.Severity)
 	require.Contains(t, result.Details, "14 days old")
 	require.Contains(t, result.Details, "mature enough")
 }
@@ -190,7 +190,7 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 	require.Equal(t, 1, len(results))
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity)
+	require.Equal(t, check.SeverityPass, result.Severity)
 	require.Contains(t, result.Details, "never been reset")
 	require.Contains(t, result.Details, "optimal")
 }
@@ -208,7 +208,7 @@ func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
 		{
 			Name:             "exactly 7 days - OK",
 			AgeDays:          7,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "just below 7 days - WARN",
@@ -218,7 +218,7 @@ func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
 		{
 			Name:             "well above threshold - OK",
 			AgeDays:          30,
-			ExpectedSeverity: check.SeverityOK,
+			ExpectedSeverity: check.SeverityPass,
 		},
 		{
 			Name:             "very fresh (1 day) - WARN",
@@ -320,7 +320,7 @@ func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
 	require.Equal(t, 1, len(results))
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Very old stats should still be OK")
+	require.Equal(t, check.SeverityPass, result.Severity, "Very old stats should still be OK")
 	require.Contains(t, result.Details, "90 days old")
 }
 

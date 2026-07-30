@@ -58,7 +58,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables with significant dead tuples found",
 		})
 		return report, nil
@@ -97,7 +97,7 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "high-dead-tuples",
 			Name:     "Dead Tuple Percentage",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All tables have acceptable dead tuple percentages (<20%)",
 		})
 		return
@@ -181,7 +181,7 @@ func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "stale-vacuum",
 			Name:     "Vacuum Freshness",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All tables with significant dead tuples have been vacuumed recently",
 		})
 		return
@@ -249,7 +249,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "large-bloated-tables",
 			Name:     "Large Table Bloat",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No large tables with significant bloat detected",
 		})
 		return

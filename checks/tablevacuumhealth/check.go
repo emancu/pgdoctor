@@ -93,7 +93,7 @@ func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Repor
 		report.AddFinding(check.Finding{
 			ID:       "autovacuum-disabled",
 			Name:     "Autovacuum Disabled Tables",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables found with autovacuum disabled",
 		})
 		return
@@ -119,7 +119,7 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 		report.AddFinding(check.Finding{
 			ID:       "large-table-defaults",
 			Name:     "Large Table Vacuum Defaults",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No large tables (>1M rows) found using default autovacuum settings",
 		})
 		return
@@ -185,7 +185,7 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "vacuum-stale",
 			Name:     "Stale Vacuum Activity",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "All tables have been vacuumed and analyzed within the last 7 days",
 		})
 		return
@@ -252,7 +252,7 @@ func checkAnalyzeNeeded(rows []db.TableVacuumHealthRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "analyze-needed",
 			Name:     "Table Statistics Staleness",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 			Details:  "No tables found with excessive modifications since last analyze",
 		})
 		return

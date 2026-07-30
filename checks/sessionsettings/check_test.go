@@ -7,6 +7,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -120,7 +121,7 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "with optimal values, check is OK",
 			Rows: mapToSessionSettingsRows(optimalSessionSettings()),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityOK},
+				{ID: "session-settings", Sev: check.SeverityPass},
 			},
 		},
 		// Statement timeout tests
@@ -154,7 +155,7 @@ func Test_SessionSettings(t *testing.T) {
 				"app_ro", "statement_timeout", "ms",
 			),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityOK},
+				{ID: "session-settings", Sev: check.SeverityPass},
 			},
 		},
 		{
@@ -186,7 +187,7 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "transaction_timeout missing for app_ro (PG < 17) is skipped",
 			Rows: removeFromSessionSettings("app_ro", "transaction_timeout"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityOK},
+				{ID: "session-settings", Sev: check.SeverityPass},
 			},
 		},
 		{
@@ -194,7 +195,7 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "transaction_timeout absent for all roles (PG < 17) yields no finding",
 			Rows: removeFromAllRoles("transaction_timeout"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityOK},
+				{ID: "session-settings", Sev: check.SeverityPass},
 			},
 		},
 		{
@@ -252,6 +253,7 @@ func Test_SessionSettings(t *testing.T) {
 			checker := sessionsettings.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
 			results := report.Results
 			require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -261,7 +263,7 @@ func Test_SessionSettings(t *testing.T) {
 			require.Equal(t, tc.Expect[0].Sev, result.Severity, "Result severity should match")
 
 			// If not OK, should have a table
-			if result.Severity != check.SeverityOK {
+			if result.Severity != check.SeverityPass {
 				require.NotNil(t, result.Table, "Non-OK result should have a table")
 				require.Greater(t, len(result.Table.Rows), 0, "Table should have rows")
 			}
@@ -292,6 +294,7 @@ func Test_SessionSettings_MultipleIssues(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -328,6 +331,7 @@ func Test_SessionSettings_BothRolesCheckedEqually(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -404,6 +408,7 @@ func Test_SessionSettings_SpecificDetailChecks(t *testing.T) {
 			checker := sessionsettings.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
 			results := report.Results
 			require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -437,12 +442,13 @@ func Test_SessionSettings_EmptyRoles(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	result := results[0]
-	require.Equal(t, check.SeverityOK, result.Severity, "Empty roles should be OK")
+	require.Equal(t, check.SeverityPass, result.Severity, "Empty roles should be OK")
 	require.Equal(t, "No application roles found", result.Details)
 }
 
@@ -469,10 +475,11 @@ func Test_SessionSettings_ArbitraryRoleNames(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
-	require.Equal(t, check.SeverityOK, results[0].Severity, "Arbitrary role names with optimal settings should be OK")
+	require.Equal(t, check.SeverityPass, results[0].Severity, "Arbitrary role names with optimal settings should be OK")
 }
 
 func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
@@ -496,6 +503,7 @@ func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
@@ -541,6 +549,7 @@ func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity, "3000ms should WARN when threshold is 2000")
@@ -583,6 +592,7 @@ func Test_SessionSettings_CustomThresholds_Fail(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityFail, result.Severity, "7000ms should FAIL when threshold is 5000")
@@ -616,6 +626,7 @@ func Test_SessionSettings_DefaultThresholds(t *testing.T) {
 	checker := sessionsettings.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms should WARN with default thresholds (5000/10000)")
@@ -655,10 +666,11 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 	checker := sessionsettings.New(queryer, cfg)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
 	// Only api_user is checked (which has good settings), worker_user is ignored
-	require.Equal(t, check.SeverityOK, results[0].Severity, "Should only check configured roles")
+	require.Equal(t, check.SeverityPass, results[0].Severity, "Should only check configured roles")
 }

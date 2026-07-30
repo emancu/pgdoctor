@@ -98,12 +98,12 @@ func TestSequenceHealth_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 3, len(report.Results))
 
 	// All three subchecks should be OK
 	for _, finding := range report.Results {
-		require.Equal(t, check.SeverityOK, finding.Severity)
+		require.Equal(t, check.SeverityPass, finding.Severity)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestSequenceHealth_NearExhaustion_CyclicIgnored(t *testing.T) {
 	}
 
 	require.NotNil(t, exhaustionFinding)
-	require.Equal(t, check.SeverityOK, exhaustionFinding.Severity)
+	require.Equal(t, check.SeverityPass, exhaustionFinding.Severity)
 	require.Contains(t, exhaustionFinding.Details, "sufficient headroom")
 }
 
@@ -533,7 +533,7 @@ func TestSequenceHealth_EdgeCase_ExactThresholds(t *testing.T) {
 		{
 			name:             "just below 75%",
 			usagePercent:     74.99,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			subcheckID:       findingIDNearExhaustion,
 		},
 		{
@@ -720,11 +720,11 @@ func TestSequenceHealth_SequenceWithoutColumn(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 
 	// All subchecks should be OK (no column means no problems)
 	for _, finding := range report.Results {
-		require.Equal(t, check.SeverityOK, finding.Severity)
+		require.Equal(t, check.SeverityPass, finding.Severity)
 	}
 }
 

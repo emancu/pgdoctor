@@ -86,9 +86,13 @@ Choose severity carefully — it determines how users prioritize their work:
 
 - **FAIL**: Requires action. Security risk, data loss potential, or imminent outage.
 - **WARN**: Should address. Performance issue, technical debt, or best practice violation.
-- **OK**: Passing. Always include at least one OK finding when no issues are detected.
+- **INFO**: Worth knowing. Relevant information with no expected action; never escalates the report severity.
+- **PASS**: Passing. Always include at least one PASS finding when no issues are detected.
+- **SKIP**: The check could not run — timeout, permission error, or a missing extension. Runner-injected, never author-assigned, and ordered below PASS so it never escalates the report.
 
 When in doubt, prefer WARN over FAIL. A noisy tool that cries wolf loses trust.
+
+Consumers switching over `Severity` with a `default` branch should add an explicit `SeverityInfo` case before surfacing INFO, or it silently falls through to the default bucket.
 
 ## Code Standards
 
@@ -96,7 +100,7 @@ When in doubt, prefer WARN over FAIL. A noisy tool that cries wolf loses trust.
 - **Embed SQL and README** via `//go:embed` directives
 - Use `check.NewReport(Metadata())` to create reports
 - Access metadata via promoted fields (`report.CheckID`, not local variables)
-- Always report `SeverityOK` when no issues are found
+- Always report `SeverityPass` when no issues are found
 - Use table-driven tests with `testify`
 
 ## Categories

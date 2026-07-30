@@ -62,7 +62,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return report, nil
 	}
@@ -94,7 +94,7 @@ func checkExactDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "exact-duplicates",
 			Name:     "Exact Duplicate Indexes",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return
 	}
@@ -145,7 +145,7 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 		report.AddFinding(check.Finding{
 			ID:       "prefix-duplicates",
 			Name:     "Prefix Duplicate Indexes",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return
 	}

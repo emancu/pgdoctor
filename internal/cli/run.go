@@ -133,7 +133,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			var reports []*check.Report
 			var currentCategory string
-			maxSeverity := check.SeverityOK
+			maxSeverity := check.SeverityPass
 
 			runOpts.OnReport = func(r *check.Report) {
 				reports = append(reports, r)
@@ -153,7 +153,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 					currentCategory = cat
 				}
 
-				if r.Severity == check.SeverityOK && opts.hidePassing {
+				if r.Severity == check.SeverityPass && opts.hidePassing {
 					return
 				}
 

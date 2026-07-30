@@ -95,11 +95,11 @@ func TestFreezeAge_AllHealthy(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityOK, report.Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 2, len(report.Results))
 
 	for _, finding := range report.Results {
-		require.Equal(t, check.SeverityOK, finding.Severity)
+		require.Equal(t, check.SeverityPass, finding.Severity)
 	}
 }
 
@@ -332,7 +332,7 @@ func TestFreezeAge_EdgeCases_ExactThresholds(t *testing.T) {
 		{
 			name:             "database just below 500M",
 			freezeAge:        499_999_999,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			checkType:        "database",
 		},
 		{
@@ -350,7 +350,7 @@ func TestFreezeAge_EdgeCases_ExactThresholds(t *testing.T) {
 		{
 			name:             "table just below 400M",
 			freezeAge:        399_999_999,
-			expectedSeverity: check.SeverityOK,
+			expectedSeverity: check.SeverityPass,
 			checkType:        "table",
 		},
 	}

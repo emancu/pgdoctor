@@ -137,7 +137,7 @@ func TestCheck_NoSlots(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, report.Results, 1)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Equal(t, "All 0 replication slot(s) are healthy", report.Results[0].Details)
 }
 
@@ -156,7 +156,7 @@ func TestCheck_AllHealthy(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, report.Results, 1)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Contains(t, report.Results[0].Details, "2 replication slot(s) are healthy")
 }
 
@@ -529,7 +529,7 @@ func TestCheck_LagBelowThreshold(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, report.Results, 1)
-	assert.Equal(t, check.SeverityOK, report.Severity)
+	assert.Equal(t, check.SeverityPass, report.Severity)
 	assert.Contains(t, report.Results[0].Details, "healthy")
 }
 
@@ -546,7 +546,7 @@ func TestCheck_LagThresholdBoundary(t *testing.T) {
 			name:       "just under 1GB",
 			lagBytes:   1*1024*1024*1024 - 1,
 			expectedID: "replication-slots", // OK
-			severity:   check.SeverityOK,
+			severity:   check.SeverityPass,
 		},
 		{
 			name:       "exactly 1GB",

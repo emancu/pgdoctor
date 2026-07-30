@@ -68,7 +68,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return report, nil
 	}
@@ -104,7 +104,7 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "unused-indexes",
 			Name:     "Unused Indexes",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return
 	}
@@ -148,7 +148,7 @@ func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "low-usage-indexes",
 			Name:     "Low Usage Indexes",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return
 	}
@@ -203,7 +203,7 @@ func checkIndexCacheRatio(rows []db.IndexUsageStatsRow, report *check.Report) {
 		report.AddFinding(check.Finding{
 			ID:       "index-cache-ratio",
 			Name:     "Index Cache Efficiency",
-			Severity: check.SeverityOK,
+			Severity: check.SeverityPass,
 		})
 		return
 	}
