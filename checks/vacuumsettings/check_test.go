@@ -220,6 +220,109 @@ func Test_VacuumSettings(t *testing.T) {
 	}
 }
 
+func findResult(results []check.Finding, id string) *check.Finding {
+	for i := range results {
+		if results[i].ID == id {
+			return &results[i]
+		}
+	}
+	return nil
+}
+
+func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
+	t.Parallel()
+
+	// All cases run against mockMetadata: db.t4g.large, 8GB RAM.
+	tests := []struct {
+		Name          string
+		Setting       string
+		Value         string
+		FindingID     string
+		Severity      check.Severity
+		Details       string
+		DebugContains []string
+	}{
+		{
+			Name:      "work_mem risky (WARN)",
+			Setting:   "work_mem",
+			Value:     "49152", // 48MB × 100 connections = 4800MB = 58.6% of 8GB
+			FindingID: "work_mem",
+			Severity:  check.SeverityWarn,
+			Details:   "work_mem 48MB × max_connections 100 → worst case 4800MB (58.6% of 8GB RAM)",
+			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
+				"Worst-case RAM usage: 4800MB (58.6% of available RAM)",
+				"Current active connections: 10 using ~480MB (5.9%)",
+				"While currently safe, connection spikes could cause memory pressure.",
+			},
+		},
+		{
+			Name:      "work_mem dangerous (FAIL)",
+			Setting:   "work_mem",
+			Value:     "2097152", // 2048MB × 100 connections = 204800MB = 2500% of 8GB
+			FindingID: "work_mem",
+			Severity:  check.SeverityFail,
+			Details:   "work_mem 2048MB × max_connections 100 → worst case 204800MB (2500.0% of 8GB RAM)",
+			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
+				"Worst-case RAM usage: 204800MB (2500.0% of available RAM)",
+				"Current active connections: 10 using ~20480MB (250.0%)",
+				"This configuration can cause out-of-memory errors when connections spike.",
+				"Note: Each query operation (sort/hash) can use work_mem multiple times.",
+			},
+		},
+		{
+			Name:      "maintenance_work_mem high budget (WARN)",
+			Setting:   "maintenance_work_mem",
+			Value:     "524288", // 512MB × 4 workers = 2048MB = 25% of 8GB
+			FindingID: "maintenance_work_mem",
+			Severity:  check.SeverityWarn,
+			Details:   "maintenance_work_mem 512MB × autovacuum_max_workers 4 → total budget 2048MB (25.0% of 8GB RAM)",
+			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
+				"Total RAM = maintenance_work_mem × autovacuum_max_workers",
+				"Your config: 512MB × 4 workers = 2048MB",
+				"While not critical, consider keeping total under 12.5% RAM (1/8 of total).",
+			},
+		},
+		{
+			Name:      "maintenance_work_mem dangerous budget (FAIL)",
+			Setting:   "maintenance_work_mem",
+			Value:     "1048576", // 1024MB × 4 workers = 4096MB = 50% of 8GB
+			FindingID: "maintenance_work_mem",
+			Severity:  check.SeverityFail,
+			Details:   "maintenance_work_mem 1024MB × autovacuum_max_workers 4 → total budget 4096MB (50.0% of 8GB RAM)",
+			DebugContains: []string{
+				"Instance: db.t4g.large (8GB RAM)",
+				"Your config: 1024MB × 4 workers = 4096MB",
+				"This can cause memory pressure. Keep total under 25% RAM.",
+				"Manual VACUUM and CREATE INDEX operations also use this memory.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockVacuumSettingsQueries{rows: overrideOptimalWith(tt.Setting, tt.Value)}
+			checker := vacuumsettings.New(queryer)
+
+			ctx := check.ContextWithInstanceMetadata(context.Background(), mockMetadata())
+			report, err := checker.Check(ctx)
+			require.NoError(t, err)
+
+			finding := findResult(report.Results, tt.FindingID)
+			require.NotNil(t, finding)
+			require.Equal(t, tt.Severity, finding.Severity)
+			require.Equal(t, tt.Details, finding.Details)
+			for _, want := range tt.DebugContains {
+				require.Contains(t, finding.Debug, want)
+			}
+		})
+	}
+}
+
 func Test_VacuumSettings_MultipleIssues(t *testing.T) {
 	t.Parallel()
 

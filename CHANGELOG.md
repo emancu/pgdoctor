@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **check**: renamed the exported `SeverityOK` constant to `SeverityPass` for consistency with its `"pass"` string and `PASS` CLI label. Breaking for consumers referencing the identifier; the int value (`1`) and string are unchanged ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`vacuum-settings`**: RAM-budget findings are now a single line; the full breakdown moved to `--detail debug` ([#21](https://github.com/emancu/pgdoctor/pull/21)).
 - **`cache-efficiency`**: now a non-paging advisory — dropped the FAIL tier and lowered the OK threshold to ≥90% (WARN only below 90%). The 90-95% band is dominated by OS-page-cache reads that Postgres counts as `blks_read`, so it was near-constant noise on healthy OLTP instances; genuine memory pressure surfaces in read latency / IOPS, not the global hit ratio.
 
 ## [0.3.0] - 2026-06-01
