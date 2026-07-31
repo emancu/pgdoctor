@@ -49,28 +49,22 @@ ALTER TABLE schema.large_table SET (
 
 ### vacuum-stale
 
-Lists tables that are both overdue for maintenance **and** carrying real pending work. A table is only reported when one of two arms trips at a tier, and both arms share the same pending-work floors:
+Identifies tables that haven't been vacuumed or analyzed recently despite pending work. Never-vacuumed/analyzed tables count as infinitely stale.
 
-- **Vacuum arm**: the last (auto)vacuum is older than the tier's age *and* pending vacuum work (dead tuples + inserts since vacuum) meets the floor.
-- **Analyze arm**: the last (auto)analyze is older than the tier's age *and* modifications since the last analyze meet the floor.
+**Severity:**
+- Warning: No vacuum/analyze in 7+ days with 250,000+ pending work
+- Fail: No vacuum/analyze in 25+ days with 500,000+ pending work
 
-**Tiers** (FAIL is evaluated first; either arm can trip either tier):
-- Warning: overdue by more than 7 days with pending work of at least 250,000.
-- Fail: overdue by more than 25 days with pending work of at least 500,000.
-
-A table that has never been vacuumed or analyzed is treated as infinitely stale, so it trips as soon as it has enough pending work. Rows are sorted worst-first (severity, then pending work).
-
-This design keeps the finding quiet: a table sitting untouched for months but with nothing to do is not reported, while a busy table that autovacuum can't keep up with surfaces immediately. It complements `statistics-freshness`, which validates **database-level** stats age, by identifying **per-table** staleness backed by actual activity.
-
-Tables that trip may have outdated statistics leading to poor query plans, accumulated dead tuples causing bloat, or increased disk usage from unreclaimed space.
+Tables that go too long without maintenance may have:
+- Outdated statistics leading to poor query plans
+- Accumulated dead tuples causing bloat
+- Increased disk usage from unreclaimed space
 
 ## Pending Work Column
 
-The "Pending Work" column is the larger of the two arms' work:
-- Vacuum work: `n_dead_tup` (dead tuples from updates/deletes) + `n_ins_since_vacuum` (inserted rows since last vacuum).
-- Analyze work: `n_mod_since_analyze` (modifications since last analyze).
-
-On modern PostgreSQL (14+) inserts count toward vacuum and analyze pressure, so a heavily append-only table can accumulate pending work without any updates or deletes.
+The "Pending Work" column is the larger of:
+- `n_dead_tup` + `n_ins_since_vacuum`: vacuum work (inserts count too, PostgreSQL 14+)
+- `n_mod_since_analyze`: analyze work
 
 ## How to Fix
 
