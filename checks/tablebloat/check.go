@@ -116,8 +116,8 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 			Cells: []string{
 				row.TableName.String,
 				fmt.Sprintf("%.1f%%", getDeadTuplePercent(row)),
-				formatNumber(row.DeadTuples.Int64),
-				formatNumber(row.LiveTuples.Int64),
+				check.FormatNumber(row.DeadTuples.Int64),
+				check.FormatNumber(row.LiveTuples.Int64),
 				check.FormatBytes(row.TotalSizeBytes.Int64),
 			},
 			Severity: check.SeverityWarn,
@@ -206,17 +206,4 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 			Rows:    tableRows,
 		},
 	})
-}
-
-func formatNumber(n int64) string {
-	if n >= 1_000_000_000 {
-		return fmt.Sprintf("%.1fB", float64(n)/1_000_000_000)
-	}
-	if n >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1_000)
-	}
-	return fmt.Sprintf("%d", n)
 }
