@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage ([#31](https://github.com/emancu/pgdoctor/pull/31)).
+- **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage, FAIL from 85% ([#31](https://github.com/emancu/pgdoctor/pull/31)).
 
 ### Added
 
