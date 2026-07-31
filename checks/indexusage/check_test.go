@@ -4,550 +4,281 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/indexusage"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	indexCacheRatioID = "index-cache-ratio"
-)
-
-type mockIndexUsageQueryer struct {
+type mockQueryer struct {
 	rows []db.IndexUsageStatsRow
 	err  error
 }
 
-func (m *mockIndexUsageQueryer) IndexUsageStats(context.Context) ([]db.IndexUsageStatsRow, error) {
+func (m *mockQueryer) IndexUsageStats(context.Context) ([]db.IndexUsageStatsRow, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.rows, nil
 }
 
-func newMockQueryer(rows []db.IndexUsageStatsRow) *mockIndexUsageQueryer {
-	return &mockIndexUsageQueryer{rows: rows}
-}
+func pgText(s string) pgtype.Text         { return pgtype.Text{String: s, Valid: true} }
+func pgInt8(i int64) pgtype.Int8          { return pgtype.Int8{Int64: i, Valid: true} }
+func pgTS(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+func pgTSNull() pgtype.Timestamptz        { return pgtype.Timestamptz{Valid: false} }
 
-func newMockQueryerWithError(err error) *mockIndexUsageQueryer {
-	return &mockIndexUsageQueryer{err: err}
-}
-
-func makeNumeric(value float64) pgtype.Numeric {
+func pgNum(v float64) pgtype.Numeric {
 	var n pgtype.Numeric
-	_ = n.Scan(fmt.Sprintf("%.2f", value))
+	_ = n.Scan(fmt.Sprintf("%.2f", v))
 	return n
 }
 
-func Test_IndexUsage(t *testing.T) {
+func mb(n int64) int64 { return n * 1024 * 1024 }
+
+// Exact-duration offset (not AddDate) so window boundaries don't drift across DST.
+func daysAgo(n int) pgtype.Timestamptz {
+	return pgTS(time.Now().Add(-time.Duration(n) * 24 * time.Hour))
+}
+
+func row(table, index string, scans, writes, sizeBytes int64, sr pgtype.Timestamptz) db.IndexUsageStatsRow {
+	return db.IndexUsageStatsRow{
+		TableName:      pgText(table),
+		IndexName:      pgText(index),
+		IdxScan:        pgInt8(scans),
+		TableWrites:    pgInt8(writes),
+		IndexSizeBytes: pgInt8(sizeBytes),
+		CacheHitRatio:  pgNum(99),
+		StatsReset:     sr,
+	}
+}
+
+func runCheck(t *testing.T, rows []db.IndexUsageStatsRow) *check.Report {
+	t.Helper()
+
+	report, err := indexusage.New(&mockQueryer{rows: rows}).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+	return report
+}
+
+func finding(t *testing.T, report *check.Report, id string) check.Finding {
+	t.Helper()
+
+	for _, f := range report.Results {
+		if f.ID == id {
+			return f
+		}
+	}
+	require.Failf(t, "missing finding", "no finding with id %q", id)
+	return check.Finding{}
+}
+
+func Test_Metadata(t *testing.T) {
 	t.Parallel()
 
-	type testCase struct {
-		Name             string
-		Rows             []db.IndexUsageStatsRow
-		ExpectedSeverity check.Severity
-		ExpectedFindings int
+	m := indexusage.Metadata()
+	require.Equal(t, "index-usage", m.CheckID)
+	require.Equal(t, "Index Usage", m.Name)
+	require.Equal(t, check.CategoryIndexes, m.Category)
+	require.NotEmpty(t, m.Description)
+	require.NotEmpty(t, m.SQL)
+	require.NotEmpty(t, m.Readme)
+}
+
+func Test_NoIndexes_Pass(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, nil)
+	require.Len(t, report.Results, 1)
+	require.Equal(t, check.SeverityPass, report.Severity)
+	require.Equal(t, "index-usage", report.Results[0].ID)
+}
+
+func Test_QueryError(t *testing.T) {
+	t.Parallel()
+
+	q := &mockQueryer{err: fmt.Errorf("connection refused")}
+	_, err := indexusage.New(q).Check(context.Background())
+	require.ErrorContains(t, err, "index-usage")
+}
+
+func Test_CacheRatio_IsInformational(t *testing.T) {
+	t.Parallel()
+
+	// Only a low cache-ratio index: high scans (not unused), recent stats (not low-usage).
+	r := row("public.orders", "idx_orders_created", 5000, 50000, mb(200), daysAgo(3))
+	r.CacheHitRatio = pgNum(85)
+
+	report := runCheck(t, []db.IndexUsageStatsRow{r})
+
+	cache := finding(t, report, "index-cache-ratio")
+	require.Equal(t, check.SeverityInfo, cache.Severity)
+	require.Contains(t, cache.Details, "85.0%")
+	// Info must not escalate the report.
+	require.Equal(t, check.SeverityPass, report.Severity)
+}
+
+func Test_UnusedIndexes_SizeFloor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		size   int64
+		listed bool
+	}{
+		{"just below floor (499MB) - not listed", mb(499), false},
+		{"at floor (500MB) - listed", mb(500), true},
 	}
 
-	testCases := []testCase{
-		{
-			Name:             "no issues - OK",
-			Rows:             []db.IndexUsageStatsRow{},
-			ExpectedSeverity: check.SeverityPass,
-			ExpectedFindings: 1,
-		},
-		{
-			Name: "unused index (0 scans, >10MB) - FAIL",
-			Rows: []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "users", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_users_unused", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: 20971520, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-					CacheHitRatio:  makeNumeric(98.0),
-				},
-			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedFindings: 3,
-		},
-		{
-			Name: "low usage index (<1000 scans, >10k writes) - WARN",
-			Rows: []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "posts", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_posts_status", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 500, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: 10485760, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 20000, Valid: true},
-					CacheHitRatio:  makeNumeric(95.0),
-				},
-			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedFindings: 3,
-		},
-		{
-			Name: "low cache ratio large index (>100MB) - FAIL",
-			Rows: []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "orders", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_orders_created", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 5000, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: 157286400, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-					CacheHitRatio:  makeNumeric(85.0),
-				},
-			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedFindings: 3,
-		},
-		{
-			Name: "mixed issues - FAIL",
-			Rows: []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "users", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_users_unused", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: 20971520, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-					CacheHitRatio:  makeNumeric(98.0),
-				},
-				{
-					TableName:      pgtype.Text{String: "posts", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_posts_status", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 500, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: 10485760, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 20000, Valid: true},
-					CacheHitRatio:  makeNumeric(92.0),
-				},
-			},
-			ExpectedSeverity: check.SeverityWarn,
-			ExpectedFindings: 3,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			queryer := newMockQueryer(tc.Rows)
+			r := row("public.users", "idx_users_unused", 0, 50000, tt.size, daysAgo(90))
+			report := runCheck(t, []db.IndexUsageStatsRow{r})
+			unused := finding(t, report, "unused-indexes")
 
-			checker := indexusage.New(queryer)
-			report, err := checker.Check(context.Background())
-			require.NoError(t, err)
+			if !tt.listed {
+				require.Equal(t, check.SeverityPass, unused.Severity)
+				require.Nil(t, unused.Table)
+				return
+			}
 
-			results := report.Results
-			require.Equal(t, tc.ExpectedFindings, len(results), "Should have expected number of findings")
-			require.Equal(t, tc.ExpectedSeverity, report.Severity, "Report severity should match")
-			require.Equal(t, check.CategoryIndexes, report.Category, "Category should be indexes")
+			require.Equal(t, check.SeverityWarn, unused.Severity)
+			require.Equal(t, []string{"Table", "Index", "Size"}, unused.Table.Headers)
+			require.Len(t, unused.Table.Rows, 1)
+			require.Equal(t, []string{"public.users", "idx_users_unused", "500.0MiB"}, unused.Table.Rows[0].Cells)
+			require.Equal(t, check.SeverityWarn, unused.Table.Rows[0].Severity)
 		})
 	}
 }
 
-func Test_IndexUsage_UnusedIndexes(t *testing.T) {
+func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.IndexUsageStatsRow{
-		{
-			TableName:      pgtype.Text{String: "users", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_users_unused_1", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 20971520, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       false,
-			TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-			CacheHitRatio:  makeNumeric(98.0),
-		},
-		{
-			TableName:      pgtype.Text{String: "posts", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_posts_unused", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 31457280, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       false,
-			TableWrites:    pgtype.Int8{Int64: 30000, Valid: true},
-			CacheHitRatio:  makeNumeric(97.0),
-		},
-	}
+	reset := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), pgTS(reset))
 
-	queryer := newMockQueryer(rows)
-
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	var unusedResult *check.Finding
-	for _, result := range report.Results {
-		if result.ID == "unused-indexes" {
-			unusedResult = &result
-			break
-		}
-	}
-
-	require.NotNil(t, unusedResult, "Should have unused-indexes finding")
-	require.Equal(t, check.SeverityWarn, unusedResult.Severity)
-	require.Contains(t, unusedResult.Details, "2 unused indexes")
-	require.Contains(t, unusedResult.Details, "idx_users_unused_1")
+	report := runCheck(t, []db.IndexUsageStatsRow{r})
+	unused := finding(t, report, "unused-indexes")
+	require.Contains(t, unused.Details, "0 scans since 2026-06-01")
+	require.Contains(t, unused.Details, ">500MB")
 }
 
-func Test_IndexUsage_LowUsageIndexes(t *testing.T) {
+func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.IndexUsageStatsRow{
-		{
-			TableName:      pgtype.Text{String: "comments", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_comments_status", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 500, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 10485760, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       false,
-			TableWrites:    pgtype.Int8{Int64: 20000, Valid: true},
-			CacheHitRatio:  makeNumeric(96.0),
-		},
-	}
+	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), pgTSNull())
 
-	queryer := newMockQueryer(rows)
-
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	var lowUsageResult *check.Finding
-	for _, result := range report.Results {
-		if result.ID == "low-usage-indexes" {
-			lowUsageResult = &result
-			break
-		}
-	}
-
-	require.NotNil(t, lowUsageResult, "Should have low-usage-indexes finding")
-	require.Equal(t, check.SeverityWarn, lowUsageResult.Severity)
-	require.Contains(t, lowUsageResult.Details, "low read usage but high write cost")
-	require.Contains(t, lowUsageResult.Details, "scans: 500")
-	require.Contains(t, lowUsageResult.Details, "writes: 20000")
+	report := runCheck(t, []db.IndexUsageStatsRow{r})
+	unused := finding(t, report, "unused-indexes")
+	require.Equal(t, check.SeverityWarn, unused.Severity)
+	require.Contains(t, unused.Details, "(0 scans, >500MB)")
+	require.NotContains(t, unused.Details, "since")
 }
 
-func Test_IndexUsage_LowCacheRatio(t *testing.T) {
+func Test_UnusedIndexes_SortedBySizeDesc(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.IndexUsageStatsRow{
-		{
-			TableName:      pgtype.Text{String: "orders", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_orders_created", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 5000, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 157286400, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       false,
-			TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-			CacheHitRatio:  makeNumeric(85.0),
-		},
-	}
+	// Rows arrive largest-first (SQL ORDER BY pg_relation_size DESC); Go preserves order.
+	big := row("public.a", "idx_big", 0, 50000, mb(900), daysAgo(90))
+	small := row("public.b", "idx_small", 0, 50000, mb(600), daysAgo(90))
 
-	queryer := newMockQueryer(rows)
-
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	var cacheResult *check.Finding
-	for _, result := range report.Results {
-		if result.ID == indexCacheRatioID {
-			cacheResult = &result
-			break
-		}
-	}
-
-	require.NotNil(t, cacheResult, "Should have index-cache-ratio finding")
-	require.Equal(t, check.SeverityWarn, cacheResult.Severity)
-	require.Contains(t, cacheResult.Details, "85.0%")
+	report := runCheck(t, []db.IndexUsageStatsRow{big, small})
+	unused := finding(t, report, "unused-indexes")
+	require.Len(t, unused.Table.Rows, 2)
+	require.Equal(t, "idx_big", unused.Table.Rows[0].Cells[1])
+	require.Equal(t, "idx_small", unused.Table.Rows[1].Cells[1])
 }
 
-func Test_IndexUsage_SkipPrimaryAndUnique(t *testing.T) {
+func Test_UnusedIndexes_SkipPrimaryAndUnique(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.IndexUsageStatsRow{
-		{
-			TableName:      pgtype.Text{String: "users", Valid: true},
-			IndexName:      pgtype.Text{String: "users_pkey", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 20971520, Valid: true},
-			IsPrimary:      true,
-			IsUnique:       true,
-			TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-			CacheHitRatio:  makeNumeric(98.0),
-		},
-		{
-			TableName:      pgtype.Text{String: "users", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_users_email_unique", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 0, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 15728640, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       true,
-			TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-			CacheHitRatio:  makeNumeric(97.0),
-		},
-	}
+	pk := row("public.users", "users_pkey", 0, 50000, mb(600), daysAgo(90))
+	pk.IsPrimary = true
+	uniq := row("public.users", "idx_users_email", 0, 50000, mb(600), daysAgo(90))
+	uniq.IsUnique = true
 
-	queryer := newMockQueryer(rows)
-
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	for _, result := range report.Results {
-		require.Equal(t, check.SeverityPass, result.Severity, "Primary/unique indexes should not be flagged")
-	}
+	report := runCheck(t, []db.IndexUsageStatsRow{pk, uniq})
+	require.Equal(t, check.SeverityPass, finding(t, report, "unused-indexes").Severity)
 }
 
-func Test_IndexUsage_SizeThresholds(t *testing.T) {
+func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 	t.Parallel()
 
-	type testCase struct {
-		Name             string
-		IdxScan          int64
-		IndexSizeBytes   int64
-		TableWrites      int64
-		ShouldBeUnused   bool
-		ShouldBeLowUsage bool
+	tests := []struct {
+		name   string
+		scans  int64
+		writes int64
+		size   int64
+		reset  pgtype.Timestamptz
+		listed bool
+	}{
+		{"window 29d - not listed", 0, 50000, mb(600), daysAgo(29), false},
+		{"window 30d - listed", 0, 50000, mb(600), daysAgo(30), true},
+		{"rate under 1/week (9 scans, 70d) - listed", 9, 50000, mb(600), daysAgo(70), true},
+		{"rate at 1/week (10 scans, 70d) - not listed", 10, 50000, mb(600), daysAgo(70), false},
+		{"writes below floor (9999) - not listed", 5, 9999, mb(600), daysAgo(90), false},
+		{"writes at floor (10000) - listed", 5, 10000, mb(600), daysAgo(90), true},
+		{"size below floor (499MB) - not listed", 5, 50000, mb(499), daysAgo(90), false},
+		{"size at floor (500MB) - listed", 5, 50000, mb(500), daysAgo(90), true},
+		{"null stats_reset qualifies window and rate", 5, 50000, mb(600), pgTSNull(), true},
 	}
 
-	testCases := []testCase{
-		{
-			Name:           "unused but small (<10MB) - not flagged",
-			IdxScan:        0,
-			IndexSizeBytes: 5242880,
-			TableWrites:    50000,
-			ShouldBeUnused: false,
-		},
-		{
-			Name:           "unused and large (>10MB) - flagged",
-			IdxScan:        0,
-			IndexSizeBytes: 20971520,
-			TableWrites:    50000,
-			ShouldBeUnused: true,
-		},
-		{
-			Name:             "low scans (<1000) but low writes - not flagged",
-			IdxScan:          500,
-			IndexSizeBytes:   10485760,
-			TableWrites:      5000,
-			ShouldBeLowUsage: false,
-		},
-		{
-			Name:             "low scans (<1000) and high writes (>10k) - flagged",
-			IdxScan:          500,
-			IndexSizeBytes:   10485760,
-			TableWrites:      20000,
-			ShouldBeLowUsage: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			rows := []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "test_table", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_test", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: tc.IdxScan, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: tc.IndexSizeBytes, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: tc.TableWrites, Valid: true},
-					CacheHitRatio:  makeNumeric(98.0),
-				},
-			}
+			r := row("public.posts", "idx_posts_status", tt.scans, tt.writes, tt.size, tt.reset)
+			report := runCheck(t, []db.IndexUsageStatsRow{r})
+			low := finding(t, report, "low-usage-indexes")
 
-			queryer := newMockQueryer(rows)
-
-			checker := indexusage.New(queryer)
-			report, err := checker.Check(context.Background())
-			require.NoError(t, err)
-
-			for _, result := range report.Results {
-				if result.ID == "unused-indexes" {
-					if tc.ShouldBeUnused {
-						require.Equal(t, check.SeverityWarn, result.Severity)
-					} else {
-						require.Equal(t, check.SeverityPass, result.Severity)
-					}
-				}
-				if result.ID == "low-usage-indexes" {
-					if tc.ShouldBeLowUsage {
-						require.Equal(t, check.SeverityWarn, result.Severity)
-					} else {
-						require.Equal(t, check.SeverityPass, result.Severity)
-					}
-				}
+			if tt.listed {
+				require.Equal(t, check.SeverityWarn, low.Severity)
+				require.Len(t, low.Table.Rows, 1)
+			} else {
+				require.Equal(t, check.SeverityPass, low.Severity)
+				require.Nil(t, low.Table)
 			}
 		})
 	}
 }
 
-func Test_IndexUsage_CacheRatioThresholds(t *testing.T) {
+func Test_LowUsageIndexes_SkipPrimaryAndUnique(t *testing.T) {
 	t.Parallel()
 
-	type testCase struct {
-		Name             string
-		CacheRatio       float64
-		IndexSizeBytes   int64
-		ExpectedSeverity check.Severity
-	}
+	pk := row("public.users", "users_pkey", 5, 50000, mb(600), daysAgo(90))
+	pk.IsPrimary = true
 
-	testCases := []testCase{
-		{
-			Name:             "good cache ratio (>95%) - OK",
-			CacheRatio:       98.0,
-			IndexSizeBytes:   157286400,
-			ExpectedSeverity: check.SeverityPass,
-		},
-		{
-			Name:             "low cache ratio (<95%), small index - WARN",
-			CacheRatio:       92.0,
-			IndexSizeBytes:   20971520,
-			ExpectedSeverity: check.SeverityWarn,
-		},
-		{
-			Name:             "low cache ratio (<90%), large index - FAIL",
-			CacheRatio:       85.0,
-			IndexSizeBytes:   157286400,
-			ExpectedSeverity: check.SeverityWarn,
-		},
-		{
-			Name:             "very small index ignored",
-			CacheRatio:       80.0,
-			IndexSizeBytes:   5242880,
-			ExpectedSeverity: check.SeverityPass,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Name, func(t *testing.T) {
-			t.Parallel()
-
-			rows := []db.IndexUsageStatsRow{
-				{
-					TableName:      pgtype.Text{String: "test_table", Valid: true},
-					IndexName:      pgtype.Text{String: "idx_test", Valid: true},
-					IdxScan:        pgtype.Int8{Int64: 5000, Valid: true},
-					IndexSizeBytes: pgtype.Int8{Int64: tc.IndexSizeBytes, Valid: true},
-					IsPrimary:      false,
-					IsUnique:       false,
-					TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-					CacheHitRatio:  makeNumeric(tc.CacheRatio),
-				},
-			}
-
-			queryer := newMockQueryer(rows)
-
-			checker := indexusage.New(queryer)
-			report, err := checker.Check(context.Background())
-			require.NoError(t, err)
-
-			var cacheResult *check.Finding
-			for _, result := range report.Results {
-				if result.ID == indexCacheRatioID {
-					cacheResult = &result
-					break
-				}
-			}
-
-			require.NotNil(t, cacheResult)
-			require.Equal(t, tc.ExpectedSeverity, cacheResult.Severity)
-		})
-	}
+	report := runCheck(t, []db.IndexUsageStatsRow{pk})
+	require.Equal(t, check.SeverityPass, finding(t, report, "low-usage-indexes").Severity)
 }
 
-func Test_IndexUsage_NoCacheData(t *testing.T) {
+func Test_LowUsageIndexes_Columns(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.IndexUsageStatsRow{
-		{
-			TableName:      pgtype.Text{String: "new_table", Valid: true},
-			IndexName:      pgtype.Text{String: "idx_new", Valid: true},
-			IdxScan:        pgtype.Int8{Int64: 5000, Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: 20971520, Valid: true},
-			IsPrimary:      false,
-			IsUnique:       false,
-			TableWrites:    pgtype.Int8{Int64: 50000, Valid: true},
-			CacheHitRatio:  pgtype.Numeric{Valid: false},
-		},
-	}
+	r := row("public.posts", "idx_recent", 5, 50000, mb(600), daysAgo(90))
 
-	queryer := newMockQueryer(rows)
+	report := runCheck(t, []db.IndexUsageStatsRow{r})
 
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	var cacheResult *check.Finding
-	for _, result := range report.Results {
-		if result.ID == indexCacheRatioID {
-			cacheResult = &result
-			break
-		}
-	}
-
-	require.NotNil(t, cacheResult)
-	require.Equal(t, check.SeverityPass, cacheResult.Severity, "Should be OK when no cache data")
+	low := finding(t, report, "low-usage-indexes")
+	require.Equal(t, []string{"Table", "Index", "Size", "Scans", "Writes"}, low.Table.Headers)
+	require.Len(t, low.Table.Rows[0].Cells, 5)
 }
 
-func Test_IndexUsage_QueryError(t *testing.T) {
+func Test_MixedFindings_ReportWarns(t *testing.T) {
 	t.Parallel()
 
-	expectedErr := fmt.Errorf("database connection error")
-	queryer := newMockQueryerWithError(expectedErr)
+	unused := row("public.users", "idx_unused", 0, 50000, mb(600), daysAgo(90))
+	lowCache := row("public.orders", "idx_orders", 5000, 50000, mb(200), daysAgo(3))
+	lowCache.CacheHitRatio = pgNum(85)
 
-	checker := indexusage.New(queryer)
-	_, err := checker.Check(context.Background())
-
-	require.Error(t, err, "Should return error when query fails")
-	require.Contains(t, err.Error(), "index-usage", "Error should mention check ID")
-}
-
-func Test_IndexUsage_Metadata(t *testing.T) {
-	t.Parallel()
-
-	queryer := newMockQueryer([]db.IndexUsageStatsRow{})
-	checker := indexusage.New(queryer)
-	metadata := checker.Metadata()
-
-	require.Equal(t, "index-usage", metadata.CheckID, "CheckID should match")
-	require.Equal(t, "Index Usage", metadata.Name, "Name should match")
-	require.Equal(t, check.CategoryIndexes, metadata.Category, "Category should be indexes")
-	require.NotEmpty(t, metadata.Description, "Description should not be empty")
-	require.NotEmpty(t, metadata.SQL, "SQL should not be empty")
-	require.NotEmpty(t, metadata.Readme, "Readme should not be empty")
-}
-
-func Test_IndexUsage_OKResult(t *testing.T) {
-	t.Parallel()
-
-	queryer := newMockQueryer([]db.IndexUsageStatsRow{})
-
-	checker := indexusage.New(queryer)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have 1 result when no indexes")
-
-	result := results[0]
-	require.Equal(t, check.SeverityPass, result.Severity, "Result should be OK")
-	require.Equal(t, "index-usage", result.ID, "ID should be index-usage")
-	require.Empty(t, result.Details, "Details should be empty for OK result")
+	report := runCheck(t, []db.IndexUsageStatsRow{unused, lowCache})
+	require.Len(t, report.Results, 3)
+	require.Equal(t, check.SeverityWarn, report.Severity)
+	require.Equal(t, check.SeverityInfo, finding(t, report, "index-cache-ratio").Severity)
 }
