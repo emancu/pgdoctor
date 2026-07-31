@@ -25,7 +25,8 @@ type checker struct {
 }
 
 const (
-	usagePercentFail = 50.0 // FAIL: >=50% of capacity used (urgent migration needed)
+	usagePercentFail  = 50.0 // FAIL: >=50% of capacity used (urgent migration needed)
+	usagePercentFloor = 45.0 // Below this, capacity pressure is not worth reporting yet
 )
 
 func Metadata() check.Metadata {
@@ -74,6 +75,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	for _, row := range rows {
 		entry := analyzeRow(row)
+		if entry.usagePct < usagePercentFloor {
+			continue
+		}
 
 		tableRows = append(tableRows, check.TableRow{
 			Cells:    entry.cells,
@@ -87,6 +91,16 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		case check.SeverityWarn:
 			warningCount++
 		}
+	}
+
+	if len(tableRows) == 0 {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeverityPass,
+			Details:  "All tables use bigint or UUID primary keys",
+		})
+		return report, nil
 	}
 
 	report.AddFinding(check.Finding{
@@ -106,6 +120,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 type tableEntry struct {
 	cells    []string
 	severity check.Severity
+	usagePct float64
 }
 
 func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
@@ -120,6 +135,7 @@ func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
 			check.FormatNumber(row.EstimatedRows.Int64),
 		},
 		severity: determineSeverity(usagePct, row.EstimatedRows.Int64),
+		usagePct: usagePct,
 	}
 }
 
