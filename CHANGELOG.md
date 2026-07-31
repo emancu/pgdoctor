@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
 ### Fixed
 
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`partition-usage`**: partition pruning is now judged per strategy — HASH and LIST need equality on the key (HASH on every key column), RANGE needs its leading column — and queries qualified by another schema are no longer attributed to a same-named table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`table-vacuum-health`**: `vacuum-stale` now lists only tables with real pending work and covers analyze staleness too ([#27](https://github.com/emancu/pgdoctor/pull/27)).
 - **`table-vacuum-health`**: `large-table-defaults` now shows when default settings would next trigger autovacuum, and no longer reports FAIL ([#28](https://github.com/emancu/pgdoctor/pull/28)).
 - **`vacuum-settings`**: RAM-budget findings are now a single line; the full breakdown moved to `--detail debug` ([#21](https://github.com/emancu/pgdoctor/pull/21)).

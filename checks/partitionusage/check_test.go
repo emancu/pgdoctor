@@ -19,16 +19,26 @@ const (
 	findingIDHighSeqScanRatio     = "high-seq-scan-ratio"
 	findingIDJoinMissingPartKey   = "join-missing-partition-key"
 	findingIDExtensionUnavailable = "extension-unavailable"
+	findingIDQueryTextRestricted  = "query-text-restricted"
 )
 
 // Mock queryer for testing.
 type mockQueryer struct {
-	tables       []db.PartitionedTablesWithKeysRow
-	queryStats   []db.QueryStatsFromStatStatementsRow
-	hasExtension *bool // Use pointer so we can distinguish between unset and false
-	tablesErr    error
-	statsErr     error
-	extensionErr error
+	tables        []db.PartitionedTablesWithKeysRow
+	queryStats    []db.QueryStatsFromStatStatementsRow
+	hasExtension  *bool // Use pointer so we can distinguish between unset and false
+	hiddenQueries int64
+	tablesErr     error
+	statsErr      error
+	extensionErr  error
+	hiddenErr     error
+}
+
+func (m *mockQueryer) HiddenQueryTextCount(context.Context) (int64, error) {
+	if m.hiddenErr != nil {
+		return 0, m.hiddenErr
+	}
+	return m.hiddenQueries, nil
 }
 
 func (m *mockQueryer) HasPgStatStatements(context.Context) (bool, error) {
@@ -70,6 +80,15 @@ func makePartitionedTable(schema, name, partitionKey string, partitionCount int6
 		TotalSeqScans:       pgtype.Int8{Int64: 0, Valid: true},
 		TotalIdxScans:       pgtype.Int8{Int64: 0, Valid: true},
 	}
+}
+
+// Helper to create a PartitionedTablesWithKeysRow with a partition strategy
+// ('h' hash, 'l' list, 'r' range).
+func makePartitionedTableWithStrategy(schema, name, partitionKey, strategy string) db.PartitionedTablesWithKeysRow {
+	table := makePartitionedTable(schema, name, partitionKey, 12)
+	table.PartitionStrategy = pgtype.Text{String: strategy, Valid: true}
+
+	return table
 }
 
 // Helper to create a PartitionedTablesWithKeysRow with scan stats.
@@ -273,6 +292,208 @@ func Test_PartitionUsage_TableMatchingBoundaries(t *testing.T) {
 				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
 			}
 		})
+	}
+}
+
+// Pruning depends on the partition strategy: range operators prune RANGE but
+// never HASH or LIST, and composite RANGE keys need their leading column.
+func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name         string
+		strategy     string
+		partitionKey string
+		query        string
+		shouldBeOK   bool
+	}{
+		{
+			name:         "hash with equality prunes",
+			strategy:     "h",
+			partitionKey: "tenant_id",
+			query:        "SELECT * FROM orders WHERE tenant_id = $1",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "hash with range operator does not prune",
+			strategy:     "h",
+			partitionKey: "tenant_id",
+			query:        "SELECT * FROM orders WHERE tenant_id > $1",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "hash with BETWEEN does not prune",
+			strategy:     "h",
+			partitionKey: "tenant_id",
+			query:        "SELECT * FROM orders WHERE tenant_id between $1 and $2",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "hash with IN prunes",
+			strategy:     "h",
+			partitionKey: "tenant_id",
+			query:        "SELECT * FROM orders WHERE tenant_id in ($1, $2)",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "hash composite needs every key column",
+			strategy:     "h",
+			partitionKey: "tenant_id,region",
+			query:        "SELECT * FROM orders WHERE tenant_id = $1",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "hash composite with every key column prunes",
+			strategy:     "h",
+			partitionKey: "tenant_id,region",
+			query:        "SELECT * FROM orders WHERE tenant_id = $1 AND region = $2",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "list with equality prunes",
+			strategy:     "l",
+			partitionKey: "status",
+			query:        "SELECT * FROM orders WHERE status = $1",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "list with range operator does not prune",
+			strategy:     "l",
+			partitionKey: "status",
+			query:        "SELECT * FROM orders WHERE status > $1",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "range composite with leading column prunes",
+			strategy:     "r",
+			partitionKey: "tenant_id,created_at",
+			query:        "SELECT * FROM orders WHERE tenant_id = $1",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "range composite with trailing column only does not prune",
+			strategy:     "r",
+			partitionKey: "tenant_id,created_at",
+			query:        "SELECT * FROM orders WHERE created_at >= $1",
+			shouldBeOK:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTableWithStrategy("public", "orders", tc.partitionKey, tc.strategy),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					makeQueryStats(tc.query, 5000, 4_000_000),
+				},
+			}
+
+			report, err := partitionusage.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			require.Len(t, report.Results, 1)
+			require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
+			if tc.shouldBeOK {
+				require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+			} else {
+				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
+			}
+		})
+	}
+}
+
+// A table referenced under a different schema must not be attributed to this one.
+func Test_PartitionUsage_CrossSchemaQueryNotAttributed(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("tenant_b", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM tenant_a.orders WHERE customer_id = $1", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+}
+
+func Test_PartitionUsage_OwnSchemaQualifiedQueryAttributed(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("tenant_a", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM tenant_a.orders WHERE customer_id = $1", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, check.SeverityFail, report.Results[0].Severity)
+}
+
+// A role that cannot read other users' query text gets a warning instead of a
+// confident PASS on the fraction of the workload it can see.
+func Test_PartitionUsage_HiddenQueryText_Warns(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		hiddenQueries: 42,
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM orders WHERE created_at > $1", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	var restricted *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == findingIDQueryTextRestricted {
+			restricted = &report.Results[i]
+			break
+		}
+	}
+
+	require.NotNil(t, restricted)
+	require.Equal(t, check.SeverityWarn, restricted.Severity)
+	require.Contains(t, restricted.Details, "42")
+}
+
+func Test_PartitionUsage_NoHiddenQueryText_NoFinding(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM orders WHERE created_at > $1", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	for _, result := range report.Results {
+		require.NotEqual(t, findingIDQueryTextRestricted, result.ID)
 	}
 }
 

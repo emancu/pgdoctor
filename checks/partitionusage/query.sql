@@ -5,11 +5,35 @@ SELECT EXISTS(
   WHERE extname = 'pg_stat_statements'
 );
 
+-- name: HiddenQueryTextCount :one
+-- Counts pg_stat_statements rows whose text the current role cannot read.
+-- Only superusers and roles with pg_read_all_stats see other users' query
+-- text; everyone else gets '<insufficient privilege>', which would silently
+-- shrink the analyzed set and produce a confident PASS on partial data.
+SELECT COUNT(*)::bigint
+FROM pg_stat_statements
+WHERE
+  query = '<insufficient privilege>'
+  AND dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database());
+
 -- name: PartitionedTablesWithKeys :many
 -- Gets partitioned tables and their partition key column(s).
 -- Pre-aggregates all partition statistics in a single CTE for better performance
 -- compared to multiple correlated subqueries.
-WITH partition_stats AS (
+WITH relevant_parents AS (
+  -- Restrict the size/stat aggregation below to the partitioned tables this
+  -- check actually reports on. Without this, pg_total_relation_size() runs for
+  -- every inherited relation in the database, including the excluded schemas.
+  SELECT c.oid
+  FROM pg_catalog.pg_class AS c
+  INNER JOIN pg_catalog.pg_namespace AS n ON c.relnamespace = n.oid
+  INNER JOIN pg_partitioned_table AS pt ON c.oid = pt.partrelid
+  WHERE
+    c.relkind = 'p'
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
+)
+
+, partition_stats AS (
   -- Single aggregation of all partition metrics from child tables
   SELECT
     i.inhparent
@@ -19,6 +43,7 @@ WITH partition_stats AS (
     , COALESCE(SUM(s.seq_scan), 0)::bigint AS total_seq_scans
     , COALESCE(SUM(s.idx_scan), 0)::bigint AS total_idx_scans
   FROM pg_inherits AS i
+  INNER JOIN relevant_parents AS rp ON i.inhparent = rp.oid
   LEFT JOIN pg_stat_user_tables AS s ON i.inhrelid = s.relid
   GROUP BY i.inhparent
 )

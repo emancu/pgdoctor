@@ -101,7 +101,19 @@ These tables are silently skipped to avoid false positives.
 
 ### What counts as using the partition key
 
-The key must appear in a comparison that can drive partition pruning (`=`, `<`, `>`, `<=`, `>=`, `IN`, `BETWEEN`, `IS NULL`). Mentions in `ORDER BY` or the select list don't count, and neither do `<>` or `IS NOT NULL`, which prune nothing.
+The key must appear in a comparison that can drive partition pruning, and which comparisons qualify depends on the partition strategy:
+
+| Strategy | Prunes with | Key columns required |
+|---|---|---|
+| `RANGE` | `=`, `<`, `<=`, `>`, `>=`, `IN`, `BETWEEN`, `IS NULL` | the leading key column |
+| `LIST` | `=`, `IN`, `IS NULL` | the key column |
+| `HASH` | `=`, `IN`, `IS NULL` | every key column |
+
+Mentions in `ORDER BY` or the select list don't count, and neither do `<>` or `IS NOT NULL`, which prune nothing. A comparison written with the key on the right (`$1 <= created_at`) counts — PostgreSQL commutes it.
+
+### Query text visibility
+
+Only superusers and roles with `pg_read_all_stats` can read other users' query text; everyone else sees `<insufficient privilege>`. When any entry is hidden, the check reports `query-text-restricted` so a partial analysis is not mistaken for a clean bill of health.
 
 ### Partition-leaf queries
 
@@ -110,6 +122,10 @@ Queries referencing a partition leaf directly (e.g. `orders_2025_01`) are not at
 ### Subqueries and CTEs
 
 Queries with subqueries or CTEs may not be fully analyzed. In particular, a partition-key column filtered inside a subquery on a *different* table can be credited to the outer table, hiding a missing filter.
+
+### Table aliases
+
+A table referenced only through an alias (`FROM order_lines AS orders`) can be mistaken for the partitioned table of that name.
 
 ## Verifying Partition Pruning
 
