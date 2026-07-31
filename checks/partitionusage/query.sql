@@ -56,7 +56,7 @@ ORDER BY ps.total_size_bytes DESC NULLS LAST;
 -- Returns queries with significant usage to check against partitioned tables.
 SELECT
   queryid::bigint AS query_id
-  , REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query
+  , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
   , calls::bigint AS calls
   , total_exec_time::double precision AS total_exec_time
   , mean_exec_time::double precision AS mean_exec_time
