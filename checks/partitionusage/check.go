@@ -111,8 +111,15 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
 	} else {
-		checkPartitionKeyUsage(partitionedTables, queryStats, report)
-		checkJoinsMissingPartitionKey(partitionedTables, queryStats, report)
+		// Lowercase each query text once; query texts are unbounded and the
+		// subchecks compare every text against every partitioned table.
+		loweredQueries := make([]string, len(queryStats))
+		for i, q := range queryStats {
+			loweredQueries[i] = strings.ToLower(q.Query.String)
+		}
+
+		checkPartitionKeyUsage(partitionedTables, queryStats, loweredQueries, report)
+		checkJoinsMissingPartitionKey(partitionedTables, queryStats, loweredQueries, report)
 	}
 
 	return report, nil
@@ -122,6 +129,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 func checkPartitionKeyUsage(
 	tables []db.PartitionedTablesWithKeysRow,
 	queries []db.QueryStatsFromStatStatementsRow,
+	loweredQueries []string,
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
@@ -148,8 +156,8 @@ func checkPartitionKeyUsage(
 		var totalExecTime float64
 		var exampleQuery string
 
-		for _, q := range queries {
-			queryText := strings.ToLower(q.Query.String)
+		for i, q := range queries {
+			queryText := loweredQueries[i]
 
 			if !queryReferencesTable(queryText, schemaName, tableName) {
 				continue
@@ -243,6 +251,10 @@ func queryReferencesTable(queryText, schemaName, tableName string) bool {
 // boundaries. In particular, a partition parent such as "orders" must not
 // match a partition leaf such as "orders_2025_01".
 func containsSQLIdentifier(queryText, identifier string) bool {
+	if identifier == "" {
+		return false
+	}
+
 	for searchFrom := 0; searchFrom < len(queryText); {
 		match := strings.Index(queryText[searchFrom:], identifier)
 		if match == -1 {
@@ -279,60 +291,110 @@ func queryUsesPartitionKey(queryText string, partitionKeys []string) bool {
 		return false
 	}
 
-	for _, col := range partitionKeys {
+	return clauseFiltersAnyColumn(whereClause, partitionKeys)
+}
+
+// clauseFiltersAnyColumn reports whether the clause filters on any of the columns.
+func clauseFiltersAnyColumn(clause string, columns []string) bool {
+	for _, col := range columns {
 		col = strings.ToLower(strings.TrimSpace(col))
 		if col == "" {
 			continue
 		}
 
-		identifierForms := []string{
-			col,
-			`"` + col + `"`,
-		}
-
-		for _, identifier := range identifierForms {
-			patterns := []string{
-				identifier + " =", identifier + "=",
-				identifier + " >", identifier + ">",
-				identifier + " <", identifier + "<",
-				identifier + " in", identifier + " between", identifier + " is", identifier + " any",
-				"." + identifier + " ", "." + identifier + "=", "." + identifier + ">", "." + identifier + "<",
-			}
-
-			for _, p := range patterns {
-				if strings.Contains(whereClause, p) {
-					return true
-				}
-			}
+		if clauseFiltersColumn(clause, col) {
+			return true
 		}
 	}
 
 	return false
 }
 
-// extractWhereClause extracts the WHERE clause from a query.
+// clauseFiltersColumn reports whether col appears in clause as a comparison
+// that can drive partition pruning, with SQL identifier boundaries so a key
+// such as "id" does not match inside "customer_id". Bare, quoted, and
+// table-qualified references all satisfy the boundary rule.
+func clauseFiltersColumn(clause, col string) bool {
+	for searchFrom := 0; searchFrom < len(clause); {
+		match := strings.Index(clause[searchFrom:], col)
+		if match == -1 {
+			return false
+		}
+		match += searchFrom
+		matchEnd := match + len(col)
+
+		hasStartBoundary := match == 0 || !isSQLIdentifierByte(clause[match-1])
+		hasEndBoundary := matchEnd == len(clause) || !isSQLIdentifierByte(clause[matchEnd])
+		if hasStartBoundary && hasEndBoundary && hasComparisonAfter(clause[matchEnd:]) {
+			return true
+		}
+
+		searchFrom = match + 1
+	}
+
+	return false
+}
+
+// hasComparisonAfter reports whether rest starts (after an optional closing
+// quote and spaces) with a comparison operator that enables partition pruning.
+// A bare column mention (e.g. in ORDER BY or a SELECT list) does not count.
+func hasComparisonAfter(rest string) bool {
+	rest = strings.TrimPrefix(rest, `"`)
+	rest = strings.TrimLeft(rest, " ")
+
+	if strings.HasPrefix(rest, "<>") {
+		return false // <> never prunes partitions
+	}
+
+	for _, op := range []string{"=", ">", "<", "in ", "in(", "between ", "is null"} {
+		if strings.HasPrefix(rest, op) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// extractWhereClause extracts the WHERE clause from a query. Clause end
+// markers are only honored outside parentheses, so a LIMIT or ORDER BY inside
+// a subquery does not truncate the outer clause.
 func extractWhereClause(queryText string) string {
 	_, after, ok := strings.Cut(queryText, " where ")
 	if !ok {
 		return ""
 	}
 
-	clause := after
-
 	endMarkers := []string{" order by", " group by", " having", " limit", " offset", " for update", " for share", ";"}
-	for _, marker := range endMarkers {
-		if idx := strings.Index(clause, marker); idx != -1 {
-			clause = clause[:idx]
+
+	depth := 0
+	for i := 0; i < len(after); i++ {
+		switch after[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ' ', ';':
+			if depth > 0 {
+				continue
+			}
+			for _, marker := range endMarkers {
+				if strings.HasPrefix(after[i:], marker) {
+					return strings.TrimSpace(after[:i])
+				}
+			}
 		}
 	}
 
-	return strings.TrimSpace(clause)
+	return strings.TrimSpace(after)
 }
 
 // checkJoinsMissingPartitionKey detects JOINs on partitioned tables that don't include the partition key.
 func checkJoinsMissingPartitionKey(
 	tables []db.PartitionedTablesWithKeysRow,
 	queries []db.QueryStatsFromStatStatementsRow,
+	loweredQueries []string,
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
@@ -356,8 +418,8 @@ func checkJoinsMissingPartitionKey(
 		var totalCalls int64
 		var totalExecTime float64
 
-		for _, q := range queries {
-			queryText := strings.ToLower(q.Query.String)
+		for i, q := range queries {
+			queryText := loweredQueries[i]
 
 			// Only check queries with JOINs that reference this table.
 			if !queryHasJoin(queryText) {
@@ -498,24 +560,13 @@ func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
 }
 
-// queryUsesPartitionKeyAfterFrom checks if partition key appears after FROM clause.
+// queryUsesPartitionKeyAfterFrom checks if the partition key is compared
+// anywhere after the FROM clause (covers JOIN ON conditions and WHERE).
 func queryUsesPartitionKeyAfterFrom(queryText string, partitionKeys []string) bool {
 	fromIdx := strings.Index(queryText, " from ")
 	if fromIdx == -1 {
 		return false
 	}
 
-	afterFrom := queryText[fromIdx:]
-
-	for _, col := range partitionKeys {
-		col = strings.ToLower(strings.TrimSpace(col))
-		if col == "" {
-			continue
-		}
-
-		if strings.Contains(afterFrom, col) {
-			return true
-		}
-	}
-	return false
+	return clauseFiltersAnyColumn(queryText[fromIdx:], partitionKeys)
 }

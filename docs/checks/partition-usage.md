@@ -99,9 +99,17 @@ CREATE TABLE logs (...) PARTITION BY HASH ((id % 8));
 
 These tables are silently skipped to avoid false positives.
 
+### What counts as using the partition key
+
+The key must appear in a comparison that can drive partition pruning (`=`, `<`, `>`, `<=`, `>=`, `IN`, `BETWEEN`, `IS NULL`). Mentions in `ORDER BY` or the select list don't count, and neither do `<>` or `IS NOT NULL`, which prune nothing.
+
+### Partition-leaf queries
+
+Queries referencing a partition leaf directly (e.g. `orders_2025_01`) are not attributed to the parent table — they touch exactly one partition by construction, so there is nothing to prune.
+
 ### Subqueries and CTEs
 
-Queries with subqueries or CTEs may not be fully analyzed.
+Queries with subqueries or CTEs may not be fully analyzed. In particular, a partition-key column filtered inside a subquery on a *different* table can be credited to the outer table, hiding a missing filter.
 
 ## Verifying Partition Pruning
 

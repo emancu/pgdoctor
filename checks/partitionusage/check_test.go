@@ -156,7 +156,7 @@ func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
 	require.Contains(t, report.Results[0].Details, "properly use partition keys")
 }
 
-func Test_PartitionUsage_LongRailsQueryUsesPartitionKey(t *testing.T) {
+func Test_PartitionUsage_QuotedPartitionKeyRecognized(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -205,7 +205,73 @@ func Test_PartitionUsage_PartitionLeafQueryIgnored(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, report.Results, 1)
+	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
 	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+}
+
+// Partition-leaf and lookalike table names must not be attributed to the parent,
+// while quoted or schema-qualified parent references still must be.
+func Test_PartitionUsage_TableMatchingBoundaries(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		query      string
+		shouldBeOK bool
+	}{
+		{
+			name:       "schema-qualified leaf",
+			query:      "SELECT * FROM public.orders_2025_01 WHERE customer_id = $1",
+			shouldBeOK: true,
+		},
+		{
+			name:       "quoted leaf",
+			query:      `SELECT * FROM "orders_2025_01" WHERE customer_id = $1`,
+			shouldBeOK: true,
+		},
+		{
+			name:       "pg_partman style leaf",
+			query:      "SELECT * FROM orders_p2025 WHERE customer_id = $1",
+			shouldBeOK: true,
+		},
+		{
+			name:       "prefix-sharing sibling table",
+			query:      "SELECT * FROM customer_orders WHERE customer_id = $1",
+			shouldBeOK: true,
+		},
+		{
+			name:       "quoted schema-qualified parent",
+			query:      `SELECT * FROM "public"."orders" WHERE customer_id = $1`,
+			shouldBeOK: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable("public", "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					makeQueryStats(tc.query, 5000, 4_000_000),
+				},
+			}
+
+			checker := partitionusage.New(queryer)
+			report, err := checker.Check(context.Background())
+			require.NoError(t, err)
+
+			require.Len(t, report.Results, 1)
+			require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
+			if tc.shouldBeOK {
+				require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+			} else {
+				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
+			}
+		})
+	}
 }
 
 func Test_PartitionUsage_QueryMissingPartitionKey_Warning(t *testing.T) {
@@ -398,7 +464,11 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	require.NotEmpty(t, metadata.Description)
 	require.NotEmpty(t, metadata.SQL)
 	require.NotEmpty(t, metadata.Readme)
-	require.NotContains(t, metadata.SQL, "LEFT(REGEXP_REPLACE(query")
+	// The full normalized query text is analyzed, scoped to the current
+	// database and top-level statements.
+	require.Contains(t, metadata.SQL, `REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query`)
+	require.Contains(t, metadata.SQL, "AND toplevel")
+	require.Contains(t, metadata.SQL, "d.datname = current_database()")
 }
 
 func Test_PartitionUsage_TableOutput(t *testing.T) {
@@ -469,6 +539,48 @@ func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 			query:        "SELECT * FROM orders WHERE orders.created_at > $1",
 			partitionKey: "created_at",
 			shouldBeOK:   true,
+		},
+		{
+			name:         "quoted column",
+			query:        `SELECT * FROM orders WHERE "created_at" > $1`,
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "key as suffix of another column",
+			query:        "SELECT * FROM orders WHERE customer_id = $1",
+			partitionKey: "id",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "column match with IS NULL",
+			query:        "SELECT * FROM orders WHERE created_at IS NULL",
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "IS NOT NULL does not prune",
+			query:        "SELECT * FROM orders WHERE created_at IS NOT NULL AND customer_id = $1",
+			partitionKey: "created_at",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "not-equals does not prune",
+			query:        "SELECT * FROM orders WHERE created_at <> $1",
+			partitionKey: "created_at",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "key filtered after a subquery containing LIMIT",
+			query:        "SELECT * FROM orders b WHERE (EXISTS (SELECT 1 FROM holds h WHERE h.order_id = b.id LIMIT 1)) AND b.created_at >= $1",
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "key only in ORDER BY",
+			query:        "SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC",
+			partitionKey: "created_at",
+			shouldBeOK:   false,
 		},
 		{
 			name:         "missing partition key",
@@ -707,6 +819,64 @@ func Test_PartitionUsage_NonJoinQuery_NoJoinFinding(t *testing.T) {
 	for _, result := range report.Results {
 		require.NotEqual(t, findingIDJoinMissingPartKey, result.ID)
 	}
+}
+
+// ORDER BY on the partition key prunes nothing — the JOIN must still be flagged.
+func Test_PartitionUsage_JoinOrderByPartitionKey_StillFlagged(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id ORDER BY o.created_at DESC", 5000, 4_000_000),
+		},
+	}
+
+	checker := partitionusage.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	var joinFinding *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == findingIDJoinMissingPartKey {
+			joinFinding = &report.Results[i]
+			break
+		}
+	}
+
+	require.NotNil(t, joinFinding)
+	require.Equal(t, check.SeverityFail, joinFinding.Severity)
+}
+
+// A key such as "id" must not match inside "customer_id" on the JOIN path.
+func Test_PartitionUsage_JoinKeySubstring_StillFlagged(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "id", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM orders o JOIN order_items oi ON oi.customer_id = o.customer_id", 5000, 4_000_000),
+		},
+	}
+
+	checker := partitionusage.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	var joinFinding *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == findingIDJoinMissingPartKey {
+			joinFinding = &report.Results[i]
+			break
+		}
+	}
+
+	require.NotNil(t, joinFinding)
+	require.Equal(t, check.SeverityFail, joinFinding.Severity)
 }
 
 func Test_PartitionUsage_JoinMissingPartitionKey_Fail(t *testing.T) {

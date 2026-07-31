@@ -63,7 +63,9 @@ SELECT
   , rows::bigint AS rows_returned
 FROM pg_stat_statements
 WHERE
-  calls > 10
+  dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
+  AND toplevel
+  AND calls > 10
   AND query NOT LIKE 'COPY%'
   AND query NOT LIKE 'SET %'
   AND query !~ '^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PREPARE|DEALLOCATE)'
