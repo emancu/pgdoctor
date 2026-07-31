@@ -24,7 +24,7 @@ These tables rely entirely on manual maintenance. Common legitimate uses:
 
 ### large-table-defaults
 
-Lists tables with 1 million or more rows using default autovacuum scale factors, alongside `Est. Next Vacuum`: when default settings would next trigger autovacuum, extrapolated from the current pending count and the rate since the last vacuum (`overdue` once pending crosses the trigger, `—` when never vacuumed or nothing is pending).
+Identifies tables with more than 1 million rows using default autovacuum scale factors.
 
 **Severity:** Warning
 
