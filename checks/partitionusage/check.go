@@ -111,15 +111,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
 	} else {
-		// Lowercase each query text once; query texts are unbounded and the
-		// subchecks compare every text against every partitioned table.
-		loweredQueries := make([]string, len(queryStats))
-		for i, q := range queryStats {
-			loweredQueries[i] = strings.ToLower(q.Query.String)
-		}
-
-		checkPartitionKeyUsage(partitionedTables, queryStats, loweredQueries, report)
-		checkJoinsMissingPartitionKey(partitionedTables, queryStats, loweredQueries, report)
+		checkPartitionKeyUsage(partitionedTables, queryStats, report)
+		checkJoinsMissingPartitionKey(partitionedTables, queryStats, report)
 	}
 
 	return report, nil
@@ -129,7 +122,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 func checkPartitionKeyUsage(
 	tables []db.PartitionedTablesWithKeysRow,
 	queries []db.QueryStatsFromStatStatementsRow,
-	loweredQueries []string,
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
@@ -156,8 +148,9 @@ func checkPartitionKeyUsage(
 		var totalExecTime float64
 		var exampleQuery string
 
-		for i, q := range queries {
-			queryText := loweredQueries[i]
+		for _, q := range queries {
+			// Query text is already normalized and lowercased by the SQL.
+			queryText := q.Query.String
 
 			if !queryReferencesTable(queryText, schemaName, tableName) {
 				continue
@@ -394,7 +387,6 @@ func extractWhereClause(queryText string) string {
 func checkJoinsMissingPartitionKey(
 	tables []db.PartitionedTablesWithKeysRow,
 	queries []db.QueryStatsFromStatStatementsRow,
-	loweredQueries []string,
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
@@ -418,8 +410,8 @@ func checkJoinsMissingPartitionKey(
 		var totalCalls int64
 		var totalExecTime float64
 
-		for i, q := range queries {
-			queryText := loweredQueries[i]
+		for _, q := range queries {
+			queryText := q.Query.String
 
 			// Only check queries with JOINs that reference this table.
 			if !queryHasJoin(queryText) {
