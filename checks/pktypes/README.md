@@ -38,14 +38,14 @@ This check identifies **ALL** tables using `int4` (integer) or `int2` (smallint)
 
 Tables with int4/int2 primary keys are reported once capacity usage reaches 45%. Severity indicates migration urgency:
 
-- **FAIL (≥50% capacity)**: Urgent migration required
+- **FAIL (≥85% capacity)**: Urgent migration required
   - Tables are approaching exhaustion
   - Migration complexity increases with size
   - Risk of emergency downtime if not addressed
 
-- **WARN (45-50% capacity)**: Migration needed, less urgent
+- **WARN (45-85% capacity)**: Migration needed, less urgent
   - Architectural violation must be fixed
-  - Migrate proactively before reaching 50%
+  - Migrate proactively before reaching 85%
   - Easier migration when table is smaller
 
 **Usage % calculation:**

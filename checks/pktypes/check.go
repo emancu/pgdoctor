@@ -25,7 +25,7 @@ type checker struct {
 }
 
 const (
-	usagePercentFail  = 50.0 // FAIL: >=50% of capacity used (urgent migration needed)
+	usagePercentFail  = 85.0 // FAIL: >=85% of capacity used (urgent migration needed)
 	usagePercentFloor = 45.0 // Below this, capacity pressure is not worth reporting yet
 )
 
