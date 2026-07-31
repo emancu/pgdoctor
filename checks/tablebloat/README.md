@@ -1,6 +1,6 @@
 # Table Bloat Check
 
-Monitors PostgreSQL tables for dead tuple accumulation indicating vacuum issues.
+Monitors PostgreSQL tables for dead tuple accumulation and the disk space it wastes.
 
 ## What It Checks
 
@@ -11,15 +11,7 @@ Identifies tables with high dead tuple percentages:
 Dead tuples are rows marked for deletion but not yet reclaimed by vacuum. A high
 ratio degrades performance (bloated scans, index bloat) but never stops the
 database, so this finding stays WARN and never pages — vacuum emergencies surface
-via `stale-vacuum`.
-
-### Stale Vacuum (`stale-vacuum`)
-Identifies tables not vacuumed recently despite accumulating dead tuples:
-- **FAIL**: Not vacuumed in >12 days with ≥1M dead tuples, or ≥400K dead tuples at ≥10% dead
-- **FAIL**: Never vacuumed with ≥250K dead tuples
-- **WARN**: Not vacuumed in >3 days with ≥100K dead tuples, or ≥10K dead tuples at ≥10% dead
-
-The 10% cutoff sits below autovacuum's default trigger (~20% dead via `autovacuum_vacuum_scale_factor`): sustained ≥10% dead with a large absolute count and no vacuum for days means autovacuum is falling behind.
+via the `table-vacuum-health` check.
 
 ### Large Bloated Tables (`large-bloated-tables`)
 Identifies large tables where bloat wastes significant disk space:
@@ -62,32 +54,6 @@ ALTER TABLE schema.table_name SET (
 **Also check:**
 - `autovacuum_max_workers` (global setting)
 - `maintenance_work_mem` (affects vacuum speed)
-
-### For `stale-vacuum`
-
-Tables with many dead tuples that haven't been vacuumed indicate autovacuum problems.
-
-**Check if autovacuum is running:**
-```sql
-SELECT * FROM pg_stat_progress_vacuum;
-```
-
-**Check autovacuum configuration:**
-```sql
-SHOW autovacuum;
-SHOW autovacuum_vacuum_scale_factor;
-SHOW autovacuum_max_workers;
-```
-
-**Manual vacuum:**
-```sql
-VACUUM ANALYZE schema.table_name;
-```
-
-**Investigate why autovacuum isn't reaching these tables:**
-- Long-running transactions holding back vacuum
-- Too few `autovacuum_max_workers`
-- Tables too large for available `maintenance_work_mem`
 
 ### For `large-bloated-tables`
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -65,7 +64,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	checkHighDeadTuples(rows, report)
-	checkStaleVacuum(rows, report)
 	checkLargeBloatedTables(rows, report)
 
 	return report, nil
@@ -131,89 +129,6 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 		Name:     "Dead Tuple Percentage",
 		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("Found %d table(s) with high dead tuple percentage (>20%%)", len(bloated)),
-		Table: &check.Table{
-			Headers: headers,
-			Rows:    tableRows,
-		},
-	})
-}
-
-// checkStaleVacuum identifies tables not vacuumed recently despite dead tuples.
-func checkStaleVacuum(rows []db.TableBloatRow, report *check.Report) {
-	now := time.Now()
-	failCutoff := now.AddDate(0, 0, -12)
-	warnCutoff := now.AddDate(0, 0, -3)
-
-	var critical []db.TableBloatRow
-	var warning []db.TableBloatRow
-
-	for _, row := range rows {
-		dead := row.DeadTuples.Int64
-		pct := getDeadTuplePercent(row)
-
-		// Get last vacuum time (prefer autovacuum)
-		var lastVacuum time.Time
-		if row.LastAutovacuum.Valid {
-			lastVacuum = row.LastAutovacuum.Time
-		} else if row.LastVacuum.Valid {
-			lastVacuum = row.LastVacuum.Time
-		}
-
-		// Never vacuumed: the zero time predates every cutoff, so both age gates pass.
-		neverVacuumed := lastVacuum.IsZero()
-
-		switch {
-		case neverVacuumed && dead >= 250_000:
-			critical = append(critical, row)
-		case ((pct >= 10 && dead >= 400_000) || dead >= 1_000_000) && lastVacuum.Before(failCutoff):
-			critical = append(critical, row)
-		case ((pct >= 10 && dead >= 10_000) || dead >= 100_000) && lastVacuum.Before(warnCutoff):
-			warning = append(warning, row)
-		}
-	}
-
-	if len(critical) == 0 && len(warning) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "stale-vacuum",
-			Name:     "Vacuum Freshness",
-			Severity: check.SeverityPass,
-			Details:  "All tables with significant dead tuples have been vacuumed recently",
-		})
-		return
-	}
-
-	headers := []string{"Table", "Last Vacuum", "Dead Tuples", "Autovacuum Count"}
-	var tableRows []check.TableRow
-
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				formatLastVacuum(row),
-				formatNumber(row.DeadTuples.Int64),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				formatLastVacuum(row),
-				formatNumber(row.DeadTuples.Int64),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "stale-vacuum",
-		Name:     "Vacuum Freshness",
-		Severity: maxRowSeverity(tableRows),
-		Details:  fmt.Sprintf("Found %d table(s) not vacuumed recently despite significant dead tuples", len(critical)+len(warning)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
@@ -291,18 +206,6 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 			Rows:    tableRows,
 		},
 	})
-}
-
-// Helper functions
-
-func formatLastVacuum(row db.TableBloatRow) string {
-	if row.LastAutovacuum.Valid {
-		return row.LastAutovacuum.Time.Format("2006-01-02 15:04")
-	}
-	if row.LastVacuum.Valid {
-		return row.LastVacuum.Time.Format("2006-01-02 15:04") + " (manual)"
-	}
-	return "never"
 }
 
 func formatNumber(n int64) string {
