@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage ([#31](https://github.com/emancu/pgdoctor/pull/31)).
+
 ### Added
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
