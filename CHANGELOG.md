@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
+- **`partition-usage`**: analyzes complete `pg_stat_statements` query text, recognizes quoted partition keys, and no longer attributes partition-leaf queries to their parent table ([#22](https://github.com/emancu/pgdoctor/issues/22)).
 
 ### Changed
 

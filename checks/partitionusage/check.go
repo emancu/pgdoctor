@@ -232,11 +232,44 @@ func queryReferencesTable(queryText, schemaName, tableName string) bool {
 	}
 
 	for _, p := range patterns {
-		if strings.Contains(queryText, p) {
+		if containsSQLIdentifier(queryText, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// containsSQLIdentifier reports whether identifier occurs with SQL identifier
+// boundaries. In particular, a partition parent such as "orders" must not
+// match a partition leaf such as "orders_2025_01".
+func containsSQLIdentifier(queryText, identifier string) bool {
+	for searchFrom := 0; searchFrom < len(queryText); {
+		match := strings.Index(queryText[searchFrom:], identifier)
+		if match == -1 {
+			return false
+		}
+		match += searchFrom
+		matchEnd := match + len(identifier)
+
+		hasStartBoundary := match == 0 || !isSQLIdentifierByte(queryText[match-1])
+		hasEndBoundary := matchEnd == len(queryText) || !isSQLIdentifierByte(queryText[matchEnd])
+		if hasStartBoundary && hasEndBoundary {
+			return true
+		}
+
+		searchFrom = match + 1
+	}
+
+	return false
+}
+
+func isSQLIdentifierByte(b byte) bool {
+	return b >= 'a' && b <= 'z' ||
+		b >= 'A' && b <= 'Z' ||
+		b >= '0' && b <= '9' ||
+		b == '_' ||
+		b == '$' ||
+		b >= 0x80
 }
 
 // queryUsesPartitionKey checks if the query's WHERE clause uses any partition key column.
@@ -252,17 +285,24 @@ func queryUsesPartitionKey(queryText string, partitionKeys []string) bool {
 			continue
 		}
 
-		patterns := []string{
-			col + " =", col + "=",
-			col + " >", col + ">",
-			col + " <", col + "<",
-			col + " in", col + " between", col + " is", col + " any",
-			"." + col + " ", "." + col + "=", "." + col + ">", "." + col + "<",
+		identifierForms := []string{
+			col,
+			`"` + col + `"`,
 		}
 
-		for _, p := range patterns {
-			if strings.Contains(whereClause, p) {
-				return true
+		for _, identifier := range identifierForms {
+			patterns := []string{
+				identifier + " =", identifier + "=",
+				identifier + " >", identifier + ">",
+				identifier + " <", identifier + "<",
+				identifier + " in", identifier + " between", identifier + " is", identifier + " any",
+				"." + identifier + " ", "." + identifier + "=", "." + identifier + ">", "." + identifier + "<",
+			}
+
+			for _, p := range patterns {
+				if strings.Contains(whereClause, p) {
+					return true
+				}
 			}
 		}
 	}
