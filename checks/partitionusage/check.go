@@ -149,7 +149,6 @@ func checkPartitionKeyUsage(
 		var exampleQuery string
 
 		for _, q := range queries {
-			// Query text is already normalized and lowercased by the SQL.
 			queryText := q.Query.String
 
 			if !queryReferencesTable(queryText, schemaName, tableName) {
