@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage, FAIL from 85% ([#31](https://github.com/emancu/pgdoctor/pull/31)).
+- **`index-usage`**: `index-cache-ratio` is now informational and no longer escalates the report ([#34](https://github.com/emancu/pgdoctor/pull/34)).
+- **`index-usage`**: `unused-indexes` reports only indexes over 500MB and discloses the statistics window ([#34](https://github.com/emancu/pgdoctor/pull/34)).
+- **`index-usage`**: `low-usage-indexes` now flags sustained low read rates instead of lifetime scan counts ([#34](https://github.com/emancu/pgdoctor/pull/34)).
 
 ### Added
 
