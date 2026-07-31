@@ -149,13 +149,11 @@ func checkPartitionKeyUsage(
 		var exampleQuery string
 
 		for _, q := range queries {
-			queryText := q.Query.String
-
-			if !queryReferencesTable(queryText, schemaName, tableName) {
+			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
 				continue
 			}
 
-			if !queryUsesPartitionKey(queryText, partitionKeys) {
+			if !queryUsesPartitionKey(q.Query.String, partitionKeys) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
@@ -317,7 +315,8 @@ func clauseFiltersColumn(clause, col string) bool {
 
 		hasStartBoundary := match == 0 || !isSQLIdentifierByte(clause[match-1])
 		hasEndBoundary := matchEnd == len(clause) || !isSQLIdentifierByte(clause[matchEnd])
-		if hasStartBoundary && hasEndBoundary && hasComparisonAfter(clause[matchEnd:]) {
+		if hasStartBoundary && hasEndBoundary &&
+			(hasComparisonAfter(clause[matchEnd:]) || hasComparisonBefore(clause[:match])) {
 			return true
 		}
 
@@ -327,20 +326,74 @@ func clauseFiltersColumn(clause, col string) bool {
 	return false
 }
 
+// pruningOperators are the btree comparison operators partition pruning can
+// use, longest first so "<=" is not read as "<".
+var pruningOperators = []string{"<=", ">=", "=", "<", ">"}
+
+// operatorBytes are bytes that can form part of a SQL operator name. They mark
+// a match such as "<" in "<@" or "<>" as a different, non-pruning operator.
+const operatorBytes = "=<>!~@#%^&|?"
+
+func isOperatorByte(b byte) bool {
+	return strings.IndexByte(operatorBytes, b) != -1
+}
+
+// trimTrailingIdentifier removes one trailing SQL identifier, quoted or bare.
+func trimTrailingIdentifier(text string) string {
+	text = strings.TrimSuffix(text, `"`)
+
+	end := len(text)
+	for end > 0 && isSQLIdentifierByte(text[end-1]) {
+		end--
+	}
+
+	return strings.TrimSuffix(text[:end], `"`)
+}
+
 // hasComparisonAfter reports whether rest starts (after an optional closing
-// quote and spaces) with a comparison operator that enables partition pruning.
-// A bare column mention (e.g. in ORDER BY or a SELECT list) does not count.
+// quote and spaces) with a comparison that enables partition pruning, i.e. the
+// column is on the left-hand side. A bare column mention (in ORDER BY or a
+// SELECT list) does not count.
 func hasComparisonAfter(rest string) bool {
 	rest = strings.TrimPrefix(rest, `"`)
 	rest = strings.TrimLeft(rest, " ")
 
-	if strings.HasPrefix(rest, "<>") {
-		return false // <> never prunes partitions
+	for _, op := range pruningOperators {
+		if strings.HasPrefix(rest, op) {
+			trailing := rest[len(op):]
+			// Reject compound operators such as <>, <@ and >>.
+			return trailing == "" || !isOperatorByte(trailing[0])
+		}
 	}
 
-	for _, op := range []string{"=", ">", "<", "in ", "in(", "between ", "is null"} {
-		if strings.HasPrefix(rest, op) {
+	for _, keyword := range []string{"in ", "in(", "between ", "is null"} {
+		if strings.HasPrefix(rest, keyword) {
 			return true
+		}
+	}
+
+	return false
+}
+
+// hasComparisonBefore reports whether text ends with a comparison that enables
+// partition pruning, i.e. the column is on the right-hand side ($1 <= created_at).
+// PostgreSQL commutes these operators, so they prune just like the left-hand form.
+func hasComparisonBefore(text string) bool {
+	text = strings.TrimSuffix(text, `"`)
+
+	// Skip a table qualifier between the operator and the column, as in
+	// "$1 <= o.created_at" or `$1 = "orders"."created_at"`.
+	if strings.HasSuffix(text, ".") {
+		text = trimTrailingIdentifier(strings.TrimSuffix(text, "."))
+	}
+
+	text = strings.TrimRight(text, " ")
+
+	for _, op := range pruningOperators {
+		if strings.HasSuffix(text, op) {
+			leading := text[:len(text)-len(op)]
+			// Reject compound operators such as <>, != and @>.
+			return leading == "" || !isOperatorByte(leading[len(leading)-1])
 		}
 	}
 
@@ -410,19 +463,17 @@ func checkJoinsMissingPartitionKey(
 		var totalExecTime float64
 
 		for _, q := range queries {
-			queryText := q.Query.String
-
 			// Only check queries with JOINs that reference this table.
-			if !queryHasJoin(queryText) {
+			if !queryHasJoin(q.Query.String) {
 				continue
 			}
 
-			if !queryReferencesTable(queryText, schemaName, tableName) {
+			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
 				continue
 			}
 
 			// Check if partition key appears after FROM (covers JOIN ON, WHERE, implicit joins).
-			if !queryUsesPartitionKeyAfterFrom(queryText, partitionKeys) {
+			if !queryUsesPartitionKeyAfterFrom(q.Query.String, partitionKeys) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
