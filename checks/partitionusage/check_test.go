@@ -156,6 +156,58 @@ func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
 	require.Contains(t, report.Results[0].Details, "properly use partition keys")
 }
 
+func Test_PartitionUsage_LongRailsQueryUsesPartitionKey(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "booking_time_segments", "booking_id", 32),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(
+				`SELECT "booking_time_segments"."id", "booking_time_segments"."created_at", `+
+					`"booking_time_segments"."updated_at", "booking_time_segments"."starts_at", `+
+					`"booking_time_segments"."ends_at" FROM "booking_time_segments" `+
+					`WHERE "booking_time_segments"."booking_id" = $1`,
+				806_000_000,
+				45_720_000,
+			),
+		},
+	}
+
+	checker := partitionusage.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Contains(t, report.Results[0].Details, "properly use partition keys")
+}
+
+func Test_PartitionUsage_PartitionLeafQueryIgnored(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "booking_time_segments", "booking_id", 32),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(
+				`SELECT * FROM booking_time_segments_17 WHERE customer_id = $1`,
+				5000,
+				4_000_000,
+			),
+		},
+	}
+
+	checker := partitionusage.New(queryer)
+	report, err := checker.Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+}
+
 func Test_PartitionUsage_QueryMissingPartitionKey_Warning(t *testing.T) {
 	t.Parallel()
 
@@ -346,6 +398,7 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	require.NotEmpty(t, metadata.Description)
 	require.NotEmpty(t, metadata.SQL)
 	require.NotEmpty(t, metadata.Readme)
+	require.NotContains(t, metadata.SQL, "LEFT(REGEXP_REPLACE(query")
 }
 
 func Test_PartitionUsage_TableOutput(t *testing.T) {

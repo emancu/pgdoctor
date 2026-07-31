@@ -1097,7 +1097,7 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
 SELECT
   queryid::bigint AS query_id
-  , LEFT(REGEXP_REPLACE(query, '\s+', ' ', 'g'), 80)::text AS query
+  , REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query
   , calls::bigint AS calls
   , total_exec_time::double precision AS total_exec_time
   , mean_exec_time::double precision AS mean_exec_time
