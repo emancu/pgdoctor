@@ -573,6 +573,36 @@ func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 			shouldBeOK:   false,
 		},
 		{
+			name:         "greater-or-equal",
+			query:        "SELECT * FROM orders WHERE created_at >= $1",
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "key on right-hand side of comparison",
+			query:        "SELECT * FROM orders o WHERE $1 <= o.created_at",
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "quoted key on right-hand side of comparison",
+			query:        `SELECT * FROM orders WHERE $1 = "created_at"`,
+			partitionKey: "created_at",
+			shouldBeOK:   true,
+		},
+		{
+			name:         "not-equals with key on right-hand side does not prune",
+			query:        "SELECT * FROM orders WHERE $1 <> created_at AND customer_id = $2",
+			partitionKey: "created_at",
+			shouldBeOK:   false,
+		},
+		{
+			name:         "range containment operator does not prune",
+			query:        "SELECT * FROM orders WHERE created_at <@ tstzrange($1, $2) AND customer_id = $3",
+			partitionKey: "created_at",
+			shouldBeOK:   false,
+		},
+		{
 			name:         "key filtered after a subquery containing LIMIT",
 			query:        "SELECT * FROM orders b WHERE (EXISTS (SELECT 1 FROM holds h WHERE h.order_id = b.id LIMIT 1)) AND b.created_at >= $1",
 			partitionKey: "created_at",
