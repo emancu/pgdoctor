@@ -49,7 +49,7 @@ ALTER TABLE schema.large_table SET (
 
 ### vacuum-stale
 
-Identifies tables that haven't been vacuumed or analyzed recently despite pending work. Never-vacuumed/analyzed tables count as infinitely stale.
+Identifies tables that haven't been vacuumed or analyzed recently despite pending work.
 
 **Severity:**
 - Warning: No vacuum/analyze in 7+ days with 250,000+ pending work
