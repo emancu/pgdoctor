@@ -3,6 +3,7 @@ package tablevacuumhealth_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ const (
 	findingIDAutovacuumDisabled = "autovacuum-disabled"
 	findingIDLargeTableDefaults = "large-table-defaults"
 	findingIDVacuumStale        = "vacuum-stale"
+
+	noEstimate = "-"
 )
 
 type mockQueryer struct {
@@ -72,11 +75,6 @@ func (b *rowBuilder) withDeadTuples(deadTup int64) *rowBuilder {
 
 func (b *rowBuilder) withReloptions(reloptions string) *rowBuilder {
 	b.row.Reloptions = pgtype.Text{String: reloptions, Valid: reloptions != ""}
-	return b
-}
-
-func (b *rowBuilder) withLastAutovacuum(t time.Time) *rowBuilder {
-	b.row.LastAutovacuum = pgtype.Timestamptz{Time: t, Valid: true}
 	return b
 }
 
@@ -200,25 +198,177 @@ func TestTableVacuumHealth_AutovacuumDisabled_Found(t *testing.T) {
 	assert.Contains(t, disabled.Details, "public.staging_table")
 }
 
-func TestTableVacuumHealth_LargeTableDefaults_UsingDefaults_Warning(t *testing.T) {
+// Column indices for the large-table-defaults table:
+// Table, Rows, Size, Trigger At, Pending, Est. Next Vacuum.
+const (
+	ltdTriggerAt = 3
+	ltdPending   = 4
+	ltdEstNext   = 5
+)
+
+func largeTableFinding(t *testing.T, rows []db.TableVacuumHealthRow) *check.Finding {
+	t.Helper()
+	return findingByID(t, runCheck(t, rows), findingIDLargeTableDefaults)
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_WarnOnly(t *testing.T) {
 	t.Parallel()
 
-	report := runCheck(t, []db.TableVacuumHealthRow{
-		makeRow("public.users").
-			withRows(2_000_000).
+	// Even a 50M-row table (former FAIL tier) is WARN only now.
+	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
+		makeRow("public.huge").
+			withRows(50_000_000).
 			withSize(1024 * 1024 * 500).
 			withDeadTuples(50_000).
-			withVacuumCount(100).
-			withLastAutovacuum(recent).
 			withLastVacuumAny(recent).
-			withLastAnalyzeAny(recent).
 			build(),
 	})
 
-	large := findingByID(t, report, findingIDLargeTableDefaults)
-	assert.Equal(t, check.SeverityWarn, large.Severity)
-	require.NotNil(t, large.Table)
-	assert.Equal(t, check.SeverityWarn, large.Table.Rows[0].Severity)
+	assert.Equal(t, check.SeverityWarn, finding.Severity)
+	require.NotNil(t, finding.Table)
+	require.Len(t, finding.Table.Rows, 1)
+	assert.Equal(t, check.SeverityWarn, finding.Table.Rows[0].Severity)
+	assert.Equal(t,
+		[]string{"Table", "Rows", "Size", "Trigger At", "Pending", "Est. Next Vacuum"},
+		finding.Table.Headers)
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_Detection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		row    db.TableVacuumHealthRow
+		listed bool
+	}{
+		{
+			name:   "below 1M rows is ignored",
+			row:    makeRow("public.small").withRows(999_999).withLastVacuumAny(recent).build(),
+			listed: false,
+		},
+		{
+			name:   "at 1M rows on defaults is listed",
+			row:    makeRow("public.edge").withRows(1_000_000).withLastVacuumAny(recent).build(),
+			listed: true,
+		},
+		{
+			name:   "custom scale factor is ignored",
+			row:    makeRow("public.tuned").withRows(5_000_000).withReloptions("autovacuum_vacuum_scale_factor=0.01").withLastVacuumAny(recent).build(),
+			listed: false,
+		},
+		{
+			name:   "custom threshold but default scale factor is listed",
+			row:    makeRow("public.partial").withRows(5_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAny(recent).build(),
+			listed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			finding := largeTableFinding(t, []db.TableVacuumHealthRow{tt.row})
+			if tt.listed {
+				assert.Equal(t, check.SeverityWarn, finding.Severity)
+				require.NotNil(t, finding.Table)
+				require.Len(t, finding.Table.Rows, 1)
+			} else {
+				assert.Equal(t, check.SeverityPass, finding.Severity)
+				assert.Nil(t, finding.Table)
+			}
+		})
+	}
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_TriggerAtMath(t *testing.T) {
+	t.Parallel()
+
+	// trigger = 0.2 * rows + 50. Custom threshold does not change the default formula.
+	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
+		makeRow("public.a").withRows(2_000_000).withDeadTuples(300_000).withInsSinceVacuum(50_000).withLastVacuumAny(recent).build(),
+		makeRow("public.b").withRows(1_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAny(recent).build(),
+	})
+
+	byName := map[string]check.TableRow{}
+	for _, r := range finding.Table.Rows {
+		byName[r.Cells[0]] = r
+	}
+
+	// 0.2*2M+50 = 400050 -> "400.1K"; pending 300K+50K = 350K -> "350.0K".
+	assert.Equal(t, "400.1K", byName["public.a"].Cells[ltdTriggerAt])
+	assert.Equal(t, "350.0K", byName["public.a"].Cells[ltdPending])
+	// 0.2*1M+50 = 200050 -> "200.1K".
+	assert.Equal(t, "200.1K", byName["public.b"].Cells[ltdTriggerAt])
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		row  db.TableVacuumHealthRow
+		want string
+	}{
+		{
+			name: "overdue when pending crosses trigger",
+			// trigger 200050, pending 250000 >= trigger.
+			row:  makeRow("public.over").withRows(1_000_000).withDeadTuples(250_000).withLastVacuumAny(recent).build(),
+			want: "overdue",
+		},
+		{
+			name: "never vacuumed has no rate",
+			// pending below trigger, no last-vacuum timestamp.
+			row:  makeRow("public.new").withRows(2_000_000).withDeadTuples(100_000).build(),
+			want: noEstimate,
+		},
+		{
+			name: "zero pending has no rate",
+			row:  makeRow("public.idle").withRows(2_000_000).withDeadTuples(0).withInsSinceVacuum(0).withLastVacuumAny(recent).build(),
+			want: noEstimate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			finding := largeTableFinding(t, []db.TableVacuumHealthRow{tt.row})
+			require.Len(t, finding.Table.Rows, 1)
+			assert.Equal(t, tt.want, finding.Table.Rows[0].Cells[ltdEstNext])
+		})
+	}
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum_DaysEstimate(t *testing.T) {
+	t.Parallel()
+
+	// trigger 2,000,050; pending 100K accrued over 10 days -> a coarse day estimate.
+	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
+		makeRow("public.slow").withRows(10_000_000).withDeadTuples(100_000).withLastVacuumAny(staleWarn).build(),
+	})
+
+	require.Len(t, finding.Table.Rows, 1)
+	est := finding.Table.Rows[0].Cells[ltdEstNext]
+	assert.True(t, strings.HasPrefix(est, "~"), "want ~-prefixed estimate, got %q", est)
+	assert.True(t, strings.HasSuffix(est, "d"), "want day-unit estimate, got %q", est)
+}
+
+func TestTableVacuumHealth_LargeTableDefaults_SortedByPendingDesc(t *testing.T) {
+	t.Parallel()
+
+	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
+		makeRow("public.low").withRows(2_000_000).withDeadTuples(100_000).withLastVacuumAny(recent).build(),
+		makeRow("public.high").withRows(2_000_000).withDeadTuples(500_000).withLastVacuumAny(recent).build(),
+		makeRow("public.mid").withRows(2_000_000).withDeadTuples(300_000).withLastVacuumAny(recent).build(),
+	})
+
+	require.Len(t, finding.Table.Rows, 3)
+	assert.Equal(t, "public.high", finding.Table.Rows[0].Cells[0])
+	assert.Equal(t, "public.mid", finding.Table.Rows[1].Cells[0])
+	assert.Equal(t, "public.low", finding.Table.Rows[2].Cells[0])
+	for _, r := range finding.Table.Rows {
+		assert.Equal(t, check.SeverityWarn, r.Severity)
+	}
 }
 
 // --- vacuum-stale ---
