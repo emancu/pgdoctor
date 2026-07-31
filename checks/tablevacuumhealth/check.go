@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -30,7 +31,9 @@ type checker struct {
 
 const (
 	largeTableMinRows = 1_000_000
-	veryLargeTableMin = 10_000_000
+
+	defaultVacuumScaleFactor = 0.2
+	defaultVacuumThreshold   = 50
 
 	staleVacuumWarnDays = 7
 	staleVacuumFailDays = 25
@@ -39,6 +42,7 @@ const (
 	pendingWorkFailFloor = 500_000
 
 	neverLabel = "never"
+	noEstimate = "-"
 )
 
 func Metadata() check.Metadata {
@@ -114,15 +118,28 @@ func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Repor
 	})
 }
 
+// largeDefaultEntry carries the derived values needed to render and sort a row.
+type largeDefaultEntry struct {
+	row     db.TableVacuumHealthRow
+	trigger int64
+	pending int64
+}
+
 func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Report) {
-	var tablesUsingDefaults []db.TableVacuumHealthRow
+	now := time.Now()
+
+	var entries []largeDefaultEntry
 	for _, row := range rows {
 		if row.EstimatedRows.Int64 >= largeTableMinRows && isUsingDefaultSettings(row.Reloptions.String) {
-			tablesUsingDefaults = append(tablesUsingDefaults, row)
+			entries = append(entries, largeDefaultEntry{
+				row:     row,
+				trigger: defaultVacuumTrigger(row.EstimatedRows.Int64),
+				pending: row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64,
+			})
 		}
 	}
 
-	if len(tablesUsingDefaults) == 0 {
+	if len(entries) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "large-table-defaults",
 			Name:     "Large Table Vacuum Defaults",
@@ -132,26 +149,22 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 		return
 	}
 
-	var tableRows []check.TableRow
-	for _, row := range tablesUsingDefaults {
-		severity := check.SeverityWarn
-		if row.EstimatedRows.Int64 >= veryLargeTableMin {
-			severity = check.SeverityFail
-		}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].pending > entries[j].pending
+	})
 
-		// Pending work = dead tuples + inserts since vacuum (PG14+)
-		pendingWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
-
+	tableRows := make([]check.TableRow, 0, len(entries))
+	for _, e := range entries {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.TableName.String,
-				formatRowCount(row.EstimatedRows.Int64),
-				check.FormatBytes(row.TableSizeBytes.Int64),
-				formatRowCount(pendingWork),
-				formatTimestamp(row.LastAutovacuum),
-				fmt.Sprintf("%d", row.AutovacuumCount.Int64),
+				e.row.TableName.String,
+				check.FormatNumber(e.row.EstimatedRows.Int64),
+				check.FormatBytes(e.row.TableSizeBytes.Int64),
+				check.FormatNumber(e.trigger),
+				check.FormatNumber(e.pending),
+				estNextVacuum(e.trigger, e.pending, getTimestamp(e.row.LastVacuumAny), now),
 			},
-			Severity: severity,
+			Severity: check.SeverityWarn,
 		})
 	}
 
@@ -159,12 +172,46 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 		ID:       "large-table-defaults",
 		Name:     "Large Table Vacuum Defaults",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d large table(s) using default autovacuum settings", len(tablesUsingDefaults)),
+		Details:  fmt.Sprintf("Found %d large table(s) using default autovacuum settings", len(entries)),
 		Table: &check.Table{
-			Headers: []string{"Table", "Rows", "Size", "Pending Work", "Last Autovacuum", "Vacuum Count"},
+			Headers: []string{"Table", "Rows", "Size", "Trigger At", "Pending", "Est. Next Vacuum"},
 			Rows:    tableRows,
 		},
 	})
+}
+
+// defaultVacuumTrigger is the dead-tuple count default autovacuum waits for.
+func defaultVacuumTrigger(estimatedRows int64) int64 {
+	return int64(defaultVacuumScaleFactor*float64(estimatedRows)) + defaultVacuumThreshold
+}
+
+// estNextVacuum assumes dead tuples keep accumulating at their post-vacuum average rate.
+func estNextVacuum(trigger, pending int64, lastVacuum, now time.Time) string {
+	if pending == 0 {
+		return noEstimate
+	}
+	if pending >= trigger {
+		return "overdue"
+	}
+	if lastVacuum.IsZero() {
+		return noEstimate
+	}
+
+	seconds := now.Sub(lastVacuum).Seconds()
+	if seconds <= 0 {
+		return noEstimate
+	}
+
+	rate := float64(pending) / seconds
+	estSeconds := float64(trigger-pending) / rate
+
+	if days := estSeconds / 86400; days >= 2 {
+		return fmt.Sprintf("~%dd", int64(math.Round(days)))
+	}
+	if hours := estSeconds / 3600; hours >= 2 {
+		return fmt.Sprintf("~%dh", int64(math.Round(hours)))
+	}
+	return "<1h"
 }
 
 // staleEntry is a row that tripped a staleness tier, carrying the values needed
@@ -282,26 +329,6 @@ func isUsingDefaultSettings(reloptions string) bool {
 		return true
 	}
 	return !strings.Contains(strings.ToLower(reloptions), "autovacuum_vacuum_scale_factor")
-}
-
-func formatRowCount(count int64) string {
-	if count >= 1_000_000_000 {
-		return fmt.Sprintf("%.2fB", float64(count)/1_000_000_000)
-	}
-	if count >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
-	}
-	if count >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(count)/1_000)
-	}
-	return fmt.Sprintf("%d", count)
-}
-
-func formatTimestamp(ts pgtype.Timestamptz) string {
-	if ts.Valid {
-		return ts.Time.Format("2006-01-02 15:04")
-	}
-	return neverLabel
 }
 
 func getTimestamp(ts pgtype.Timestamptz) time.Time {

@@ -24,11 +24,9 @@ These tables rely entirely on manual maintenance. Common legitimate uses:
 
 ### large-table-defaults
 
-Identifies tables with more than 1 million rows using default autovacuum scale factors.
+Lists tables with 1 million or more rows using default autovacuum scale factors, alongside `Est. Next Vacuum`: when default settings would next trigger autovacuum, extrapolated from the current pending count and the rate since the last vacuum (`overdue` once pending crosses the trigger, `—` when never vacuumed or nothing is pending).
 
-**Severity:**
-- Warning: Tables with 1M-10M rows
-- Fail: Tables with >10M rows
+**Severity:** Warning
 
 The default `autovacuum_vacuum_scale_factor` is 0.2 (20%), meaning autovacuum triggers when dead tuples exceed 20% of the table size:
 
