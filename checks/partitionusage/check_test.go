@@ -34,11 +34,11 @@ type mockQueryer struct {
 	hiddenErr     error
 }
 
-func (m *mockQueryer) HiddenQueryTextCount(context.Context) (int64, error) {
+func (m *mockQueryer) HiddenQueryTextCount(context.Context) (pgtype.Int8, error) {
 	if m.hiddenErr != nil {
-		return 0, m.hiddenErr
+		return pgtype.Int8{}, m.hiddenErr
 	}
-	return m.hiddenQueries, nil
+	return pgtype.Int8{Int64: m.hiddenQueries, Valid: true}, nil
 }
 
 func (m *mockQueryer) HasPgStatStatements(context.Context) (bool, error) {

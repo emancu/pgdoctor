@@ -354,6 +354,25 @@ func (q *Queries) HasPgStatStatements(ctx context.Context) (bool, error) {
 	return exists, err
 }
 
+const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one
+SELECT COUNT(*)::bigint
+FROM pg_stat_statements
+WHERE
+  query = '<insufficient privilege>'
+  AND dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
+`
+
+// Counts pg_stat_statements rows whose text the current role cannot read.
+// Only superusers and roles with pg_read_all_stats see other users' query
+// text; everyone else gets '<insufficient privilege>', which would silently
+// shrink the analyzed set and produce a confident PASS on partial data.
+func (q *Queries) HiddenQueryTextCount(ctx context.Context) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, hiddenQueryTextCount)
+	var count pgtype.Int8
+	err := row.Scan(&count)
+	return count, err
+}
+
 const highSeqScanTables = `-- name: HighSeqScanTables :many
 WITH table_indexes AS (
   SELECT
@@ -633,25 +652,6 @@ func (q *Queries) IndexBloat(ctx context.Context) ([]IndexBloatRow, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one
-SELECT COUNT(*)::bigint
-FROM pg_stat_statements
-WHERE
-  query = '<insufficient privilege>'
-  AND dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
-`
-
-// Counts pg_stat_statements rows whose text the current role cannot read.
-// Only superusers and roles with pg_read_all_stats see other users' query
-// text; everyone else gets '<insufficient privilege>', which would silently
-// shrink the analyzed set and produce a confident PASS on partial data.
-func (q *Queries) HiddenQueryTextCount(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, hiddenQueryTextCount)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const indexUsageStats = `-- name: IndexUsageStats :many

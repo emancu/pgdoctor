@@ -10,6 +10,7 @@ import (
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 //go:embed query.sql
@@ -20,7 +21,7 @@ var readme string
 
 type PartitionUsageQueries interface {
 	HasPgStatStatements(context.Context) (bool, error)
-	HiddenQueryTextCount(context.Context) (int64, error)
+	HiddenQueryTextCount(context.Context) (pgtype.Int8, error)
 	PartitionedTablesWithKeys(context.Context) ([]db.PartitionedTablesWithKeysRow, error)
 	QueryStatsFromStatStatements(context.Context) ([]db.QueryStatsFromStatStatementsRow, error)
 }
@@ -104,14 +105,14 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("counting hidden query texts: %w", err)
 	}
 
-	if hiddenQueries > 0 {
+	if hiddenQueries.Int64 > 0 {
 		report.AddFinding(check.Finding{
 			ID:       "query-text-restricted",
 			Name:     "Query Text Not Fully Visible",
 			Severity: check.SeverityWarn,
 			Details: fmt.Sprintf(
 				"%d pg_stat_statements entries are hidden from the current role, so partition key analysis covers only part of the workload. Grant pg_read_all_stats to see every query.",
-				hiddenQueries),
+				hiddenQueries.Int64),
 		})
 	}
 
