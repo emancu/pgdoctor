@@ -109,13 +109,11 @@ func makePartitionedTableWithScans(schema, name, partitionKey string, seqScans, 
 }
 
 // Helper to create a QueryStatsFromStatStatementsRow.
-// Lowercases the matching text and keeps the original for display, mirroring
-// the LOWER() and query_display columns in query.sql.
+// The query text arrives in its original casing, as query.sql returns it.
 func makeQueryStats(query string, calls int64, totalExecTime float64) db.QueryStatsFromStatStatementsRow {
 	return db.QueryStatsFromStatStatementsRow{
 		QueryID:       pgtype.Int8{Int64: 12345, Valid: true},
-		Query:         pgtype.Text{String: strings.ToLower(query), Valid: true},
-		QueryDisplay:  pgtype.Text{String: query, Valid: true},
+		Query:         pgtype.Text{String: query, Valid: true},
 		Calls:         pgtype.Int8{Int64: calls, Valid: true},
 		TotalExecTime: pgtype.Float8{Float64: totalExecTime, Valid: true},
 		MeanExecTime:  pgtype.Float8{Float64: totalExecTime / float64(calls), Valid: true},
@@ -932,7 +930,9 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	require.NotEmpty(t, metadata.Readme)
 	// The full normalized query text is analyzed, scoped to the current
 	// database and top-level statements.
-	require.Contains(t, metadata.SQL, `LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query`)
+	require.Contains(t, metadata.SQL, `REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query`)
+	// One copy of the text per row: matching lowercases it in Go.
+	require.NotContains(t, metadata.SQL, "AS query_display")
 	require.Contains(t, metadata.SQL, "AND toplevel")
 	require.Contains(t, metadata.SQL, "d.datname = current_database()")
 	// Statement type is matched on the leading keyword. Substring matching let
