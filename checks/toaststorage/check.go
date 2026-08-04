@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/emancu/pgdoctor/check"
@@ -37,6 +38,9 @@ const (
 	wideColumnTextThreshold  = 10000 // 10KB
 
 	compressionToastFloorBytes = int64(check.GiB) // itemize only tables with TOAST > 1GiB
+
+	compressionPglz = "pglz"
+	compressionLz4  = "lz4"
 )
 
 func Metadata() check.Metadata {
@@ -84,8 +88,27 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	checkToastBloat(rows, report)
 	checkWideColumns(rows, report)
 	checkCompressionAlgorithm(ctx, rows, report)
+	checkCompressionDefault(ctx, rows, report)
 
 	return report, nil
+}
+
+// pgMajor extracts the PostgreSQL major version from context metadata, defaulting to 14.
+func pgMajor(ctx context.Context) int {
+	meta := check.InstanceMetadataFromContext(ctx)
+	major := 14
+	if meta != nil && meta.EngineVersion != "" {
+		_, _ = fmt.Sscanf(meta.EngineVersion, "%d", &major)
+	}
+	return major
+}
+
+// defaultToastCompression reads the cluster GUC (a per-row scalar), defaulting to pglz when unset.
+func defaultToastCompression(rows []db.ToastStorageRow) string {
+	if len(rows) == 0 || !rows[0].DefaultToastCompression.Valid {
+		return compressionPglz
+	}
+	return rows[0].DefaultToastCompression.String
 }
 
 // getToastPercent extracts TOAST percentage from pgtype.Numeric.
@@ -403,27 +426,30 @@ func checkWideColumns(rows []db.ToastStorageRow, report *check.Report) {
 	})
 }
 
-// checkCompressionAlgorithm flags columns still on pglz; informational, itemizes only large-TOAST tables.
-func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, report *check.Report) {
-	meta := check.InstanceMetadataFromContext(ctx)
-	pgVersion := 14
-	if meta != nil && meta.EngineVersion != "" {
-		_, _ = fmt.Sscanf(meta.EngineVersion, "%d", &pgVersion)
+// effectiveCompression resolves a column's on-disk method: explicit wins, unset falls back to the GUC.
+func effectiveCompression(algo string, defaultIsLz4 bool) string {
+	switch algo {
+	case compressionLz4:
+		return compressionLz4
+	case compressionPglz:
+		return compressionPglz
+	default:
+		if defaultIsLz4 {
+			return compressionLz4
+		}
+		return compressionPglz
 	}
+}
 
-	if pgVersion < 14 {
+// checkCompressionAlgorithm counts columns effectively on pglz; itemization lives in Debug.
+func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, report *check.Report) {
+	if pgMajor(ctx) < 14 {
 		return
 	}
 
-	type compressionColumn struct {
-		tableName  string
-		columnName string
-		columnType string
-		toastSize  int64
-		fix        string
-	}
+	defaultIsLz4 := defaultToastCompression(rows) == compressionLz4
 
-	var pglzColumns []compressionColumn
+	pglzColumns := 0
 	tablesWithPglz := map[string]struct{}{}
 
 	for _, row := range rows {
@@ -435,68 +461,100 @@ func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, r
 				continue
 			}
 
-			compressionAlgo := parts[1]
-			if compressionAlgo != "default" && compressionAlgo != "pglz" {
+			if effectiveCompression(parts[1], defaultIsLz4) != compressionPglz {
 				continue
 			}
 
-			colType := parts[3]
-			fix := "lz4"
-			if colType == "bytea" && parts[2] == "EXTENDED" {
-				fix = "external"
-			}
-
-			pglzColumns = append(pglzColumns, compressionColumn{
-				tableName:  tableName,
-				columnName: parts[0],
-				columnType: colType,
-				toastSize:  row.ToastSize.Int64,
-				fix:        fix,
-			})
+			pglzColumns++
 			tablesWithPglz[tableName] = struct{}{}
 		}
 	}
 
-	if len(pglzColumns) == 0 {
+	debug := bigToastCompressionDebug(rows, defaultIsLz4)
+
+	if pglzColumns == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "compression-algorithm",
 			Name:     "TOAST Compression Algorithm",
 			Severity: check.SeverityPass,
 			Details:  "All columns are using optimal compression settings (LZ4 or appropriate strategy)",
+			Debug:    debug,
 		})
 		return
 	}
 
-	var tableRows []check.TableRow
-	for _, col := range pglzColumns {
-		if col.toastSize <= compressionToastFloorBytes {
-			continue
-		}
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				col.tableName,
-				col.columnName,
-				col.columnType,
-				check.FormatBytes(col.toastSize),
-				col.fix,
-			},
-			Severity: check.SeverityInfo,
-		})
-	}
-
-	finding := check.Finding{
+	report.AddFinding(check.Finding{
 		ID:       "compression-algorithm",
 		Name:     "TOAST Compression Algorithm",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("%d column(s) on %d table(s) use pglz compression", len(pglzColumns), len(tablesWithPglz)),
+		Details:  fmt.Sprintf("%d column(s) on %d table(s) use pglz compression", pglzColumns, len(tablesWithPglz)),
+		Debug:    debug,
+	})
+}
+
+// bigToastCompressionDebug lists >1GiB columns with their effective method, keeping pglz residue visible after a flip.
+func bigToastCompressionDebug(rows []db.ToastStorageRow, defaultIsLz4 bool) string {
+	type entry struct {
+		toastSize int64
+		effective string
+		name      string
 	}
-	if len(tableRows) > 0 {
-		finding.Table = &check.Table{
-			Headers: []string{"Table", "Column", "Type", "TOAST", "Fix"},
-			Rows:    tableRows,
+
+	var entries []entry
+	for _, row := range rows {
+		if row.ToastSize.Int64 <= compressionToastFloorBytes {
+			continue
+		}
+		for _, compInfo := range row.ColumnCompressionInfo {
+			parts := strings.Split(compInfo, ":")
+			if len(parts) != 4 {
+				continue
+			}
+			entries = append(entries, entry{
+				toastSize: row.ToastSize.Int64,
+				effective: effectiveCompression(parts[1], defaultIsLz4),
+				name:      fmt.Sprintf("%s.%s.%s", row.SchemaName.String, row.TableName.String, parts[0]),
+			})
 		}
 	}
-	report.AddFinding(finding)
+
+	if len(entries) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].toastSize > entries[j].toastSize })
+
+	var b strings.Builder
+	b.WriteString("Big-TOAST columns (>1GiB, effective compression):")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "\n#  %-8s effective %-4s  %s", check.FormatBytes(e.toastSize), e.effective, e.name)
+	}
+	return b.String()
+}
+
+// checkCompressionDefault flags a cluster default_toast_compression that is not lz4.
+func checkCompressionDefault(ctx context.Context, rows []db.ToastStorageRow, report *check.Report) {
+	if pgMajor(ctx) < 14 {
+		return
+	}
+
+	current := defaultToastCompression(rows)
+	if current == compressionLz4 {
+		report.AddFinding(check.Finding{
+			ID:       "compression-default",
+			Name:     "Default TOAST Compression",
+			Severity: check.SeverityPass,
+			Details:  "default_toast_compression is lz4",
+		})
+		return
+	}
+
+	report.AddFinding(check.Finding{
+		ID:       "compression-default",
+		Name:     "Default TOAST Compression",
+		Severity: check.SeverityInfo,
+		Details:  fmt.Sprintf("default_toast_compression is %s; unset columns compress new writes with %s — lz4 is strictly better here", current, current),
+	})
 }
 
 // Helper functions

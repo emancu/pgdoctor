@@ -3,6 +3,7 @@ package toaststorage_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -19,6 +20,7 @@ const (
 	findingIDToastBloat           = "toast-bloat"
 	findingIDWideColumns          = "wide-columns"
 	findingIDCompressionAlgorithm = "compression-algorithm"
+	findingIDCompressionDefault   = "compression-default"
 )
 
 type mockQueryer struct {
@@ -302,21 +304,32 @@ func Test_ToastStorage_WideColumns_Text(t *testing.T) {
 	require.Contains(t, wideFinding.Table.Rows[0].Cells[3], "text")
 }
 
-func compressionFinding(t *testing.T, report *check.Report) *check.Finding {
-	t.Helper()
+func findingByID(report *check.Report, id string) *check.Finding {
 	for i := range report.Results {
-		if report.Results[i].ID == findingIDCompressionAlgorithm {
+		if report.Results[i].ID == id {
 			return &report.Results[i]
 		}
 	}
 	return nil
 }
 
+func compressionFinding(t *testing.T, report *check.Report) *check.Finding {
+	t.Helper()
+	return findingByID(report, findingIDCompressionAlgorithm)
+}
+
 func pg14Ctx() context.Context {
 	return check.ContextWithInstanceMetadata(context.Background(), &check.InstanceMetadata{EngineVersion: "14.8"})
 }
 
-func Test_ToastStorage_CompressionAlgorithm_Info_Itemized(t *testing.T) {
+func withDefaultCompression(rows []db.ToastStorageRow, algo string) []db.ToastStorageRow {
+	for i := range rows {
+		rows[i].DefaultToastCompression = pgtype.Text{String: algo, Valid: true}
+	}
+	return rows
+}
+
+func Test_ToastStorage_CompressionAlgorithm_Info_DetailsOnly(t *testing.T) {
 	t.Parallel()
 
 	row := makeToastRow("public", "events", "pg_toast.pg_toast_90123", 10*check.GiB, 15*check.GiB, 25*check.GiB, 60.0)
@@ -325,7 +338,7 @@ func Test_ToastStorage_CompressionAlgorithm_Info_Itemized(t *testing.T) {
 		"metadata:pglz:EXTENDED:jsonb",
 	}
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "pglz")}
 	report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 	require.NoError(t, err)
@@ -335,15 +348,49 @@ func Test_ToastStorage_CompressionAlgorithm_Info_Itemized(t *testing.T) {
 	require.NotNil(t, f, "compression-algorithm subcheck should be present")
 	require.Equal(t, check.SeverityInfo, f.Severity)
 	require.Contains(t, f.Details, "2 column(s) on 1 table(s) use pglz compression")
-	require.NotNil(t, f.Table)
-	require.Equal(t, []string{"Table", "Column", "Type", "TOAST", "Fix"}, f.Table.Headers)
-	require.Equal(t, 2, len(f.Table.Rows))
-	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
-	require.Equal(t, "public.events", f.Table.Rows[0].Cells[0])
-	require.Equal(t, "payload", f.Table.Rows[0].Cells[1])
-	require.Equal(t, "jsonb", f.Table.Rows[0].Cells[2])
-	require.Equal(t, check.FormatBytes(15*check.GiB), f.Table.Rows[0].Cells[3])
-	require.Equal(t, "lz4", f.Table.Rows[0].Cells[4])
+	require.Nil(t, f.Table, "itemization moved to Debug; no table in normal output")
+	require.Contains(t, f.Debug, "public.events.payload")
+	require.Contains(t, f.Debug, "effective pglz")
+}
+
+func Test_ToastStorage_CompressionAlgorithm_EffectiveAwareness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		algo        string
+		clusterAlgo string
+		wantCounted bool
+	}{
+		{name: "explicit pglz counts on lz4 default", algo: "pglz", clusterAlgo: "lz4", wantCounted: true},
+		{name: "unset does not count on lz4 default", algo: "default", clusterAlgo: "lz4", wantCounted: false},
+		{name: "unset counts on pglz default", algo: "default", clusterAlgo: "pglz", wantCounted: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			row := makeToastRow("public", "events", "pg_toast.pg_toast_90124", 10*check.GiB, 15*check.GiB, 25*check.GiB, 60.0)
+			row.ColumnCompressionInfo = []string{"payload:" + tt.algo + ":EXTENDED:jsonb"}
+
+			queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, tt.clusterAlgo)}
+			report, err := toaststorage.New(queryer).Check(pg14Ctx())
+
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			f := compressionFinding(t, report)
+			require.NotNil(t, f)
+			if tt.wantCounted {
+				require.Equal(t, check.SeverityInfo, f.Severity)
+				require.Contains(t, f.Details, "1 column(s) on 1 table(s) use pglz compression")
+			} else {
+				require.Equal(t, check.SeverityPass, f.Severity)
+				require.Contains(t, f.Details, "optimal compression")
+			}
+		})
+	}
 }
 
 func Test_ToastStorage_CompressionAlgorithm_DoesNotEscalate(t *testing.T) {
@@ -353,7 +400,7 @@ func Test_ToastStorage_CompressionAlgorithm_DoesNotEscalate(t *testing.T) {
 	row := makeToastRow("public", "small", "pg_toast.pg_toast_55550", 10*check.GiB, 2*check.GiB, 12*check.GiB, 16.0)
 	row.ColumnCompressionInfo = []string{"payload:default:EXTENDED:jsonb"}
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "pglz")}
 	report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 	require.NoError(t, err)
@@ -365,16 +412,16 @@ func Test_ToastStorage_CompressionAlgorithm_DoesNotEscalate(t *testing.T) {
 	require.Equal(t, check.SeverityPass, report.Severity, "Info finding must not escalate the report")
 }
 
-func Test_ToastStorage_CompressionAlgorithm_FloorBoundary(t *testing.T) {
+func Test_ToastStorage_CompressionAlgorithm_DebugFloorBoundary(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name      string
 		toastSize int64
-		wantTable bool
+		wantDebug bool
 	}{
-		{name: "just under 1GiB is not itemized", toastSize: check.GiB, wantTable: false},
-		{name: "just over 1GiB is itemized", toastSize: check.GiB + 1, wantTable: true},
+		{name: "just under 1GiB is not itemized in Debug", toastSize: check.GiB, wantDebug: false},
+		{name: "just over 1GiB is itemized in Debug", toastSize: check.GiB + 1, wantDebug: true},
 	}
 
 	for _, tt := range tests {
@@ -384,7 +431,7 @@ func Test_ToastStorage_CompressionAlgorithm_FloorBoundary(t *testing.T) {
 			row := makeToastRow("public", "events", "pg_toast.pg_toast_66660", 10*check.GiB, tt.toastSize, 12*check.GiB, 16.0)
 			row.ColumnCompressionInfo = []string{"payload:default:EXTENDED:jsonb"}
 
-			queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+			queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "pglz")}
 			report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 			require.NoError(t, err)
@@ -394,27 +441,28 @@ func Test_ToastStorage_CompressionAlgorithm_FloorBoundary(t *testing.T) {
 			require.NotNil(t, f)
 			require.Equal(t, check.SeverityInfo, f.Severity)
 			require.Contains(t, f.Details, "1 column(s) on 1 table(s) use pglz compression")
-			if tt.wantTable {
-				require.NotNil(t, f.Table)
-				require.Equal(t, 1, len(f.Table.Rows))
+			require.Nil(t, f.Table)
+			if tt.wantDebug {
+				require.Contains(t, f.Debug, "public.events.payload")
 			} else {
-				require.Nil(t, f.Table, "sub-floor tables carry the aggregate Details but no table")
+				require.Empty(t, f.Debug, "sub-floor columns carry the aggregate Details but no Debug listing")
 			}
 		})
 	}
 }
 
-func Test_ToastStorage_CompressionAlgorithm_AggregateWithoutRows(t *testing.T) {
+func Test_ToastStorage_CompressionAlgorithm_DebugAlwaysListsBigToast(t *testing.T) {
 	t.Parallel()
 
+	// lz4 everywhere: PASS path, but big-TOAST columns must still appear in Debug, sorted by size desc.
 	rows := []db.ToastStorageRow{
-		makeToastRow("public", "a", "pg_toast.pg_toast_77770", 5*check.GiB, 500*check.MiB, 6*check.GiB, 8.0),
-		makeToastRow("public", "b", "pg_toast.pg_toast_88880", 5*check.GiB, 800*check.MiB, 6*check.GiB, 12.0),
+		makeToastRow("public", "small_lz4", "pg_toast.pg_toast_77771", 5*check.GiB, 2*check.GiB, 7*check.GiB, 28.0),
+		makeToastRow("public", "big_lz4", "pg_toast.pg_toast_77772", 5*check.GiB, 4*check.GiB, 9*check.GiB, 44.0),
 	}
-	rows[0].ColumnCompressionInfo = []string{"payload:default:EXTENDED:jsonb"}
-	rows[1].ColumnCompressionInfo = []string{"message:pglz:EXTENDED:text", "notes:pglz:EXTENDED:text"}
+	rows[0].ColumnCompressionInfo = []string{"a:lz4:EXTENDED:jsonb"}
+	rows[1].ColumnCompressionInfo = []string{"b:lz4:EXTENDED:jsonb"}
 
-	queryer := &mockQueryer{rows: rows}
+	queryer := &mockQueryer{rows: withDefaultCompression(rows, "lz4")}
 	report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 	require.NoError(t, err)
@@ -422,9 +470,14 @@ func Test_ToastStorage_CompressionAlgorithm_AggregateWithoutRows(t *testing.T) {
 
 	f := compressionFinding(t, report)
 	require.NotNil(t, f)
-	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.Contains(t, f.Details, "3 column(s) on 2 table(s) use pglz compression")
-	require.Nil(t, f.Table, "no column clears the 1GiB floor, so no table is emitted")
+	require.Equal(t, check.SeverityPass, f.Severity, "all lz4 is a PASS")
+	require.Contains(t, f.Debug, "public.big_lz4.b")
+	require.Contains(t, f.Debug, "public.small_lz4.a")
+	require.Contains(t, f.Debug, "effective lz4")
+	require.Less(t,
+		strings.Index(f.Debug, "public.big_lz4.b"),
+		strings.Index(f.Debug, "public.small_lz4.a"),
+		"Debug is sorted by TOAST size descending")
 }
 
 func Test_ToastStorage_CompressionAlgorithm_OptimalLZ4(t *testing.T) {
@@ -436,7 +489,7 @@ func Test_ToastStorage_CompressionAlgorithm_OptimalLZ4(t *testing.T) {
 		"metadata:lz4:EXTENDED:jsonb",
 	}
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "lz4")}
 	report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 	require.NoError(t, err)
@@ -467,27 +520,45 @@ func Test_ToastStorage_CompressionAlgorithm_SkipsOnPG13(t *testing.T) {
 	checktest.AssertSeverityInvariant(t, report)
 
 	require.Nil(t, compressionFinding(t, report), "compression-algorithm subcheck should not run on PG < 14")
+	require.Nil(t, findingByID(report, findingIDCompressionDefault), "compression-default should not run on PG < 14")
 }
 
-func Test_ToastStorage_CompressionAlgorithm_ByteaExternalFix(t *testing.T) {
+func Test_ToastStorage_CompressionDefault_PglzInfo(t *testing.T) {
 	t.Parallel()
 
-	row := makeToastRow("public", "media", "pg_toast.pg_toast_34560", 5*check.GiB, 10*check.GiB, 15*check.GiB, 66.67)
-	row.ColumnCompressionInfo = []string{
-		"file_data:default:EXTENDED:bytea",
-	}
+	row := makeToastRow("public", "events", "pg_toast.pg_toast_34561", 5*check.GiB, 2*check.GiB, 7*check.GiB, 28.0)
+	row.ColumnCompressionInfo = []string{"payload:lz4:EXTENDED:jsonb"}
 
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
+	queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "pglz")}
 	report, err := toaststorage.New(queryer).Check(pg14Ctx())
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
 
-	f := compressionFinding(t, report)
+	f := findingByID(report, findingIDCompressionDefault)
 	require.NotNil(t, f)
 	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.NotNil(t, f.Table)
-	require.Equal(t, "external", f.Table.Rows[0].Cells[4])
+	require.Contains(t, f.Details, "default_toast_compression is pglz")
+	require.Nil(t, f.Table)
+	require.Equal(t, check.SeverityPass, report.Severity, "Info finding must not escalate the report")
+}
+
+func Test_ToastStorage_CompressionDefault_Lz4Pass(t *testing.T) {
+	t.Parallel()
+
+	row := makeToastRow("public", "events", "pg_toast.pg_toast_34562", 5*check.GiB, 2*check.GiB, 7*check.GiB, 28.0)
+	row.ColumnCompressionInfo = []string{"payload:lz4:EXTENDED:jsonb"}
+
+	queryer := &mockQueryer{rows: withDefaultCompression([]db.ToastStorageRow{row}, "lz4")}
+	report, err := toaststorage.New(queryer).Check(pg14Ctx())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+
+	f := findingByID(report, findingIDCompressionDefault)
+	require.NotNil(t, f)
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Contains(t, f.Details, "default_toast_compression is lz4")
 }
 
 func Test_ToastStorage_MultipleTables_MultipleSeverities(t *testing.T) {

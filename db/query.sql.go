@@ -2449,23 +2449,26 @@ SELECT
     )
     , ARRAY[]::text []
   ) AS column_compression_info
+  -- PG14+ GUC; safe form returns NULL on PG13 where it does not exist
+  , current_setting('default_toast_compression', true) AS default_toast_compression
 FROM toast_info AS ti
 ORDER BY ti.toast_size DESC
 `
 
 type ToastStorageRow struct {
-	SchemaName            pgtype.Text
-	TableName             pgtype.Text
-	ToastTableName        pgtype.Text
-	MainTableSize         pgtype.Int8
-	ToastSize             pgtype.Int8
-	TotalSize             pgtype.Int8
-	IndexesSize           pgtype.Int8
-	ToastPercent          pgtype.Numeric
-	ToastLiveTuples       pgtype.Int8
-	ToastDeadTuples       pgtype.Int8
-	WideColumns           []string
-	ColumnCompressionInfo []string
+	SchemaName              pgtype.Text
+	TableName               pgtype.Text
+	ToastTableName          pgtype.Text
+	MainTableSize           pgtype.Int8
+	ToastSize               pgtype.Int8
+	TotalSize               pgtype.Int8
+	IndexesSize             pgtype.Int8
+	ToastPercent            pgtype.Numeric
+	ToastLiveTuples         pgtype.Int8
+	ToastDeadTuples         pgtype.Int8
+	WideColumns             []string
+	ColumnCompressionInfo   []string
+	DefaultToastCompression pgtype.Text
 }
 
 // Analyzes TOAST storage usage and identifies tables with large value storage
@@ -2491,6 +2494,7 @@ func (q *Queries) ToastStorage(ctx context.Context) ([]ToastStorageRow, error) {
 			&i.ToastDeadTuples,
 			&i.WideColumns,
 			&i.ColumnCompressionInfo,
+			&i.DefaultToastCompression,
 		); err != nil {
 			return nil, err
 		}
