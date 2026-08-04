@@ -144,6 +144,7 @@ func checkPartitionKeyUsage(
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
+	var examples []problemQuery
 	hasCritical := false
 
 	for _, table := range tables {
@@ -164,6 +165,7 @@ func checkPartitionKeyUsage(
 		var problemQueryCount int
 		var totalCalls int64
 		var totalExecTime float64
+		qualifiedName := fmt.Sprintf("%s.%s", schemaName, tableName)
 
 		for _, q := range queries {
 			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
@@ -177,6 +179,13 @@ func checkPartitionKeyUsage(
 					problemQueryCount++
 					totalCalls += calls
 					totalExecTime += execTime
+					examples = append(examples, problemQuery{
+						table:    qualifiedName,
+						calls:    calls,
+						execTime: execTime,
+						queryID:  q.QueryID.Int64,
+						text:     q.QueryDisplay.String,
+					})
 				}
 			}
 		}
@@ -227,6 +236,87 @@ func checkPartitionKeyUsage(
 			Rows:    tableRows,
 		},
 	})
+
+	addProblemQueryExamples(examples, report)
+}
+
+// problemQuery is one statement reported as not constraining the partition key,
+// kept so the offending text can be surfaced as evidence.
+type problemQuery struct {
+	table    string
+	calls    int64
+	execTime float64
+	queryID  int64
+	text     string
+}
+
+// exampleQueriesBrief is how many offending queries are listed at the default
+// detail level; --detail verbose lists every one.
+const exampleQueriesBrief = 3
+
+// maxQueryTextWidth keeps the evidence table inside a terminal. ORM-generated
+// statements run to thousands of characters, and the queryid is what identifies
+// them anyway.
+const maxQueryTextWidth = 80
+
+// addProblemQueryExamples emits the offending statements as an informational
+// finding. Severity is INFO so it never escalates the report: this is evidence
+// for the sibling finding, not a health conclusion of its own.
+func addProblemQueryExamples(examples []problemQuery, report *check.Report) {
+	if len(examples) == 0 {
+		return
+	}
+
+	// Worst first, so the default detail level shows the queries that matter
+	// most across every table rather than whichever table came first.
+	slices.SortStableFunc(examples, func(a, b problemQuery) int {
+		switch {
+		case a.execTime > b.execTime:
+			return -1
+		case a.execTime < b.execTime:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	rows := make([]check.TableRow, 0, len(examples))
+	for _, example := range examples {
+		rows = append(rows, check.TableRow{
+			Cells: []string{
+				example.table,
+				check.FormatNumber(example.calls),
+				check.FormatDurationMs(example.execTime),
+				fmt.Sprintf("%d", example.queryID),
+				clipQueryText(example.text),
+			},
+			Severity: check.SeverityInfo,
+		})
+	}
+
+	report.AddFinding(check.Finding{
+		ID:       "partition-key-examples",
+		Name:     "Example Queries Missing Partition Key",
+		Severity: check.SeverityInfo,
+		Details: fmt.Sprintf(
+			"%d statement(s) do not constrain the partition key. Read one in full with:\n"+
+				"  SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;",
+			len(examples)),
+		Table: &check.Table{
+			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
+			Rows:         rows,
+			MaxRowsBrief: exampleQueriesBrief,
+		},
+	})
+}
+
+// clipQueryText shortens a normalized statement to one terminal line.
+func clipQueryText(text string) string {
+	if len(text) <= maxQueryTextWidth {
+		return text
+	}
+
+	return text[:maxQueryTextWidth-1] + "…"
 }
 
 // queryReferencesTable checks if a query text references a specific table.

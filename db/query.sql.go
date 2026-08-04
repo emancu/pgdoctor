@@ -1112,7 +1112,9 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
 SELECT
   queryid::bigint AS query_id
+  -- Lowercased for matching; the original casing is kept for display.
   , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
+  , REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query_display
   , calls::bigint AS calls
   , total_exec_time::double precision AS total_exec_time
   , mean_exec_time::double precision AS mean_exec_time
@@ -1135,6 +1137,7 @@ LIMIT 500
 type QueryStatsFromStatStatementsRow struct {
 	QueryID       pgtype.Int8
 	Query         pgtype.Text
+	QueryDisplay  pgtype.Text
 	Calls         pgtype.Int8
 	TotalExecTime pgtype.Float8
 	MeanExecTime  pgtype.Float8
@@ -1155,6 +1158,7 @@ func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStat
 		if err := rows.Scan(
 			&i.QueryID,
 			&i.Query,
+			&i.QueryDisplay,
 			&i.Calls,
 			&i.TotalExecTime,
 			&i.MeanExecTime,

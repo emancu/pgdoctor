@@ -159,7 +159,12 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 
 	indentStr := strings.Repeat(" ", indentSpaces)
 
-	const maxRowsBrief = 10
+	const defaultMaxRowsBrief = 10
+	maxRowsBrief := defaultMaxRowsBrief
+	if table.MaxRowsBrief > 0 {
+		maxRowsBrief = table.MaxRowsBrief
+	}
+
 	totalRows := len(table.Rows)
 	rowsToShow := table.Rows
 	truncated := false
@@ -169,11 +174,13 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 		truncated = true
 	}
 
+	// Size columns to the rows actually displayed, so a long cell in a hidden
+	// row does not stretch the table.
 	widths := make([]int, len(table.Headers))
 	for i, header := range table.Headers {
 		widths[i] = len(header)
 	}
-	for _, row := range table.Rows {
+	for _, row := range rowsToShow {
 		for i, cell := range row.Cells {
 			if i < len(widths) && len(cell) > widths[i] {
 				widths[i] = len(cell)

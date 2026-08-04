@@ -20,6 +20,7 @@ const (
 	findingIDJoinMissingPartKey   = "join-missing-partition-key"
 	findingIDExtensionUnavailable = "extension-unavailable"
 	findingIDQueryTextRestricted  = "query-text-restricted"
+	findingIDPartitionKeyExamples = "partition-key-examples"
 )
 
 // Mock queryer for testing.
@@ -108,16 +109,41 @@ func makePartitionedTableWithScans(schema, name, partitionKey string, seqScans, 
 }
 
 // Helper to create a QueryStatsFromStatStatementsRow.
-// Lowercases the query text, mirroring the LOWER() in query.sql.
+// Lowercases the matching text and keeps the original for display, mirroring
+// the LOWER() and query_display columns in query.sql.
 func makeQueryStats(query string, calls int64, totalExecTime float64) db.QueryStatsFromStatStatementsRow {
 	return db.QueryStatsFromStatStatementsRow{
 		QueryID:       pgtype.Int8{Int64: 12345, Valid: true},
 		Query:         pgtype.Text{String: strings.ToLower(query), Valid: true},
+		QueryDisplay:  pgtype.Text{String: query, Valid: true},
 		Calls:         pgtype.Int8{Int64: calls, Valid: true},
 		TotalExecTime: pgtype.Float8{Float64: totalExecTime, Valid: true},
 		MeanExecTime:  pgtype.Float8{Float64: totalExecTime / float64(calls), Valid: true},
 		RowsReturned:  pgtype.Int8{Int64: calls * 10, Valid: true},
 	}
+}
+
+// keyFinding returns the partition-key-unused finding. Looking findings up by ID
+// keeps assertions valid as the check gains findings such as the informational
+// example-queries one.
+func keyFinding(t *testing.T, report *check.Report) check.Finding {
+	t.Helper()
+
+	return findingByID(t, report, findingIDPartitionKeyUnused)
+}
+
+func findingByID(t *testing.T, report *check.Report, id string) check.Finding {
+	t.Helper()
+
+	for _, result := range report.Results {
+		if result.ID == id {
+			return result
+		}
+	}
+
+	require.FailNowf(t, "finding not found", "no finding with ID %q in %+v", id, report.Results)
+
+	return check.Finding{}
 }
 
 func Test_PartitionUsage_NoPartitionedTables(t *testing.T) {
@@ -132,9 +158,8 @@ func Test_PartitionUsage_NoPartitionedTables(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "No partitioned tables found")
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "No partitioned tables found")
 }
 
 func Test_PartitionUsage_NoQueryStats(t *testing.T) {
@@ -151,9 +176,8 @@ func Test_PartitionUsage_NoQueryStats(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "No query statistics available")
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "No query statistics available")
 }
 
 func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
@@ -172,9 +196,8 @@ func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "properly use partition keys")
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "properly use partition keys")
 }
 
 func Test_PartitionUsage_QuotedPartitionKeyRecognized(t *testing.T) {
@@ -200,9 +223,8 @@ func Test_PartitionUsage_QuotedPartitionKeyRecognized(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "properly use partition keys")
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "properly use partition keys")
 }
 
 func Test_PartitionUsage_PartitionLeafQueryIgnored(t *testing.T) {
@@ -225,9 +247,7 @@ func Test_PartitionUsage_PartitionLeafQueryIgnored(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 // Partition-leaf and lookalike table names must not be attributed to the parent,
@@ -284,12 +304,10 @@ func Test_PartitionUsage_TableMatchingBoundaries(t *testing.T) {
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
-			require.Len(t, report.Results, 1)
-			require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
 			if tc.shouldBeOK {
-				require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+				require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 			} else {
-				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
+				require.NotEqual(t, check.SeverityPass, keyFinding(t, report).Severity)
 			}
 		})
 	}
@@ -395,12 +413,10 @@ func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
 			report, err := partitionusage.New(queryer).Check(context.Background())
 			require.NoError(t, err)
 
-			require.Len(t, report.Results, 1)
-			require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
 			if tc.shouldBeOK {
-				require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+				require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 			} else {
-				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity)
+				require.NotEqual(t, check.SeverityPass, keyFinding(t, report).Severity)
 			}
 		})
 	}
@@ -427,9 +443,7 @@ func Test_PartitionUsage_KeyConstrainedInJoinCondition_NotFlagged(t *testing.T) 
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 // The same column name constrained inside a subquery on a different table must
@@ -453,9 +467,7 @@ func Test_PartitionUsage_KeyConstrainedOnlyInSubquery_StillFlagged(t *testing.T)
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
-	require.Equal(t, check.SeverityFail, report.Results[0].Severity)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 }
 
 // A table referenced under a different schema must not be attributed to this one.
@@ -474,9 +486,7 @@ func Test_PartitionUsage_CrossSchemaQueryNotAttributed(t *testing.T) {
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 func Test_PartitionUsage_OwnSchemaQualifiedQueryAttributed(t *testing.T) {
@@ -494,8 +504,7 @@ func Test_PartitionUsage_OwnSchemaQualifiedQueryAttributed(t *testing.T) {
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityFail, report.Results[0].Severity)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 }
 
 // A role that cannot read other users' query text gets a warning instead of a
@@ -566,9 +575,8 @@ func Test_PartitionUsage_QueryMissingPartitionKey_Warning(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityWarn, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "1 partitioned table")
+	require.Equal(t, check.SeverityWarn, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "1 partitioned table")
 }
 
 func Test_PartitionUsage_QueryMissingPartitionKey_Fail(t *testing.T) {
@@ -588,8 +596,7 @@ func Test_PartitionUsage_QueryMissingPartitionKey_Fail(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityFail, report.Results[0].Severity)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 }
 
 func Test_PartitionUsage_QueryBelowThreshold_Ignored(t *testing.T) {
@@ -609,8 +616,7 @@ func Test_PartitionUsage_QueryBelowThreshold_Ignored(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 func Test_PartitionUsage_QueryNotReferencingTable_Ignored(t *testing.T) {
@@ -630,8 +636,7 @@ func Test_PartitionUsage_QueryNotReferencingTable_Ignored(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 func Test_PartitionUsage_ExpressionBasedKey_Skipped(t *testing.T) {
@@ -652,8 +657,7 @@ func Test_PartitionUsage_ExpressionBasedKey_Skipped(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should be OK because expression-based keys are skipped
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
 }
 
 func Test_PartitionUsage_MultipleTables(t *testing.T) {
@@ -678,9 +682,8 @@ func Test_PartitionUsage_MultipleTables(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	require.Equal(t, check.SeverityWarn, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "2 partitioned table")
+	require.Equal(t, check.SeverityWarn, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "2 partitioned table")
 }
 
 func Test_PartitionUsage_TablesQueryError(t *testing.T) {
@@ -715,17 +718,105 @@ func Test_PartitionUsage_ExtensionNotInstalled(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 2, len(report.Results)) // seq scan check + extension warning
 
-	// Check that seq scan analysis still ran (runs first, doesn't need extension)
-	seqScanFinding := report.Results[0]
-	require.Equal(t, findingIDHighSeqScanRatio, seqScanFinding.ID)
+	// Check that seq scan analysis still ran (doesn't need the extension)
+	seqScanFinding := findingByID(t, report, findingIDHighSeqScanRatio)
 	require.Equal(t, check.SeverityWarn, seqScanFinding.Severity)
 
-	// Check extension warning finding (runs after seq scan check)
-	extensionFinding := report.Results[1]
-	require.Equal(t, findingIDExtensionUnavailable, extensionFinding.ID)
+	extensionFinding := findingByID(t, report, findingIDExtensionUnavailable)
 	require.Equal(t, check.SeverityWarn, extensionFinding.Severity)
 	require.Contains(t, extensionFinding.Details, "cannot analyze query patterns")
 }
+
+// The offending statements are surfaced as an informational finding so an
+// engineer can investigate without hand-writing pg_stat_statements queries.
+func Test_PartitionUsage_ProblemQueryExamples(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(`SELECT * FROM "orders" WHERE "customer_id" = $1`, 500, 400_000),
+			makeQueryStats(`SELECT * FROM "orders" WHERE "status" = $1`, 900, 900_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	examples := findingByID(t, report, findingIDPartitionKeyExamples)
+
+	// INFO never escalates: the report severity comes from the sibling finding,
+	// which fails here because the two shapes exceed 1000 combined calls.
+	require.Equal(t, check.SeverityInfo, examples.Severity)
+	require.Equal(t, check.SeverityFail, report.Severity)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
+
+	require.NotNil(t, examples.Table)
+	require.Equal(t, []string{"Table", "Calls", "Total Time", "Query ID", "Query"}, examples.Table.Headers)
+	require.Len(t, examples.Table.Rows, 2)
+	require.Equal(t, 3, examples.Table.MaxRowsBrief, "brief output shows three, verbose shows all")
+
+	// Worst by total time first.
+	require.Contains(t, examples.Table.Rows[0].Cells[4], `"status" = $1`)
+	require.Contains(t, examples.Table.Rows[1].Cells[4], `"customer_id" = $1`)
+
+	// Original casing is preserved for display, and the queryid is shown so the
+	// full text can be looked up.
+	require.Contains(t, examples.Table.Rows[0].Cells[4], "SELECT")
+	require.Equal(t, "12345", examples.Table.Rows[0].Cells[3])
+	require.Contains(t, examples.Details, "pg_stat_statements WHERE queryid")
+}
+
+func Test_PartitionUsage_NoProblemQueries_NoExamplesFinding(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM orders WHERE created_at > $1", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	for _, result := range report.Results {
+		require.NotEqual(t, findingIDPartitionKeyExamples, result.ID)
+	}
+}
+
+// Long ORM statements must not stretch the table beyond a terminal line.
+func Test_PartitionUsage_ExampleQueryTextIsClipped(t *testing.T) {
+	t.Parallel()
+
+	longQuery := `SELECT "orders"."id", "orders"."reference", "orders"."customer_id", ` +
+		`"orders"."provider_id", "orders"."employee_id", "orders"."location_id" ` +
+		`FROM "orders" WHERE "orders"."status" = $1`
+	require.Greater(t, len(longQuery), 80, "fixture must exceed the clip width")
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(longQuery, 500, 400_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	examples := findingByID(t, report, findingIDPartitionKeyExamples)
+	cell := examples.Table.Rows[0].Cells[4]
+
+	require.LessOrEqual(t, len([]rune(cell)), 80)
+	require.True(t, strings.HasSuffix(cell, "…"), "clipped text is marked with an ellipsis")
+}
+
 func Test_PartitionUsage_Metadata(t *testing.T) {
 	t.Parallel()
 
@@ -766,8 +857,7 @@ func Test_PartitionUsage_TableOutput(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(report.Results))
-	result := report.Results[0]
+	result := keyFinding(t, report)
 
 	require.NotNil(t, result.Table)
 	require.Equal(t, []string{"Table", "Partition Key", "Partitions", "Problem Queries", "Total Calls", "Total Time"}, result.Table.Headers)
@@ -922,11 +1012,10 @@ func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
-			require.Equal(t, 1, len(report.Results))
 			if tc.shouldBeOK {
-				require.Equal(t, check.SeverityPass, report.Results[0].Severity, "Expected OK for: %s", tc.name)
+				require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity, "Expected OK for: %s", tc.name)
 			} else {
-				require.NotEqual(t, check.SeverityPass, report.Results[0].Severity, "Expected not OK for: %s", tc.name)
+				require.NotEqual(t, check.SeverityPass, keyFinding(t, report).Severity, "Expected not OK for: %s", tc.name)
 			}
 		})
 	}

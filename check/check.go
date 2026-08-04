@@ -124,6 +124,10 @@ type Finding struct {
 type Table struct {
 	Headers []string
 	Rows    []TableRow
+	// MaxRowsBrief caps how many rows are shown at the default detail level;
+	// --detail verbose always shows every row. Zero means the renderer's
+	// default cap applies.
+	MaxRowsBrief int
 }
 
 type TableRow struct {

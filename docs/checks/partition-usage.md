@@ -40,6 +40,16 @@ Identifies partitioned tables where high-frequency queries don't use the partiti
 - Warning: >100 calls without partition key, OR total execution time >5 minutes
 - Critical: >1000 calls without partition key, OR total execution time >1 hour
 
+### partition-key-examples
+
+Lists the statements behind `partition-key-unused` so they can be investigated without querying `pg_stat_statements` by hand: table, calls, total time, `queryid`, and the statement clipped to one line.
+
+Always INFO — it is evidence for `partition-key-unused`, not a health verdict, and never escalates the report. The default detail level shows the three costliest; `--detail verbose` shows every one. Statement text is clipped, so read one in full with:
+
+```sql
+SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;
+```
+
 ### high-seq-scan-ratio
 
 Identifies partitioned tables with excessive sequential scans compared to index scans, indicating queries may not be using partition pruning effectively.

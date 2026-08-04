@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`partition-usage`**: new `partition-key-examples` INFO finding listing the statements behind `partition-key-unused` — table, calls, total time, `queryid` and clipped text — so they can be investigated without querying `pg_stat_statements` by hand. Three at the default detail level, all with `--detail verbose` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
 ### Fixed
