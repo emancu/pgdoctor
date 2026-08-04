@@ -42,6 +42,12 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 		onReport = func(*check.Report) {}
 	}
 
+	// Discover installed extensions once, so no check has to query pg_extension
+	// itself. A consumer that already put a set on the context keeps it.
+	if check.ExtensionsFromContext(ctx) == nil {
+		ctx = check.ContextWithExtensions(ctx, installedExtensions(ctx, conn))
+	}
+
 	for _, pkg := range opts.Checks {
 		checker := pkg.New(conn, opts.Config)
 
@@ -50,26 +56,68 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 		elapsed := time.Since(start)
 
 		if err != nil {
-			metadata := checker.Metadata()
-			report = check.NewReport(metadata)
-			report.Severity = check.SeveritySkip
-
-			detail := err.Error()
-			if isStatementTimeout(err) {
-				detail = "query cancelled by statement_timeout"
-			}
-
-			report.AddFinding(check.Finding{
-				ID:       "error",
-				Name:     "Check Error",
-				Severity: check.SeveritySkip,
-				Details:  detail,
-			})
+			report = skipped(checker, report, err)
 		}
 
 		report.Duration = elapsed
 		onReport(report)
 	}
+}
+
+// installedExtensions reads the installed extension set. A failure (or a nil
+// conn, as check-level tests pass) leaves availability unknown rather than
+// reporting every extension as absent, so checks are never skipped on a guess.
+func installedExtensions(ctx context.Context, conn db.DBTX) check.Extensions {
+	if conn == nil {
+		return nil
+	}
+
+	rows, err := db.New(conn).InstalledExtensions(ctx)
+	if err != nil {
+		return nil
+	}
+
+	extensions := make(check.Extensions, len(rows))
+	for _, row := range rows {
+		extensions[row.Name] = row.Version
+	}
+
+	return extensions
+}
+
+// skipped builds the report for a check that returned an error.
+//
+// A check may return findings alongside its error, for work it completed before
+// the failure — partition-usage analyzes pg_stat_user_tables before it needs
+// pg_stat_statements. Those findings are kept and the SKIP is recorded as one
+// more finding: SeveritySkip sorts below SeverityPass, so it documents what did
+// not run without lowering what did. Only a check that produced nothing skips
+// wholesale.
+func skipped(checker check.Checker, report *check.Report, err error) *check.Report {
+	if report == nil || len(report.Results) == 0 {
+		report = check.NewReport(checker.Metadata())
+		report.Severity = check.SeveritySkip
+	}
+
+	finding := check.Finding{
+		ID:       "error",
+		Name:     "Check Error",
+		Severity: check.SeveritySkip,
+		Details:  err.Error(),
+	}
+
+	switch {
+	case isStatementTimeout(err):
+		finding.Details = "query cancelled by statement_timeout"
+	case isMissingExtension(err):
+		// Uniform identity and wording for every check that needs an extension.
+		finding.ID = "extension-unavailable"
+		finding.Name = "Extension Unavailable"
+	}
+
+	report.AddFinding(finding)
+
+	return report
 }
 
 // Filter returns checks matching the only/ignored filters.
@@ -201,4 +249,11 @@ func AllFilters() []string {
 func isStatementTimeout(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "57014"
+}
+
+// isMissingExtension checks if the error is a check reporting that an extension
+// it needs is not installed.
+func isMissingExtension(err error) bool {
+	var missing *check.MissingExtensionError
+	return errors.As(err, &missing)
 }

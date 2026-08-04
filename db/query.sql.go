@@ -339,21 +339,6 @@ func (q *Queries) DuplicateIndexes(ctx context.Context) ([]DuplicateIndexesRow, 
 	return items, nil
 }
 
-const hasPgStatStatements = `-- name: HasPgStatStatements :one
-SELECT EXISTS(
-  SELECT 1 FROM pg_extension
-  WHERE extname = 'pg_stat_statements'
-)
-`
-
-// Checks if pg_stat_statements extension is installed.
-func (q *Queries) HasPgStatStatements(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPgStatStatements)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one
 SELECT COUNT(*)::bigint
 FROM pg_stat_statements
@@ -773,6 +758,42 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 			&i.TableWrites,
 			&i.StatsReset,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const installedExtensions = `-- name: InstalledExtensions :many
+SELECT
+  extname::text AS name
+  , extversion::text AS version
+FROM pg_catalog.pg_extension
+`
+
+type InstalledExtensionsRow struct {
+	Name    string
+	Version string
+}
+
+// Lists the extensions installed in the current database, with their version.
+// Runner-level query, not owned by any single check: pgdoctor.Run() executes it
+// once per run and publishes the result on the context, so no check has to
+// discover extension availability for itself.
+func (q *Queries) InstalledExtensions(ctx context.Context) ([]InstalledExtensionsRow, error) {
+	rows, err := q.db.Query(ctx, installedExtensions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InstalledExtensionsRow
+	for rows.Next() {
+		var i InstalledExtensionsRow
+		if err := rows.Scan(&i.Name, &i.Version); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

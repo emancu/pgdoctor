@@ -106,6 +106,117 @@ func fakePackage(id string, category check.Category, report *check.Report, err e
 	}
 }
 
+// reportWithFinding builds a report carrying one finding, standing in for the
+// work a check completed before it failed.
+func reportWithFinding(id string, severity check.Severity) *check.Report {
+	report := check.NewReport(check.Metadata{CheckID: id, Name: id, Category: check.CategoryConfigs})
+	report.AddFinding(check.Finding{ID: "partial", Name: "Partial", Severity: severity})
+
+	return report
+}
+
+// A check that needs an absent extension reports it as an error, and the runner
+// turns that into a uniform SKIP finding — no check assigns SeveritySkip itself.
+func TestRun_MissingExtensionSkipsCheck(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("query pattern analysis: %w",
+		&check.MissingExtensionError{Extension: "pg_stat_statements"})
+
+	var reports []*check.Report
+	Run(context.Background(), nil, Options{
+		Checks:   []check.Package{fakePackage("needs-ext", check.CategoryPerformance, nil, err)},
+		OnReport: Collect(&reports),
+	})
+	require.Len(t, reports, 1)
+
+	assert.Equal(t, check.SeveritySkip, reports[0].Severity)
+	require.Len(t, reports[0].Results, 1)
+	assert.Equal(t, "extension-unavailable", reports[0].Results[0].ID)
+	assert.Equal(t, "Extension Unavailable", reports[0].Results[0].Name)
+	assert.Equal(t, check.SeveritySkip, reports[0].Results[0].Severity)
+	assert.Contains(t, reports[0].Results[0].Details, "pg_stat_statements is not installed")
+}
+
+// A check may return findings alongside its error, for subchecks that completed
+// before the failure. Those are kept, and the SKIP is recorded as one more
+// finding without lowering the report's severity.
+func TestRun_KeepsPartialFindingsOnError(t *testing.T) {
+	t.Parallel()
+
+	partial := reportWithFinding("partly-ran", check.SeverityWarn)
+	err := &check.MissingExtensionError{Extension: "pg_stat_statements"}
+
+	var reports []*check.Report
+	Run(context.Background(), nil, Options{
+		Checks:   []check.Package{fakePackage("partly-ran", check.CategoryPerformance, partial, err)},
+		OnReport: Collect(&reports),
+	})
+	require.Len(t, reports, 1)
+
+	assert.Equal(t, check.SeverityWarn, reports[0].Severity, "the SKIP must not mask a real finding")
+	require.Len(t, reports[0].Results, 2)
+	assert.Equal(t, "partial", reports[0].Results[0].ID)
+	assert.Equal(t, "extension-unavailable", reports[0].Results[1].ID)
+	assert.Equal(t, check.SeveritySkip, reports[0].Results[1].Severity)
+}
+
+// An empty report is nothing to preserve, so the check skips wholesale.
+func TestRun_EmptyPartialReportSkipsWholesale(t *testing.T) {
+	t.Parallel()
+
+	empty := check.NewReport(check.Metadata{CheckID: "empty", Name: "empty", Category: check.CategoryConfigs})
+
+	var reports []*check.Report
+	Run(context.Background(), nil, Options{
+		Checks:   []check.Package{fakePackage("empty", check.CategoryConfigs, empty, fmt.Errorf("boom"))},
+		OnReport: Collect(&reports),
+	})
+	require.Len(t, reports, 1)
+
+	assert.Equal(t, check.SeveritySkip, reports[0].Severity)
+	require.Len(t, reports[0].Results, 1)
+	assert.Equal(t, "error", reports[0].Results[0].ID)
+}
+
+// ctxChecker records the context its Check received.
+type ctxChecker struct {
+	metadata check.Metadata
+	seen     context.Context
+}
+
+func (c *ctxChecker) Metadata() check.Metadata { return c.metadata }
+
+func (c *ctxChecker) Check(ctx context.Context) (*check.Report, error) {
+	c.seen = ctx
+	report := check.NewReport(c.metadata)
+	report.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityPass})
+
+	return report, nil
+}
+
+// A consumer that discovered extensions itself keeps its set; the runner does
+// not overwrite it.
+func TestRun_KeepsConsumerSuppliedExtensions(t *testing.T) {
+	t.Parallel()
+
+	meta := check.Metadata{CheckID: "reads-ctx", Name: "reads-ctx", Category: check.CategoryConfigs}
+	checker := &ctxChecker{metadata: meta}
+
+	extensions := check.Extensions{"pg_buffercache": "1.5"}
+	ctx := check.ContextWithExtensions(context.Background(), extensions)
+
+	Run(ctx, nil, Options{
+		Checks: []check.Package{{
+			Metadata: func() check.Metadata { return meta },
+			New:      func(_ db.DBTX, _ check.Config) check.Checker { return checker },
+		}},
+	})
+
+	require.NotNil(t, checker.seen)
+	assert.Equal(t, extensions, check.ExtensionsFromContext(checker.seen))
+}
+
 func TestRun_ContinuesAfterStatementTimeout(t *testing.T) {
 	t.Parallel()
 

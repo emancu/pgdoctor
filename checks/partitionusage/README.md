@@ -7,7 +7,7 @@ Detects queries on partitioned tables that don't use partition keys in their WHE
 - **pg_stat_statements >= 1.9** (PostgreSQL 14+) for query pattern analysis; older versions lack the `toplevel` column and the check reports SKIP
 - PostgreSQL 15+
 
-If `pg_stat_statements` is not installed, this check will report a WARNING and skip query pattern analysis. The sequential scan analysis will still run as it uses `pg_stat_user_tables` statistics.
+If `pg_stat_statements` is not installed, query pattern analysis reports SKIP. The sequential scan analysis still runs — it reads `pg_stat_user_tables` — and any finding it produces is reported alongside the skip.
 
 To enable the extension:
 

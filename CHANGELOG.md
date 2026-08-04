@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **check**: extension availability is discovered once per run and published on the context. `check.RequireExtension(ctx, name)` returns a `*check.MissingExtensionError` that the runner turns into a uniform `extension-unavailable` SKIP finding, so a check needing `pg_buffercache` or `pgstattuple` no longer hand-rolls its own `pg_extension` query and wording. `check.ExtensionsFromContext` exposes the set (with versions) to checks that adapt rather than skip ([#40](https://github.com/emancu/pgdoctor/pull/40)).
 
 ### Fixed
 
@@ -37,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`cache-efficiency`**: `cache-hit-ratio` is now informational, no longer escalates the report, and reports only below a 60% cache-hit ratio ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **`cache-efficiency`**: `index-cache-ratio` moved from `index-usage`; the old `index-usage/index-cache-ratio` finding ID is retired — consumers must switch to `cache-efficiency/index-cache-ratio` ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **`cache-efficiency`**: `index-cache-ratio` now lists only hot indexes (top-20 by scans or ≥1% of scan traffic, and ≥10,000 scans) over 500MB with a cache-hit ratio below 75% ([#37](https://github.com/emancu/pgdoctor/pull/37)).
+- **runner**: a check may now return findings alongside its error. The findings are kept and the SKIP is recorded as one more finding, instead of the whole report being discarded — so a partially-blocked check no longer has to choose between losing real signal and mislabelling it. A check that produced nothing still skips wholesale ([#40](https://github.com/emancu/pgdoctor/pull/40)).
+- **`partition-usage`**: missing `pg_stat_statements` now reports SKIP for the query pattern analysis instead of its own WARN. The `high-seq-scan-ratio` finding reads `pg_stat_user_tables` and is still reported; the `extension-unavailable` WARN finding is retired ([#40](https://github.com/emancu/pgdoctor/pull/40)).
 - **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage, FAIL from 85% ([#31](https://github.com/emancu/pgdoctor/pull/31)).
 - **`index-usage`**: `index-cache-ratio` is now informational and no longer escalates the report ([#34](https://github.com/emancu/pgdoctor/pull/34)).
 - **`index-usage`**: `unused-indexes` reports only indexes over 500MB and discloses the statistics window ([#34](https://github.com/emancu/pgdoctor/pull/34)).

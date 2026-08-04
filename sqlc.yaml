@@ -3,6 +3,8 @@ sql:
   # Core checks - generate all to shared db package
   - engine: "postgresql"
     queries:
+      # Runner-level queries (extension discovery), not owned by any check.
+      - "check"
       - "checks/pgversion"
       - "checks/invalidindexes"
       - "checks/sessionsettings"

@@ -7,6 +7,7 @@ pgdoctor is a PostgreSQL health-check CLI and Go library. This guide helps AI ag
 ```
 pgdoctor/
 ├── check/              # Core types (Metadata, Report, Finding, Severity, Checker interface)
+│   └── query.sql       #   - Runner-level queries (extension discovery), not owned by a check
 ├── db/                 # Generated database code (shared by ALL checks via sqlc)
 ├── checks/             # Individual health checks (self-contained)
 │   └── {checkname}/    # Each check is a package with:
@@ -217,6 +218,32 @@ Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):
 - `index-usage` - Uses `pg_stat_user_indexes` for scan counts
 - `table-seq-scans` - Uses `pg_stat_user_tables` for scan ratios
 - `cache-efficiency` - Uses `pg_stat_database` for cache hit ratios
+
+### Extension-Dependent Checks
+
+Extension availability is discovered once per run by `pgdoctor.Run()` and published on the context. **Never query `pg_extension` from a check.**
+
+```go
+if err := check.RequireExtension(ctx, "pg_stat_statements"); err != nil {
+    return nil, fmt.Errorf("query pattern analysis: %w", err)
+}
+```
+
+Returning the error is what makes the check SKIP — the runner recognizes `*check.MissingExtensionError` and injects a uniform `extension-unavailable` SKIP finding. A check never assigns `SeveritySkip` itself and never writes its own missing-extension finding.
+
+When only part of a check needs the extension, return the report **alongside** the error. Findings already added are kept, and the SKIP is recorded as one more finding — `SeveritySkip` sorts below `SeverityPass`, so it documents what did not run without lowering what did. `partition-usage` does this: its sequential scan analysis reads `pg_stat_user_tables` and stands on its own.
+
+```go
+checkSequentialScans(tables, report)  // needs no extension
+
+if err := check.RequireExtension(ctx, "pg_stat_statements"); err != nil {
+    return report, fmt.Errorf("query pattern analysis: %w", err)
+}
+```
+
+A check that produced no findings skips wholesale, exactly as if it had returned `nil`.
+
+`check.ExtensionsFromContext(ctx)` is also available directly, for a check that adapts rather than skips (`Has`, `Version`). A nil set means availability is **unknown** — no discovery ran, as in unit tests — and `RequireExtension` deliberately does not block a check on unknown availability.
 
 ### Instance Metadata Context
 

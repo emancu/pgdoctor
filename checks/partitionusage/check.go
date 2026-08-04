@@ -19,8 +19,11 @@ var querySQL string
 //go:embed README.md
 var readme string
 
+// requiredExtension is what the query pattern analysis needs. The sequential
+// scan analysis reads pg_stat_user_tables and needs nothing.
+const requiredExtension = "pg_stat_statements"
+
 type PartitionUsageQueries interface {
-	HasPgStatStatements(context.Context) (bool, error)
 	HiddenQueryTextCount(context.Context) (pgtype.Int8, error)
 	PartitionedTablesWithKeys(context.Context) ([]db.PartitionedTablesWithKeysRow, error)
 	QueryStatsFromStatStatements(context.Context) ([]db.QueryStatsFromStatStatementsRow, error)
@@ -93,20 +96,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	checkSequentialScans(partitionedTables, report)
 
-	hasExtension, err := c.queries.HasPgStatStatements(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("checking pg_stat_statements extension: %w", err)
-	}
-
-	if !hasExtension {
-		report.AddFinding(check.Finding{
-			ID:       "extension-unavailable",
-			Name:     "pg_stat_statements Extension Not Available",
-			Severity: check.SeverityWarn,
-			Details:  fmt.Sprintf("Found %d partitioned table(s) but cannot analyze query patterns without pg_stat_statements extension", len(partitionedTables)),
-		})
-
-		return report, nil
+	// Everything below reads pg_stat_statements. Returning the error is what
+	// makes the check SKIP; returning the report with it keeps the sequential
+	// scan findings, which came from pg_stat_user_tables and stand on their own.
+	if err := check.RequireExtension(ctx, requiredExtension); err != nil {
+		return report, fmt.Errorf("query pattern analysis on %d partitioned table(s): %w", len(partitionedTables), err)
 	}
 
 	hiddenQueries, err := c.queries.HiddenQueryTextCount(ctx)

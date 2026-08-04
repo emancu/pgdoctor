@@ -16,22 +16,19 @@ import (
 
 // Finding IDs.
 const (
-	findingIDPartitionKeyUnused   = "partition-key-unused"
-	findingIDHighSeqScanRatio     = "high-seq-scan-ratio"
-	findingIDJoinMissingPartKey   = "join-missing-partition-key"
-	findingIDExtensionUnavailable = "extension-unavailable"
-	findingIDQueryTextRestricted  = "query-text-restricted"
+	findingIDPartitionKeyUnused  = "partition-key-unused"
+	findingIDHighSeqScanRatio    = "high-seq-scan-ratio"
+	findingIDJoinMissingPartKey  = "join-missing-partition-key"
+	findingIDQueryTextRestricted = "query-text-restricted"
 )
 
 // Mock queryer for testing.
 type mockQueryer struct {
 	tables        []db.PartitionedTablesWithKeysRow
 	queryStats    []db.QueryStatsFromStatStatementsRow
-	hasExtension  *bool // Use pointer so we can distinguish between unset and false
 	hiddenQueries int64
 	tablesErr     error
 	statsErr      error
-	extensionErr  error
 	hiddenErr     error
 }
 
@@ -40,17 +37,6 @@ func (m *mockQueryer) HiddenQueryTextCount(context.Context) (pgtype.Int8, error)
 		return pgtype.Int8{}, m.hiddenErr
 	}
 	return pgtype.Int8{Int64: m.hiddenQueries, Valid: true}, nil
-}
-
-func (m *mockQueryer) HasPgStatStatements(context.Context) (bool, error) {
-	if m.extensionErr != nil {
-		return false, m.extensionErr
-	}
-	// Default to true (extension available) unless explicitly set to false
-	if m.hasExtension == nil {
-		return true, nil
-	}
-	return *m.hasExtension, nil
 }
 
 func (m *mockQueryer) PartitionedTablesWithKeys(context.Context) ([]db.PartitionedTablesWithKeysRow, error) {
@@ -798,31 +784,89 @@ func Test_PartitionUsage_TablesQueryError(t *testing.T) {
 	require.Contains(t, err.Error(), "partition-usage")
 }
 
+// withoutExtensions returns a context whose extension set is known and empty,
+// as it would be on a database without pg_stat_statements. An empty set is not
+// the same as the nil set every other test here uses, which means "availability
+// unknown" and lets the query analysis run against the mock.
+func withoutExtensions() context.Context {
+	return check.ContextWithExtensions(context.Background(), check.Extensions{})
+}
+
+// Without pg_stat_statements the query analysis cannot run, so the check reports
+// a missing-extension error and the runner turns it into SKIP. The sequential
+// scan findings read pg_stat_user_tables and stand on their own, so they are
+// returned alongside the error rather than discarded.
 func Test_PartitionUsage_ExtensionNotInstalled(t *testing.T) {
 	t.Parallel()
 
-	hasExtFalse := false
 	queryer := &mockQueryer{
 		tables: []db.PartitionedTablesWithKeysRow{
 			makePartitionedTableWithScans("public", "orders", "created_at", 2000, 100),
 		},
-		hasExtension: &hasExtFalse,
 	}
 
-	checker := partitionusage.New(queryer)
-	report, err := checker.Check(context.Background())
+	report, err := partitionusage.New(queryer).Check(withoutExtensions())
+
+	var missing *check.MissingExtensionError
+	require.ErrorAs(t, err, &missing)
+	require.Equal(t, "pg_stat_statements", missing.Extension)
+	require.Contains(t, err.Error(), "1 partitioned table(s)")
+
+	require.NotNil(t, report, "seq scan findings must survive the missing extension")
+	require.Len(t, report.Results, 1)
+	require.Equal(t, check.SeverityWarn, findingByID(t, report, findingIDHighSeqScanRatio).Severity)
+}
+
+// With nothing to keep, the check hands back an empty report and the runner
+// skips it wholesale.
+func Test_PartitionUsage_ExtensionNotInstalled_NoOtherFindings(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(withoutExtensions())
+
+	require.Error(t, err)
+	require.Empty(t, report.Results)
+}
+
+// No partitioned tables means nothing to analyze, so the check passes without
+// ever needing the extension.
+func Test_PartitionUsage_ExtensionNotInstalled_NoPartitionedTables(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{tables: []db.PartitionedTablesWithKeysRow{}}
+
+	report, err := partitionusage.New(queryer).Check(withoutExtensions())
 
 	require.NoError(t, err)
-	require.Equal(t, check.SeverityWarn, report.Severity)
-	require.Equal(t, 2, len(report.Results)) // seq scan check + extension warning
+	require.Equal(t, check.SeverityPass, report.Severity)
+}
 
-	// Check that seq scan analysis still ran (doesn't need the extension)
-	seqScanFinding := findingByID(t, report, findingIDHighSeqScanRatio)
-	require.Equal(t, check.SeverityWarn, seqScanFinding.Severity)
+// The extension being installed is the ordinary path: analysis runs.
+func Test_PartitionUsage_ExtensionInstalled(t *testing.T) {
+	t.Parallel()
 
-	extensionFinding := findingByID(t, report, findingIDExtensionUnavailable)
-	require.Equal(t, check.SeverityWarn, extensionFinding.Severity)
-	require.Contains(t, extensionFinding.Details, "cannot analyze query patterns")
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(`SELECT * FROM orders WHERE customer_id = $1`, 5000, 100),
+		},
+	}
+
+	ctx := check.ContextWithExtensions(context.Background(),
+		check.Extensions{"pg_stat_statements": "1.11"})
+
+	report, err := partitionusage.New(queryer).Check(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 }
 
 // The offending statements are listed in the finding itself, so an engineer can
