@@ -1122,12 +1122,12 @@ WHERE
   dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
   AND toplevel
   AND calls > 10
-  AND query NOT LIKE 'COPY%'
-  AND query NOT LIKE 'SET %'
-  AND query !~ '^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PREPARE|DEALLOCATE)'
-  AND query !~ '^(VACUUM|ANALYZE|REINDEX|CLUSTER)'
-  AND query !~ '^(CREATE|DROP|ALTER|TRUNCATE)'
-  AND (query ILIKE '%SELECT%' OR query ILIKE '%UPDATE%' OR query ILIKE '%DELETE%')
+  -- Only statements that scan the table can prune partitions, so match on the
+  -- leading keyword. An INSERT routes each row to a partition by its key value
+  -- and never prunes; matching '%UPDATE%' anywhere in the text used to accept
+  -- every INSERT that carried an "updated_at" column. Anchoring here also
+  -- excludes utility statements (COPY, SET, VACUUM, transaction control, DDL).
+  AND query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'
 ORDER BY total_exec_time DESC
 LIMIT 500
 `

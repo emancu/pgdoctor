@@ -692,6 +692,10 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	require.Contains(t, metadata.SQL, `LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query`)
 	require.Contains(t, metadata.SQL, "AND toplevel")
 	require.Contains(t, metadata.SQL, "d.datname = current_database()")
+	// Statement type is matched on the leading keyword. Substring matching let
+	// every INSERT carrying an "updated_at" column through as an "UPDATE".
+	require.Contains(t, metadata.SQL, `query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'`)
+	require.NotContains(t, metadata.SQL, "query ILIKE '%UPDATE%'")
 }
 
 func Test_PartitionUsage_TableOutput(t *testing.T) {

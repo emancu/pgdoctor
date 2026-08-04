@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
 - **`partition-usage`**: analyzes complete `pg_stat_statements` query text (current database, top-level statements only), matches tables and partition keys on SQL identifier boundaries, and requires a pruning-capable comparison — partition-leaf queries, lookalike column names, and `ORDER BY`-only key mentions no longer skew results ([#25](https://github.com/emancu/pgdoctor/pull/25)).
+- **`partition-usage`**: no longer reports `INSERT` statements as missing the partition key. Statement type is matched on the leading keyword, where before `ILIKE '%UPDATE%'` accepted every insert carrying an `updated_at` column — which on Rails and Ecto schemas meant the highest-traffic writes on every partitioned table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
 ### Removed
 

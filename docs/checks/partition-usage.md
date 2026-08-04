@@ -111,6 +111,10 @@ The key must appear in a comparison that can drive partition pruning, and which 
 
 Mentions in `ORDER BY` or the select list don't count, and neither do `<>` or `IS NOT NULL`, which prune nothing. A comparison written with the key on the right (`$1 <= created_at`) counts — PostgreSQL commutes it.
 
+### Only scanning statements are analyzed
+
+Just `SELECT`, `UPDATE`, `DELETE` and `WITH` statements are considered, matched on the leading keyword. An `INSERT` routes each row to a partition by its key value and has nothing to prune, so including it would report every write as a problem. `INSERT ... SELECT` is excluded too, so a partitioned table scanned only as an insert source is not analyzed.
+
 ### Query text visibility
 
 Only superusers and roles with `pg_read_all_stats` can read other users' query text; everyone else sees `<insufficient privilege>`. When any entry is hidden, the check reports `query-text-restricted` so a partial analysis is not mistaken for a clean bill of health.
