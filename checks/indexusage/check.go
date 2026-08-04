@@ -181,14 +181,14 @@ func reportLowUsage(lowUsage []db.IndexUsageStatsRow, report *check.Report) {
 				check.FormatNumber(row.IdxScan.Int64),
 				check.FormatNumber(row.TableWrites.Int64),
 			},
-			Severity: check.SeverityWarn,
+			Severity: check.SeverityInfo,
 		})
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "low-usage-indexes",
 		Name:     "Low Usage Indexes",
-		Severity: check.SeverityWarn,
+		Severity: check.SeverityInfo,
 		Details:  fmt.Sprintf("Found %d indexes with sustained low read rates (>500MB, >=10k writes, <1 scan/week)", len(lowUsage)),
 		Table: &check.Table{
 			Headers: []string{"Table", "Index", "Size", "Scans", "Writes"},
