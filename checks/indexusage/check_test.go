@@ -215,7 +215,7 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 			low := finding(t, report, "low-usage-indexes")
 
 			if tt.listed {
-				require.Equal(t, check.SeverityWarn, low.Severity)
+				require.Equal(t, check.SeverityInfo, low.Severity)
 				require.Len(t, low.Table.Rows, 1)
 			} else {
 				require.Equal(t, check.SeverityPass, low.Severity)
@@ -257,5 +257,5 @@ func Test_MixedFindings_ReportWarns(t *testing.T) {
 	require.Len(t, report.Results, 2)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, check.SeverityWarn, finding(t, report, "unused-indexes").Severity)
-	require.Equal(t, check.SeverityWarn, finding(t, report, "low-usage-indexes").Severity)
+	require.Equal(t, check.SeverityInfo, finding(t, report, "low-usage-indexes").Severity)
 }

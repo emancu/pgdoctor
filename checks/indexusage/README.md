@@ -22,7 +22,7 @@ Indexes larger than 500 MB with more than 10,000 table writes and a sustained sc
 over a statistics window of at least 30 days.
 These indexes have high maintenance costs relative to their query benefits.
 
-**Severity**: WARN
+**Severity**: INFO
 
 ## Statistics Requirements
 
