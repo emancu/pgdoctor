@@ -5,9 +5,11 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 //go:embed query.sql
@@ -17,12 +19,12 @@ var querySQL string
 var readme string
 
 const (
-	cacheLowThreshold = 90.0
+	cacheLowThreshold = 60.0
 
-	indexCacheFailThreshold = 90.0
-	indexCacheWarnThreshold = 95.0
-	indexCacheMinSizeMB     = 10
-	indexCacheFailSizeMB    = 100
+	indexCacheRatioThreshold    = 75.0
+	indexCacheSizeFloorBytes    = 500 * check.MiB
+	indexCacheMinScansPerDay    = 100.0
+	indexCacheLifetimeScanFloor = 10000
 )
 
 type CacheEfficiencyQueries interface {
@@ -119,11 +121,14 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 
 		ratio, _ := row.CacheHitRatio.Float64Value()
 		cacheRatio := ratio.Float64
-		sizeMB := float64(row.IndexSizeBytes.Int64) / check.MiB
 
-		lowOnLarge := cacheRatio < indexCacheFailThreshold && sizeMB > indexCacheFailSizeMB
-		lowOnMedium := cacheRatio < indexCacheWarnThreshold && sizeMB > indexCacheMinSizeMB
-		if !lowOnLarge && !lowOnMedium {
+		if cacheRatio >= indexCacheRatioThreshold {
+			continue
+		}
+		if row.IndexSizeBytes.Int64 < indexCacheSizeFloorBytes {
+			continue
+		}
+		if !indexFrequentlyUsed(row.IdxScan.Int64, row.StatsReset) {
 			continue
 		}
 
@@ -150,10 +155,21 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		ID:       "index-cache-ratio",
 		Name:     "Index Cache Efficiency",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("Found %d indexes with low cache hit ratios (<90%% on >100MB, <95%% on >10MB)", len(tableRows)),
+		Details:  fmt.Sprintf("Found %d frequently-scanned indexes over 500MB with cache hit ratio below 75%%", len(tableRows)),
 		Table: &check.Table{
 			Headers: []string{"Index", "Size", "Hit %"},
 			Rows:    tableRows,
 		},
 	})
+}
+
+// indexFrequentlyUsed gates on scan rate over the stats window; a NULL or
+// sub-day window falls back to the lifetime scan count.
+func indexFrequentlyUsed(idxScan int64, statsReset pgtype.Timestamptz) bool {
+	if statsReset.Valid {
+		if windowDays := time.Since(statsReset.Time).Hours() / 24; windowDays >= 1 {
+			return float64(idxScan)/windowDays >= indexCacheMinScansPerDay
+		}
+	}
+	return idxScan >= indexCacheLifetimeScanFloor
 }

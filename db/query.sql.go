@@ -656,26 +656,32 @@ func (q *Queries) IndexBloat(ctx context.Context) ([]IndexBloatRow, error) {
 
 const indexCacheEfficiency = `-- name: IndexCacheEfficiency :many
 SELECT
-  (schemaname || '.' || indexrelname)::text AS index_name
-  , pg_relation_size(indexrelid) AS index_size_bytes
+  (psio.schemaname || '.' || psio.indexrelname)::text AS index_name
+  , pg_relation_size(psio.indexrelid) AS index_size_bytes
+  , coalesce(psi.idx_scan, 0) AS idx_scan
   , CASE
-    WHEN coalesce(idx_blks_hit, 0) + coalesce(idx_blks_read, 0) = 0 THEN NULL
-    ELSE round(100.0 * idx_blks_hit / (idx_blks_hit + idx_blks_read), 2)
+    WHEN coalesce(psio.idx_blks_hit, 0) + coalesce(psio.idx_blks_read, 0) = 0 THEN NULL
+    ELSE round(100.0 * psio.idx_blks_hit / (psio.idx_blks_hit + psio.idx_blks_read), 2)
   END AS cache_hit_ratio
-FROM pg_statio_user_indexes
+  , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
+FROM pg_statio_user_indexes AS psio
+INNER JOIN pg_stat_user_indexes AS psi ON psio.indexrelid = psi.indexrelid
 WHERE
-  schemaname = 'public'
-  AND pg_relation_size(indexrelid) > 10 * 1024 * 1024
-ORDER BY pg_relation_size(indexrelid) DESC
+  psio.schemaname = 'public'
+  AND pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024
+ORDER BY pg_relation_size(psio.indexrelid) DESC
 `
 
 type IndexCacheEfficiencyRow struct {
 	IndexName      pgtype.Text
 	IndexSizeBytes pgtype.Int8
+	IdxScan        pgtype.Int8
 	CacheHitRatio  pgtype.Numeric
+	StatsReset     pgtype.Timestamptz
 }
 
-// Per-index buffer cache hit ratios. Low ratios on large indexes indicate frequent disk I/O.
+// Per-index buffer cache hit ratios with scan frequency. Low ratios on large,
+// frequently-scanned indexes indicate hot-path disk I/O.
 func (q *Queries) IndexCacheEfficiency(ctx context.Context) ([]IndexCacheEfficiencyRow, error) {
 	rows, err := q.db.Query(ctx, indexCacheEfficiency)
 	if err != nil {
@@ -685,7 +691,13 @@ func (q *Queries) IndexCacheEfficiency(ctx context.Context) ([]IndexCacheEfficie
 	var items []IndexCacheEfficiencyRow
 	for rows.Next() {
 		var i IndexCacheEfficiencyRow
-		if err := rows.Scan(&i.IndexName, &i.IndexSizeBytes, &i.CacheHitRatio); err != nil {
+		if err := rows.Scan(
+			&i.IndexName,
+			&i.IndexSizeBytes,
+			&i.IdxScan,
+			&i.CacheHitRatio,
+			&i.StatsReset,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
@@ -48,15 +49,23 @@ func makeNumeric(value float64) pgtype.Numeric {
 	return n
 }
 
-func indexRow(name string, sizeBytes int64, ratio float64) db.IndexCacheEfficiencyRow {
+func indexRow(name string, sizeBytes, idxScan int64, ratio float64, statsReset pgtype.Timestamptz) db.IndexCacheEfficiencyRow {
 	return db.IndexCacheEfficiencyRow{
 		IndexName:      pgtype.Text{String: name, Valid: true},
 		IndexSizeBytes: pgtype.Int8{Int64: sizeBytes, Valid: true},
+		IdxScan:        pgtype.Int8{Int64: idxScan, Valid: true},
 		CacheHitRatio:  makeNumeric(ratio),
+		StatsReset:     statsReset,
 	}
 }
 
 func mb(n int64) int64 { return n * 1024 * 1024 }
+
+func windowDaysAgo(days int) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Now().AddDate(0, 0, -days), Valid: true}
+}
+
+func nullWindow() pgtype.Timestamptz { return pgtype.Timestamptz{Valid: false} }
 
 func findFinding(t *testing.T, report *check.Report, id string) check.Finding {
 	t.Helper()
@@ -91,21 +100,21 @@ func Test_CacheEfficiency(t *testing.T) {
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "mid band (90-95%) - OK",
+			Name: "above 60% threshold (85%) - OK",
 			Row: db.DatabaseCacheEfficiencyRow{
-				CacheHitRatio: makeNumeric(92.5),
-				BlksHit:       pgtype.Int8{Int64: 925000, Valid: true},
-				BlksRead:      pgtype.Int8{Int64: 75000, Valid: true},
+				CacheHitRatio: makeNumeric(85.0),
+				BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
+				BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
 			},
 			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "low ratio (<90%) - INFO",
+			Name: "low ratio (<60%) - INFO",
 			Row: db.DatabaseCacheEfficiencyRow{
-				CacheHitRatio: makeNumeric(85.0),
-				BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
-				BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
+				CacheHitRatio: makeNumeric(55.0),
+				BlksHit:       pgtype.Int8{Int64: 550000, Valid: true},
+				BlksRead:      pgtype.Int8{Int64: 450000, Valid: true},
 			},
 			ExpectedSeverity: check.SeverityInfo,
 			ExpectedID:       "cache-hit-ratio",
@@ -144,9 +153,9 @@ func Test_CacheEfficiency_DetailsContent(t *testing.T) {
 	t.Parallel()
 
 	row := db.DatabaseCacheEfficiencyRow{
-		CacheHitRatio: makeNumeric(85.0),
-		BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
-		BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
+		CacheHitRatio: makeNumeric(55.0),
+		BlksHit:       pgtype.Int8{Int64: 550000, Valid: true},
+		BlksRead:      pgtype.Int8{Int64: 450000, Valid: true},
 	}
 
 	queryer := newMockQueryer(row)
@@ -159,9 +168,9 @@ func Test_CacheEfficiency_DetailsContent(t *testing.T) {
 	result := findFinding(t, report, "cache-hit-ratio")
 	require.Equal(t, check.SeverityInfo, result.Severity)
 
-	require.Contains(t, result.Details, "85.00%", "Details should contain cache ratio")
-	require.Contains(t, result.Details, "850000", "Details should contain blocks hit")
-	require.Contains(t, result.Details, "150000", "Details should contain blocks read")
+	require.Contains(t, result.Details, "55.00%", "Details should contain cache ratio")
+	require.Contains(t, result.Details, "550000", "Details should contain blocks hit")
+	require.Contains(t, result.Details, "450000", "Details should contain blocks read")
 }
 
 func Test_CacheEfficiency_OKResult(t *testing.T) {
@@ -229,18 +238,18 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 			ExpectedSeverity: check.SeverityPass,
 		},
 		{
-			Name:             "mid band now OK - OK",
-			CacheRatio:       92.5,
+			Name:             "just above threshold - OK",
+			CacheRatio:       60.1,
 			ExpectedSeverity: check.SeverityPass,
 		},
 		{
-			Name:             "exactly 90% - OK",
-			CacheRatio:       90.0,
+			Name:             "exactly 60% - OK",
+			CacheRatio:       60.0,
 			ExpectedSeverity: check.SeverityPass,
 		},
 		{
-			Name:             "just below 90% - INFO",
-			CacheRatio:       89.9,
+			Name:             "just below 60% - INFO",
+			CacheRatio:       59.9,
 			ExpectedSeverity: check.SeverityInfo,
 		},
 	}
@@ -312,35 +321,42 @@ func Test_IndexCacheRatio_Informational(t *testing.T) {
 	t.Parallel()
 
 	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
-		indexRow("public.idx_orders_created", mb(200), 85.0),
+		indexRow("public.idx_orders_created", mb(600), 6000, 70.0, windowDaysAgo(30)),
 	})
 
 	f := findFinding(t, report, "index-cache-ratio")
 	require.Equal(t, check.SeverityInfo, f.Severity)
 	require.Equal(t, []string{"Index", "Size", "Hit %"}, f.Table.Headers)
 	require.Len(t, f.Table.Rows, 1)
-	require.Equal(t, []string{"public.idx_orders_created", "200.0MiB", "85.0%"}, f.Table.Rows[0].Cells)
+	require.Equal(t, []string{"public.idx_orders_created", "600.0MiB", "70.0%"}, f.Table.Rows[0].Cells)
 	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
 	// Info must not escalate the report.
 	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
-func Test_IndexCacheRatio_Thresholds(t *testing.T) {
+func Test_IndexCacheRatio_Gate(t *testing.T) {
 	t.Parallel()
 
+	// A 30-day window turns idx_scan into a scans/day rate: 3300 = 110/day (hot),
+	// 2700 = 90/day (cold), 3000 = 100/day (exactly at the frequency floor).
+	window := windowDaysAgo(30)
+
 	tests := []struct {
-		name   string
-		size   int64
-		ratio  float64
-		listed bool
+		name       string
+		size       int64
+		idxScan    int64
+		ratio      float64
+		statsReset pgtype.Timestamptz
+		listed     bool
 	}{
-		{"large index below 90% (fail tier) - listed", mb(101), 89.0, true},
-		{"large index at 94% (warn tier) - listed", mb(101), 94.0, true},
-		{"large index at 95% - not listed", mb(101), 95.0, false},
-		{"medium index below 95% (warn tier) - listed", mb(11), 94.0, true},
-		{"medium index at 95% - not listed", mb(11), 95.0, false},
-		{"index at 10MB floor, 94% - not listed", mb(10), 94.0, false},
-		{"healthy large index - not listed", mb(500), 99.0, false},
+		{"hot + big + low-ratio - listed", mb(600), 3300, 70.0, window, true},
+		{"hot + big + ok-ratio - not listed", mb(600), 3300, 80.0, window, false},
+		{"cold + big + low-ratio - not listed", mb(600), 2700, 70.0, window, false},
+		{"hot + small - not listed", mb(400), 3300, 70.0, window, false},
+		{"exactly 500MB + hot + low-ratio - listed", mb(500), 3300, 70.0, window, true},
+		{"exactly 75% ratio - not listed", mb(600), 3300, 75.0, window, false},
+		{"NULL window, lifetime >=10k - listed", mb(600), 20000, 70.0, nullWindow(), true},
+		{"NULL window, lifetime <10k - not listed", mb(600), 5000, 70.0, nullWindow(), false},
 	}
 
 	for _, tt := range tests {
@@ -348,7 +364,7 @@ func Test_IndexCacheRatio_Thresholds(t *testing.T) {
 			t.Parallel()
 
 			report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
-				indexRow("public.idx_x", tt.size, tt.ratio),
+				indexRow("public.idx_x", tt.size, tt.idxScan, tt.ratio, tt.statsReset),
 			})
 			f := findFinding(t, report, "index-cache-ratio")
 
@@ -366,11 +382,14 @@ func Test_IndexCacheRatio_Thresholds(t *testing.T) {
 func Test_IndexCacheRatio_NullRatioSkipped(t *testing.T) {
 	t.Parallel()
 
+	// Hot, big index whose ratio is NULL (no block activity) must still be skipped.
 	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
 		{
 			IndexName:      pgtype.Text{String: "public.idx_idle", Valid: true},
-			IndexSizeBytes: pgtype.Int8{Int64: mb(500), Valid: true},
+			IndexSizeBytes: pgtype.Int8{Int64: mb(600), Valid: true},
+			IdxScan:        pgtype.Int8{Int64: 20000, Valid: true},
 			CacheHitRatio:  pgtype.Numeric{Valid: false},
+			StatsReset:     windowDaysAgo(30),
 		},
 	})
 

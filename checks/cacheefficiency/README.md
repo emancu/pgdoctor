@@ -13,14 +13,18 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 **Formula**: `blocks_hit / (blocks_hit + blocks_read) * 100`
 
 **Thresholds**:
-- **INFO**: < 90% cache hit ratio
-- **OK**: ≥ 90% cache hit ratio
+- **INFO**: < 60% cache hit ratio
+- **OK**: ≥ 60% cache hit ratio
 
 ### Per-Index Cache Hit Ratio
 
-Indexes with low buffer cache hit ratios, indicating frequent disk I/O:
-- < 90% cache hit ratio on indexes > 100 MB
-- < 95% cache hit ratio on indexes > 10 MB
+Lists an index only when it is a hot, disk-bound index — all of the following hold:
+- **frequently used**: ≥ 100 index scans/day over the stats window (or lifetime
+  `idx_scan` ≥ 10,000 when `stats_reset` is NULL and the window is unknown)
+- size ≥ 500 MB
+- cache hit ratio < 75%
+
+A rarely-read index is uncached by design, so only hot-path indexes are reported.
 
 **Severity**: INFO
 
@@ -120,13 +124,13 @@ For persistent low cache ratios despite tuning:
 
 ### For `index-cache-ratio`
 
-Low cache hit ratio means frequent disk I/O.
+Listed indexes are large (≥ 500 MB), frequently scanned (≥ 100 scans/day), yet
+served under 75% from cache — hot-path disk I/O.
 
 **Options to improve:**
 1. Increase `shared_buffers` (if memory available)
 2. Consider partial indexes to reduce size
 3. Review query patterns - may be scanning too much data
-4. If index is unused, consider dropping it
 
 ```sql
 -- Check current shared_buffers
@@ -144,4 +148,7 @@ Run this check during normal OLTP workload periods for accurate results.
 
 ## Query Details
 
-Queries `pg_stat_database` for the current database's block hit and read counters, and `pg_statio_user_indexes` for per-index hit and read counters, calculating the cache hit percentages.
+Queries `pg_stat_database` for the current database's block hit and read counters,
+and joins `pg_statio_user_indexes` with `pg_stat_user_indexes` for per-index hit,
+read, and scan counters, deriving cache hit percentages and scan rate over the
+`stats_reset` window.
