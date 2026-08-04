@@ -141,6 +141,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	} else {
 		checkPartitionKeyUsage(partitionedTables, queryStats, report)
 		checkJoinsMissingPartitionKey(partitionedTables, queryStats, report)
+		checkStatementCoverage(partitionedTables, queryStats, report)
 	}
 
 	return report, nil
@@ -157,13 +158,7 @@ func checkPartitionKeyUsage(
 	hasCritical := false
 
 	for _, table := range tables {
-		// Skip tables with expression-based partition keys (too complex to analyze).
-		if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
-			continue
-		}
-
-		// Skip tables without partition key info.
-		if !table.PartitionKeyColumns.Valid || table.PartitionKeyColumns.String == "" {
+		if !isAnalyzable(table) {
 			continue
 		}
 
@@ -736,12 +731,7 @@ func checkJoinsMissingPartitionKey(
 	hasCritical := false
 
 	for _, table := range tables {
-		// Skip tables with expression-based partition keys.
-		if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
-			continue
-		}
-
-		if !table.PartitionKeyColumns.Valid || table.PartitionKeyColumns.String == "" {
+		if !isAnalyzable(table) {
 			continue
 		}
 
@@ -884,6 +874,110 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 			Rows:    tableRows,
 		},
 	})
+}
+
+// checkStatementCoverage reports how many analyzed statements matched each
+// partitioned table. A table whose application only ever queries partition leaves
+// matches none, and then a "partition keys are used" PASS rests on no evidence at
+// all — indistinguishable from genuine coverage without this signal. Inventory
+// only, so it never escalates the report.
+func checkStatementCoverage(
+	tables []db.PartitionedTablesWithKeysRow,
+	queries []db.QueryStatsFromStatStatementsRow,
+	report *check.Report,
+) {
+	type coverage struct {
+		qualifiedName string
+		partitionKeys string
+		partitions    int64
+		statements    int
+		calls         int64
+	}
+
+	var covered []coverage
+	uncovered := 0
+
+	for _, table := range tables {
+		if !isAnalyzable(table) {
+			continue
+		}
+
+		row := coverage{
+			qualifiedName: fmt.Sprintf("%s.%s", table.SchemaName.String, table.TableName.String),
+			partitionKeys: table.PartitionKeyColumns.String,
+			partitions:    table.PartitionCount.Int64,
+		}
+
+		for _, q := range queries {
+			if queryReferencesTable(q.Query.String, table.SchemaName.String, table.TableName.String) {
+				row.statements++
+				row.calls += q.Calls.Int64
+			}
+		}
+
+		if row.statements == 0 {
+			uncovered++
+		}
+
+		covered = append(covered, row)
+	}
+
+	if len(covered) == 0 {
+		return
+	}
+
+	// Least covered first, so the tables whose verdict rests on nothing stay
+	// visible under the renderer's row cap.
+	slices.SortStableFunc(covered, func(a, b coverage) int {
+		if a.statements != b.statements {
+			return a.statements - b.statements
+		}
+
+		return strings.Compare(a.qualifiedName, b.qualifiedName)
+	})
+
+	rows := make([]check.TableRow, 0, len(covered))
+	for _, row := range covered {
+		rows = append(rows, check.TableRow{
+			Cells: []string{
+				row.qualifiedName,
+				row.partitionKeys,
+				check.FormatNumber(row.partitions),
+				fmt.Sprintf("%d", row.statements),
+				check.FormatNumber(row.calls),
+			},
+			Severity: check.SeverityInfo,
+		})
+	}
+
+	details := fmt.Sprintf("Every one of the %d analyzed partitioned table(s) matched at least one statement", len(covered))
+	if uncovered > 0 {
+		details = fmt.Sprintf(
+			"%d of %d analyzed partitioned table(s) matched no statement, so their partition key verdict is based on no evidence. Queries naming a partition leaf directly are attributed to the leaf, not to the parent.",
+			uncovered, len(covered))
+	}
+
+	report.AddFinding(check.Finding{
+		ID:       "statement-coverage",
+		Name:     "Analyzed Statement Coverage",
+		Severity: check.SeverityInfo,
+		Details:  details,
+		Table: &check.Table{
+			Headers: []string{"Table", "Partition Key", "Partitions", "Statements", "Calls"},
+			Rows:    rows,
+		},
+	})
+}
+
+// isAnalyzable reports whether a partitioned table's key can be matched against
+// query text. Expression keys are stored with attnum = 0, leaving no column to
+// look for, and a table with no key columns at all offers nothing to match.
+func isAnalyzable(table db.PartitionedTablesWithKeysRow) bool {
+	if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
+		return false
+	}
+
+	return table.PartitionKeyColumns.Valid && table.PartitionKeyColumns.String != ""
 }
 
 // Query analysis helpers.
