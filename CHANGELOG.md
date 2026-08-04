@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`toast-storage`**: `compression-algorithm` is now informational and itemizes only tables with TOAST > 1 GiB ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`cache-efficiency`**: `cache-hit-ratio` is now informational, no longer escalates the report, and reports only below a 60% cache-hit ratio ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **`cache-efficiency`**: `index-cache-ratio` moved from `index-usage`; the old `index-usage/index-cache-ratio` finding ID is retired — consumers must switch to `cache-efficiency/index-cache-ratio` ([#37](https://github.com/emancu/pgdoctor/pull/37)).

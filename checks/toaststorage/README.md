@@ -131,34 +131,23 @@ Identifies specific columns causing TOAST usage:
 
 ### compression-algorithm
 
-Identifies columns using suboptimal compression algorithms (PostgreSQL 14+ only):
-- **WARN**: Columns using `default` (which means pglz) instead of explicit lz4 compression
+Informational (PostgreSQL 14+ only): columns still on `default`/pglz compression where lz4 is available.
 
-**Why important**: When columns have no explicit compression setting, PostgreSQL uses `default`, which means the legacy pglz algorithm. LZ4 (available in PostgreSQL 14+) is significantly faster and often more effective.
+- **INFO**: never escalates the check severity.
+- Details always carry the full aggregate: `N column(s) on M table(s) use pglz compression`.
+- The table itemizes only columns whose table has TOAST > 1 GiB; below that floor the aggregate shows with no table.
 
-**What "default" means**:
-- If you haven't explicitly set compression with `ALTER COLUMN SET COMPRESSION`, the column uses `default`
-- `default` = pglz algorithm for backward compatibility
-- Applies to columns with `EXTENDED` or `MAIN` storage strategies
+Columns: `Table, Column, Type, TOAST, Fix`. `Fix` is a closed token:
+- `lz4` — switch compression (the normal case).
+- `external` — bytea on `EXTENDED` storage; treat as pre-compressed, drop compression instead.
 
-**Comparison** (see "Compression algorithms" section above for details):
-- **default (pglz)**: Slower, 2-3x compression, legacy algorithm
-- **lz4**: 3-5x faster, 2-4x compression, recommended for JSON/text/logs
+`default` = no explicit `SET COMPRESSION`, i.e. pglz for backward compatibility. `EXTERNAL`/`PLAIN` storage
+do not use compression, so they are never flagged.
 
-**Impact of using default/pglz instead of lz4**:
-- Wastes CPU cycles during TOAST operations (compression/decompression)
-- May result in larger TOAST storage (pglz often compresses worse than lz4)
-- Slower read/write performance for TOASTed values
-- Especially noticeable on high-traffic tables with large JSON/text columns
-
-**Storage strategy context**:
-This check looks at columns with `EXTENDED` or `MAIN` storage (where compression applies).
-- `EXTERNAL` storage doesn't use compression (by design, for pre-compressed data)
-- `PLAIN` storage doesn't support compression (fixed-size types)
-
-See "Storage strategies" section above for detailed explanations of each strategy.
-
-**This subcheck only runs on PostgreSQL 14+** (where lz4 is available)
+**Honest semantics**:
+- `ALTER TABLE ... SET COMPRESSION lz4` applies to newly written data only; existing TOAST stays pglz.
+- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums.
+- Reclaiming existing TOAST needs `pg_repack` or a dump/restore.
 
 ## How to Fix
 

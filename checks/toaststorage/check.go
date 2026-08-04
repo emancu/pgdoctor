@@ -35,6 +35,8 @@ const (
 
 	wideColumnJSONBThreshold = 5000  // 5KB
 	wideColumnTextThreshold  = 10000 // 10KB
+
+	compressionToastFloorBytes = int64(check.GiB) // itemize only tables with TOAST > 1GiB
 )
 
 func Metadata() check.Metadata {
@@ -401,31 +403,28 @@ func checkWideColumns(rows []db.ToastStorageRow, report *check.Report) {
 	})
 }
 
-// checkCompressionAlgorithm identifies columns using suboptimal compression (pglz instead of lz4).
+// checkCompressionAlgorithm flags columns still on pglz; informational, itemizes only large-TOAST tables.
 func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, report *check.Report) {
-	// Check PostgreSQL version - LZ4 compression is only available in PG14+
 	meta := check.InstanceMetadataFromContext(ctx)
-	pgVersion := 14 // Default assumption
+	pgVersion := 14
 	if meta != nil && meta.EngineVersion != "" {
-		// Parse major version from "15.4" or "17.0"
 		_, _ = fmt.Sscanf(meta.EngineVersion, "%d", &pgVersion)
 	}
 
-	// If PG < 14, skip this check
 	if pgVersion < 14 {
 		return
 	}
 
-	type compressionIssue struct {
-		tableName          string
-		columnName         string
-		currentCompression string
-		storageStrategy    string
-		columnType         string
-		recommendedAction  string
+	type compressionColumn struct {
+		tableName  string
+		columnName string
+		columnType string
+		toastSize  int64
+		fix        string
 	}
 
-	var suboptimalColumns []compressionIssue
+	var pglzColumns []compressionColumn
+	tablesWithPglz := map[string]struct{}{}
 
 	for _, row := range rows {
 		tableName := fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String)
@@ -436,33 +435,29 @@ func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, r
 				continue
 			}
 
-			colName := parts[0]
 			compressionAlgo := parts[1]
-			storageStrategy := parts[2]
-			colType := parts[3]
-
-			// Flag columns using default (pglz) or explicitly set to pglz
-			// LZ4 is better for jsonb, text, and most use cases
-			if compressionAlgo == "default" || compressionAlgo == "pglz" {
-				action := "SET COMPRESSION lz4"
-				if colType == "bytea" && storageStrategy == "EXTENDED" {
-					// For binary data, consider EXTERNAL (no compression)
-					action = "Consider SET STORAGE EXTERNAL (if pre-compressed data)"
-				}
-
-				suboptimalColumns = append(suboptimalColumns, compressionIssue{
-					tableName:          tableName,
-					columnName:         colName,
-					currentCompression: compressionAlgo,
-					storageStrategy:    storageStrategy,
-					columnType:         colType,
-					recommendedAction:  action,
-				})
+			if compressionAlgo != "default" && compressionAlgo != "pglz" {
+				continue
 			}
+
+			colType := parts[3]
+			fix := "lz4"
+			if colType == "bytea" && parts[2] == "EXTENDED" {
+				fix = "external"
+			}
+
+			pglzColumns = append(pglzColumns, compressionColumn{
+				tableName:  tableName,
+				columnName: parts[0],
+				columnType: colType,
+				toastSize:  row.ToastSize.Int64,
+				fix:        fix,
+			})
+			tablesWithPglz[tableName] = struct{}{}
 		}
 	}
 
-	if len(suboptimalColumns) == 0 {
+	if len(pglzColumns) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "compression-algorithm",
 			Name:     "TOAST Compression Algorithm",
@@ -472,33 +467,36 @@ func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, r
 		return
 	}
 
-	headers := []string{"Table", "Column", "Type", "Current", "Storage", "Recommendation"}
 	var tableRows []check.TableRow
-
-	for _, issue := range suboptimalColumns {
+	for _, col := range pglzColumns {
+		if col.toastSize <= compressionToastFloorBytes {
+			continue
+		}
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				issue.tableName,
-				issue.columnName,
-				issue.columnType,
-				issue.currentCompression,
-				issue.storageStrategy,
-				issue.recommendedAction,
+				col.tableName,
+				col.columnName,
+				col.columnType,
+				check.FormatBytes(col.toastSize),
+				col.fix,
 			},
-			Severity: check.SeverityWarn,
+			Severity: check.SeverityInfo,
 		})
 	}
 
-	report.AddFinding(check.Finding{
+	finding := check.Finding{
 		ID:       "compression-algorithm",
 		Name:     "TOAST Compression Algorithm",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d column(s) using suboptimal compression (pglz instead of lz4)", len(suboptimalColumns)),
-		Table: &check.Table{
-			Headers: headers,
+		Severity: check.SeverityInfo,
+		Details:  fmt.Sprintf("%d column(s) on %d table(s) use pglz compression", len(pglzColumns), len(tablesWithPglz)),
+	}
+	if len(tableRows) > 0 {
+		finding.Table = &check.Table{
+			Headers: []string{"Table", "Column", "Type", "TOAST", "Fix"},
 			Rows:    tableRows,
-		},
-	})
+		}
+	}
+	report.AddFinding(finding)
 }
 
 // Helper functions
