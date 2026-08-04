@@ -20,7 +20,6 @@ const (
 	findingIDJoinMissingPartKey   = "join-missing-partition-key"
 	findingIDExtensionUnavailable = "extension-unavailable"
 	findingIDQueryTextRestricted  = "query-text-restricted"
-	findingIDPartitionKeyExamples = "partition-key-examples"
 )
 
 // Mock queryer for testing.
@@ -124,8 +123,7 @@ func makeQueryStats(query string, calls int64, totalExecTime float64) db.QuerySt
 }
 
 // keyFinding returns the partition-key-unused finding. Looking findings up by ID
-// keeps assertions valid as the check gains findings such as the informational
-// example-queries one.
+// rather than by position keeps assertions valid as the check gains findings.
 func keyFinding(t *testing.T, report *check.Report) check.Finding {
 	t.Helper()
 
@@ -727,9 +725,9 @@ func Test_PartitionUsage_ExtensionNotInstalled(t *testing.T) {
 	require.Contains(t, extensionFinding.Details, "cannot analyze query patterns")
 }
 
-// The offending statements are surfaced as an informational finding so an
-// engineer can investigate without hand-writing pg_stat_statements queries.
-func Test_PartitionUsage_ProblemQueryExamples(t *testing.T) {
+// The offending statements are listed in the finding itself, so an engineer can
+// investigate without hand-writing pg_stat_statements queries.
+func Test_PartitionUsage_ProblemQueriesListed(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -745,18 +743,17 @@ func Test_PartitionUsage_ProblemQueryExamples(t *testing.T) {
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	examples := findingByID(t, report, findingIDPartitionKeyExamples)
+	examples := keyFinding(t, report)
 
-	// INFO never escalates: the report severity comes from the sibling finding,
-	// which fails here because the two shapes exceed 1000 combined calls.
-	require.Equal(t, check.SeverityInfo, examples.Severity)
+	// Fails because the two shapes exceed 1000 combined calls.
 	require.Equal(t, check.SeverityFail, report.Severity)
-	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
+	require.Equal(t, check.SeverityFail, examples.Severity)
 
 	require.NotNil(t, examples.Table)
 	require.Equal(t, []string{"Table", "Calls", "Total Time", "Query ID", "Query"}, examples.Table.Headers)
 	require.Len(t, examples.Table.Rows, 2)
 	require.Equal(t, 3, examples.Table.MaxRowsBrief, "brief output shows three, verbose shows all")
+	require.Equal(t, check.SeverityFail, examples.Table.Rows[0].Severity)
 
 	// Worst by total time first.
 	require.Contains(t, examples.Table.Rows[0].Cells[4], `"status" = $1`)
@@ -769,7 +766,7 @@ func Test_PartitionUsage_ProblemQueryExamples(t *testing.T) {
 	require.Contains(t, examples.Details, "pg_stat_statements WHERE queryid")
 }
 
-func Test_PartitionUsage_NoProblemQueries_NoExamplesFinding(t *testing.T) {
+func Test_PartitionUsage_NoProblemQueries_NoTable(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -784,9 +781,9 @@ func Test_PartitionUsage_NoProblemQueries_NoExamplesFinding(t *testing.T) {
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDPartitionKeyExamples, result.ID)
-	}
+	finding := keyFinding(t, report)
+	require.Equal(t, check.SeverityPass, finding.Severity)
+	require.Nil(t, finding.Table)
 }
 
 // Long ORM statements must not stretch the table beyond a terminal line.
@@ -810,8 +807,7 @@ func Test_PartitionUsage_ExampleQueryTextIsClipped(t *testing.T) {
 	report, err := partitionusage.New(queryer).Check(context.Background())
 	require.NoError(t, err)
 
-	examples := findingByID(t, report, findingIDPartitionKeyExamples)
-	cell := examples.Table.Rows[0].Cells[4]
+	cell := keyFinding(t, report).Table.Rows[0].Cells[4]
 
 	require.LessOrEqual(t, len([]rune(cell)), 80)
 	require.True(t, strings.HasSuffix(cell, "…"), "clipped text is marked with an ellipsis")
@@ -859,14 +855,21 @@ func Test_PartitionUsage_TableOutput(t *testing.T) {
 
 	result := keyFinding(t, report)
 
+	// One row per offending statement; the per-table totals live in Details.
 	require.NotNil(t, result.Table)
-	require.Equal(t, []string{"Table", "Partition Key", "Partitions", "Problem Queries", "Total Calls", "Total Time"}, result.Table.Headers)
-	require.Greater(t, len(result.Table.Rows), 0)
+	require.Equal(t, []string{"Table", "Calls", "Total Time", "Query ID", "Query"}, result.Table.Headers)
+	require.Len(t, result.Table.Rows, 1)
 
 	row := result.Table.Rows[0]
 	require.Equal(t, "public.orders", row.Cells[0])
-	require.Equal(t, "created_at", row.Cells[1])
-	require.Equal(t, "12", row.Cells[2])
+	require.Equal(t, "500", row.Cells[1])
+	require.Equal(t, "12345", row.Cells[3])
+	require.Contains(t, row.Cells[4], "customer_id = $1")
+	require.Equal(t, check.SeverityWarn, row.Severity)
+
+	require.Contains(t, result.Details, "1 statement(s) not using the partition key")
+	require.Contains(t, result.Details, "public.orders (key: created_at, 12 partitions)")
+	require.Contains(t, result.Details, "pg_stat_statements WHERE queryid")
 }
 
 func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {

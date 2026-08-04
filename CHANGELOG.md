@@ -17,7 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
-- **`partition-usage`**: new `partition-key-examples` INFO finding listing the statements behind `partition-key-unused` — table, calls, total time, `queryid` and clipped text — so they can be investigated without querying `pg_stat_statements` by hand. Three at the default detail level, all with `--detail verbose` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
@@ -35,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`partition-usage`**: `partition-key-unused` now reports one row per offending statement — table, calls, total time, `queryid` and clipped text — instead of one aggregate row per table, so a finding can be investigated without querying `pg_stat_statements` by hand. Per-table totals moved above the table and are always shown; the statement list is capped at three by default and complete under `--detail verbose` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: `partition-key-unused` now counts a partition key constrained anywhere after `FROM`, including `JOIN ... ON` conditions, instead of only in `WHERE`. Such queries prune whenever the planner parameterizes the partitioned side, and reporting them buried the genuinely unprunable ones. The finding is also renamed to "Queries Missing Partition Key", matching its `join-missing-partition-key` sibling ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: partition pruning is now judged per strategy — HASH and LIST need equality on the key (HASH on every key column), RANGE needs its leading column — and queries qualified by another schema are no longer attributed to a same-named table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`table-vacuum-health`**: `vacuum-stale` now lists only tables with real pending work and covers analyze staleness too ([#27](https://github.com/emancu/pgdoctor/pull/27)).

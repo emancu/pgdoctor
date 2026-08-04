@@ -36,19 +36,17 @@ SELECT * FROM orders WHERE customer_id = 123 AND created_at > '2024-01-01';
 
 Identifies partitioned tables where high-frequency queries don't use the partition key.
 
-**Thresholds:**
-- Warning: >100 calls without partition key, OR total execution time >5 minutes
-- Critical: >1000 calls without partition key, OR total execution time >1 hour
+Reports one row per offending statement — table, calls, total time, `queryid`, and the statement clipped to one line — so a finding can be investigated without querying `pg_stat_statements` by hand. The default detail level lists the three costliest; `--detail verbose` lists every one. Per-table totals (partition key, partition count, statements, calls, time) are always shown above the table, so they stay visible whatever the row cap.
 
-### partition-key-examples
-
-Lists the statements behind `partition-key-unused` so they can be investigated without querying `pg_stat_statements` by hand: table, calls, total time, `queryid`, and the statement clipped to one line.
-
-Always INFO — it is evidence for `partition-key-unused`, not a health verdict, and never escalates the report. The default detail level shows the three costliest; `--detail verbose` shows every one. Statement text is clipped, so read one in full with:
+Statement text is clipped, so read one in full with:
 
 ```sql
 SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;
 ```
+
+**Thresholds** apply to a table's whole unprunable workload, not to individual statements, and every row of a table carries that table's severity:
+- Warning: >100 calls without partition key, OR total execution time >5 minutes
+- Critical: >1000 calls without partition key, OR total execution time >1 hour
 
 ### high-seq-scan-ratio
 

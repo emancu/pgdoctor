@@ -143,8 +143,8 @@ func checkPartitionKeyUsage(
 	queries []db.QueryStatsFromStatStatementsRow,
 	report *check.Report,
 ) {
-	var tableRows []check.TableRow
-	var examples []problemQuery
+	var affected []affectedTable
+	var problems []problemQuery
 	hasCritical := false
 
 	for _, table := range tables {
@@ -161,11 +161,11 @@ func checkPartitionKeyUsage(
 		partitionKeys := strings.Split(table.PartitionKeyColumns.String, ",")
 		tableName := table.TableName.String
 		schemaName := table.SchemaName.String
+		qualifiedName := fmt.Sprintf("%s.%s", schemaName, tableName)
 
-		var problemQueryCount int
+		var found []problemQuery
 		var totalCalls int64
 		var totalExecTime float64
-		qualifiedName := fmt.Sprintf("%s.%s", schemaName, tableName)
 
 		for _, q := range queries {
 			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
@@ -176,10 +176,9 @@ func checkPartitionKeyUsage(
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
-					problemQueryCount++
 					totalCalls += calls
 					totalExecTime += execTime
-					examples = append(examples, problemQuery{
+					found = append(found, problemQuery{
 						table:    qualifiedName,
 						calls:    calls,
 						execTime: execTime,
@@ -190,28 +189,34 @@ func checkPartitionKeyUsage(
 			}
 		}
 
-		if problemQueryCount > 0 {
-			severity := check.SeverityWarn
-			if totalCalls >= minCallsFail || totalExecTime >= totalExecTimeFailMs {
-				severity = check.SeverityFail
-				hasCritical = true
-			}
-
-			tableRows = append(tableRows, check.TableRow{
-				Cells: []string{
-					fmt.Sprintf("%s.%s", schemaName, tableName),
-					table.PartitionKeyColumns.String,
-					fmt.Sprintf("%d", table.PartitionCount.Int64),
-					fmt.Sprintf("%d", problemQueryCount),
-					fmt.Sprintf("%d", totalCalls),
-					check.FormatDurationMs(totalExecTime),
-				},
-				Severity: severity,
-			})
+		if len(found) == 0 {
+			continue
 		}
+
+		// Severity is a property of the table's whole workload, not of any single
+		// statement, so every one of its rows carries the table's severity.
+		severity := check.SeverityWarn
+		if totalCalls >= minCallsFail || totalExecTime >= totalExecTimeFailMs {
+			severity = check.SeverityFail
+			hasCritical = true
+		}
+
+		for i := range found {
+			found[i].severity = severity
+		}
+
+		problems = append(problems, found...)
+		affected = append(affected, affectedTable{
+			qualifiedName: qualifiedName,
+			partitionKeys: table.PartitionKeyColumns.String,
+			partitions:    table.PartitionCount.Int64,
+			statements:    len(found),
+			calls:         totalCalls,
+			execTime:      totalExecTime,
+		})
 	}
 
-	if len(tableRows) == 0 {
+	if len(affected) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
 			Name:     "Queries Missing Partition Key",
@@ -226,50 +231,9 @@ func checkPartitionKeyUsage(
 		overallSeverity = check.SeverityFail
 	}
 
-	report.AddFinding(check.Finding{
-		ID:       "partition-key-unused",
-		Name:     "Queries Missing Partition Key",
-		Severity: overallSeverity,
-		Details:  fmt.Sprintf("Found %d partitioned table(s) with queries not using partition key", len(tableRows)),
-		Table: &check.Table{
-			Headers: []string{"Table", "Partition Key", "Partitions", "Problem Queries", "Total Calls", "Total Time"},
-			Rows:    tableRows,
-		},
-	})
-
-	addProblemQueryExamples(examples, report)
-}
-
-// problemQuery is one statement reported as not constraining the partition key,
-// kept so the offending text can be surfaced as evidence.
-type problemQuery struct {
-	table    string
-	calls    int64
-	execTime float64
-	queryID  int64
-	text     string
-}
-
-// exampleQueriesBrief is how many offending queries are listed at the default
-// detail level; --detail verbose lists every one.
-const exampleQueriesBrief = 3
-
-// maxQueryTextWidth keeps the evidence table inside a terminal. ORM-generated
-// statements run to thousands of characters, and the queryid is what identifies
-// them anyway.
-const maxQueryTextWidth = 80
-
-// addProblemQueryExamples emits the offending statements as an informational
-// finding. Severity is INFO so it never escalates the report: this is evidence
-// for the sibling finding, not a health conclusion of its own.
-func addProblemQueryExamples(examples []problemQuery, report *check.Report) {
-	if len(examples) == 0 {
-		return
-	}
-
-	// Worst first, so the default detail level shows the queries that matter
+	// Worst first, so the default detail level shows the statements that matter
 	// most across every table rather than whichever table came first.
-	slices.SortStableFunc(examples, func(a, b problemQuery) int {
+	slices.SortStableFunc(problems, func(a, b problemQuery) int {
 		switch {
 		case a.execTime > b.execTime:
 			return -1
@@ -280,34 +244,78 @@ func addProblemQueryExamples(examples []problemQuery, report *check.Report) {
 		}
 	})
 
-	rows := make([]check.TableRow, 0, len(examples))
-	for _, example := range examples {
+	rows := make([]check.TableRow, 0, len(problems))
+	for _, problem := range problems {
 		rows = append(rows, check.TableRow{
 			Cells: []string{
-				example.table,
-				check.FormatNumber(example.calls),
-				check.FormatDurationMs(example.execTime),
-				fmt.Sprintf("%d", example.queryID),
-				clipQueryText(example.text),
+				problem.table,
+				check.FormatNumber(problem.calls),
+				check.FormatDurationMs(problem.execTime),
+				fmt.Sprintf("%d", problem.queryID),
+				clipQueryText(problem.text),
 			},
-			Severity: check.SeverityInfo,
+			Severity: problem.severity,
 		})
 	}
 
 	report.AddFinding(check.Finding{
-		ID:       "partition-key-examples",
-		Name:     "Example Queries Missing Partition Key",
-		Severity: check.SeverityInfo,
-		Details: fmt.Sprintf(
-			"%d statement(s) do not constrain the partition key. Read one in full with:\n"+
-				"  SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;",
-			len(examples)),
+		ID:       "partition-key-unused",
+		Name:     "Queries Missing Partition Key",
+		Severity: overallSeverity,
+		Details:  problemDetails(affected, len(problems)),
 		Table: &check.Table{
 			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
 			Rows:         rows,
-			MaxRowsBrief: exampleQueriesBrief,
+			MaxRowsBrief: problemQueriesBrief,
 		},
 	})
+}
+
+// affectedTable summarizes one partitioned table's unprunable workload.
+type affectedTable struct {
+	qualifiedName string
+	partitionKeys string
+	partitions    int64
+	statements    int
+	calls         int64
+	execTime      float64
+}
+
+// problemQuery is one statement that does not constrain its table's partition key.
+type problemQuery struct {
+	table    string
+	calls    int64
+	execTime float64
+	queryID  int64
+	text     string
+	severity check.Severity
+}
+
+// problemQueriesBrief is how many statements are listed at the default detail
+// level; --detail verbose lists every one.
+const problemQueriesBrief = 3
+
+// maxQueryTextWidth keeps the table inside a terminal. ORM-generated statements
+// run to thousands of characters, and the queryid identifies them anyway.
+const maxQueryTextWidth = 80
+
+// problemDetails describes the affected tables, so the per-table totals stay
+// visible even when the statement list is capped at the default detail level.
+func problemDetails(affected []affectedTable, statements int) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)",
+		statements, len(affected))
+
+	for _, table := range affected {
+		fmt.Fprintf(&b, "\n  %s (key: %s, %d partitions) — %d statement(s), %s calls, %s",
+			table.qualifiedName, table.partitionKeys, table.partitions, table.statements,
+			check.FormatNumber(table.calls), check.FormatDurationMs(table.execTime))
+	}
+
+	b.WriteString("\nRead a statement in full: SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;")
+
+	return b.String()
 }
 
 // clipQueryText shortens a normalized statement to one terminal line.
