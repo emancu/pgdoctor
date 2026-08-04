@@ -8,13 +8,16 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
 type mockCacheEfficiencyQueryer struct {
-	row db.DatabaseCacheEfficiencyRow
-	err error
+	row        db.DatabaseCacheEfficiencyRow
+	indexRows  []db.IndexCacheEfficiencyRow
+	err        error
+	indexError error
 }
 
 func (m *mockCacheEfficiencyQueryer) DatabaseCacheEfficiency(context.Context) (db.DatabaseCacheEfficiencyRow, error) {
@@ -22,6 +25,13 @@ func (m *mockCacheEfficiencyQueryer) DatabaseCacheEfficiency(context.Context) (d
 		return db.DatabaseCacheEfficiencyRow{}, m.err
 	}
 	return m.row, nil
+}
+
+func (m *mockCacheEfficiencyQueryer) IndexCacheEfficiency(context.Context) ([]db.IndexCacheEfficiencyRow, error) {
+	if m.indexError != nil {
+		return nil, m.indexError
+	}
+	return m.indexRows, nil
 }
 
 func newMockQueryer(row db.DatabaseCacheEfficiencyRow) *mockCacheEfficiencyQueryer {
@@ -36,6 +46,27 @@ func makeNumeric(value float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(fmt.Sprintf("%.2f", value))
 	return n
+}
+
+func indexRow(name string, sizeBytes int64, ratio float64) db.IndexCacheEfficiencyRow {
+	return db.IndexCacheEfficiencyRow{
+		IndexName:      pgtype.Text{String: name, Valid: true},
+		IndexSizeBytes: pgtype.Int8{Int64: sizeBytes, Valid: true},
+		CacheHitRatio:  makeNumeric(ratio),
+	}
+}
+
+func mb(n int64) int64 { return n * 1024 * 1024 }
+
+func findFinding(t *testing.T, report *check.Report, id string) check.Finding {
+	t.Helper()
+	for _, f := range report.Results {
+		if f.ID == id {
+			return f
+		}
+	}
+	require.Failf(t, "missing finding", "no finding with id %q", id)
+	return check.Finding{}
 }
 
 func Test_CacheEfficiency(t *testing.T) {
@@ -70,13 +101,13 @@ func Test_CacheEfficiency(t *testing.T) {
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "low ratio (<90%) - WARN",
+			Name: "low ratio (<90%) - INFO",
 			Row: db.DatabaseCacheEfficiencyRow{
 				CacheHitRatio: makeNumeric(85.0),
 				BlksHit:       pgtype.Int8{Int64: 850000, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 150000, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityInfo,
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
@@ -100,12 +131,9 @@ func Test_CacheEfficiency(t *testing.T) {
 			checker := cacheefficiency.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
-			results := report.Results
-			require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-			result := results[0]
-			require.Equal(t, tc.ExpectedID, result.ID, "Result ID should match")
+			result := findFinding(t, report, tc.ExpectedID)
 			require.Equal(t, tc.ExpectedSeverity, result.Severity, "Result severity should match")
 			require.Equal(t, check.CategoryPerformance, report.Category, "Category should be performance")
 		})
@@ -126,12 +154,10 @@ func Test_CacheEfficiency_DetailsContent(t *testing.T) {
 	checker := cacheefficiency.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-	result := results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity)
+	result := findFinding(t, report, "cache-hit-ratio")
+	require.Equal(t, check.SeverityInfo, result.Severity)
 
 	require.Contains(t, result.Details, "85.00%", "Details should contain cache ratio")
 	require.Contains(t, result.Details, "850000", "Details should contain blocks hit")
@@ -152,11 +178,9 @@ func Test_CacheEfficiency_OKResult(t *testing.T) {
 	checker := cacheefficiency.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-	result := results[0]
+	result := findFinding(t, report, "cache-hit-ratio")
 	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when cache ratio is healthy")
 	require.Contains(t, result.Details, "healthy", "Details should mention healthy status")
 }
@@ -215,9 +239,9 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 			ExpectedSeverity: check.SeverityPass,
 		},
 		{
-			Name:             "just below 90% - WARN",
+			Name:             "just below 90% - INFO",
 			CacheRatio:       89.9,
-			ExpectedSeverity: check.SeverityWarn,
+			ExpectedSeverity: check.SeverityInfo,
 		},
 	}
 
@@ -236,11 +260,9 @@ func Test_CacheEfficiency_ThresholdBoundaries(t *testing.T) {
 			checker := cacheefficiency.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 
-			results := report.Results
-			require.Equal(t, 1, len(results))
-
-			result := results[0]
+			result := findFinding(t, report, "cache-hit-ratio")
 			require.Equal(t, tc.ExpectedSeverity, result.Severity, "Severity should match expected")
 		})
 	}
@@ -260,11 +282,120 @@ func Test_CacheEfficiency_NoActivityHandling(t *testing.T) {
 	checker := cacheefficiency.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
-	results := report.Results
-	require.Equal(t, 1, len(results))
-
-	result := results[0]
+	result := findFinding(t, report, "cache-hit-ratio")
 	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when no cache activity")
 	require.Contains(t, result.Details, "Insufficient cache activity", "Details should explain no activity")
+}
+
+// healthyDBRow isolates per-index findings from the database-wide finding.
+func healthyDBRow() db.DatabaseCacheEfficiencyRow {
+	return db.DatabaseCacheEfficiencyRow{
+		CacheHitRatio: makeNumeric(99.0),
+		BlksHit:       pgtype.Int8{Int64: 990000, Valid: true},
+		BlksRead:      pgtype.Int8{Int64: 10000, Valid: true},
+	}
+}
+
+func runWithIndexRows(t *testing.T, rows []db.IndexCacheEfficiencyRow) *check.Report {
+	t.Helper()
+
+	queryer := &mockCacheEfficiencyQueryer{row: healthyDBRow(), indexRows: rows}
+	report, err := cacheefficiency.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+	return report
+}
+
+func Test_IndexCacheRatio_Informational(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+		indexRow("public.idx_orders_created", mb(200), 85.0),
+	})
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Equal(t, check.SeverityInfo, f.Severity)
+	require.Equal(t, []string{"Index", "Size", "Hit %"}, f.Table.Headers)
+	require.Len(t, f.Table.Rows, 1)
+	require.Equal(t, []string{"public.idx_orders_created", "200.0MiB", "85.0%"}, f.Table.Rows[0].Cells)
+	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
+	// Info must not escalate the report.
+	require.Equal(t, check.SeverityPass, report.Severity)
+}
+
+func Test_IndexCacheRatio_Thresholds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		size   int64
+		ratio  float64
+		listed bool
+	}{
+		{"large index below 90% (fail tier) - listed", mb(101), 89.0, true},
+		{"large index at 94% (warn tier) - listed", mb(101), 94.0, true},
+		{"large index at 95% - not listed", mb(101), 95.0, false},
+		{"medium index below 95% (warn tier) - listed", mb(11), 94.0, true},
+		{"medium index at 95% - not listed", mb(11), 95.0, false},
+		{"index at 10MB floor, 94% - not listed", mb(10), 94.0, false},
+		{"healthy large index - not listed", mb(500), 99.0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+				indexRow("public.idx_x", tt.size, tt.ratio),
+			})
+			f := findFinding(t, report, "index-cache-ratio")
+
+			if tt.listed {
+				require.Equal(t, check.SeverityInfo, f.Severity)
+				require.Len(t, f.Table.Rows, 1)
+			} else {
+				require.Equal(t, check.SeverityPass, f.Severity)
+				require.Nil(t, f.Table)
+			}
+		})
+	}
+}
+
+func Test_IndexCacheRatio_NullRatioSkipped(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+		{
+			IndexName:      pgtype.Text{String: "public.idx_idle", Valid: true},
+			IndexSizeBytes: pgtype.Int8{Int64: mb(500), Valid: true},
+			CacheHitRatio:  pgtype.Numeric{Valid: false},
+		},
+	})
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Nil(t, f.Table)
+}
+
+func Test_IndexCacheRatio_NoIndexes_Pass(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, nil)
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Nil(t, f.Table)
+}
+
+func Test_IndexCacheRatio_QueryError(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockCacheEfficiencyQueryer{
+		row:        healthyDBRow(),
+		indexError: fmt.Errorf("connection refused"),
+	}
+	_, err := cacheefficiency.New(queryer).Check(context.Background())
+	require.ErrorContains(t, err, "cache-efficiency")
 }

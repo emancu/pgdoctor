@@ -31,12 +31,6 @@ func pgInt8(i int64) pgtype.Int8          { return pgtype.Int8{Int64: i, Valid: 
 func pgTS(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 func pgTSNull() pgtype.Timestamptz        { return pgtype.Timestamptz{Valid: false} }
 
-func pgNum(v float64) pgtype.Numeric {
-	var n pgtype.Numeric
-	_ = n.Scan(fmt.Sprintf("%.2f", v))
-	return n
-}
-
 func mb(n int64) int64 { return n * 1024 * 1024 }
 
 // Exact-duration offset (not AddDate) so window boundaries don't drift across DST.
@@ -51,7 +45,6 @@ func row(table, index string, scans, writes, sizeBytes int64, sr pgtype.Timestam
 		IdxScan:        pgInt8(scans),
 		TableWrites:    pgInt8(writes),
 		IndexSizeBytes: pgInt8(sizeBytes),
-		CacheHitRatio:  pgNum(99),
 		StatsReset:     sr,
 	}
 }
@@ -104,22 +97,6 @@ func Test_QueryError(t *testing.T) {
 	q := &mockQueryer{err: fmt.Errorf("connection refused")}
 	_, err := indexusage.New(q).Check(context.Background())
 	require.ErrorContains(t, err, "index-usage")
-}
-
-func Test_CacheRatio_IsInformational(t *testing.T) {
-	t.Parallel()
-
-	// Only a low cache-ratio index: high scans (not unused), recent stats (not low-usage).
-	r := row("public.orders", "idx_orders_created", 5000, 50000, mb(200), daysAgo(3))
-	r.CacheHitRatio = pgNum(85)
-
-	report := runCheck(t, []db.IndexUsageStatsRow{r})
-
-	cache := finding(t, report, "index-cache-ratio")
-	require.Equal(t, check.SeverityInfo, cache.Severity)
-	require.Contains(t, cache.Details, "85.0%")
-	// Info must not escalate the report.
-	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
 func Test_UnusedIndexes_SizeFloor(t *testing.T) {
@@ -274,11 +251,11 @@ func Test_MixedFindings_ReportWarns(t *testing.T) {
 	t.Parallel()
 
 	unused := row("public.users", "idx_unused", 0, 50000, mb(600), daysAgo(90))
-	lowCache := row("public.orders", "idx_orders", 5000, 50000, mb(200), daysAgo(3))
-	lowCache.CacheHitRatio = pgNum(85)
+	lowUsage := row("public.orders", "idx_orders", 5, 50000, mb(600), daysAgo(90))
 
-	report := runCheck(t, []db.IndexUsageStatsRow{unused, lowCache})
-	require.Len(t, report.Results, 3)
+	report := runCheck(t, []db.IndexUsageStatsRow{unused, lowUsage})
+	require.Len(t, report.Results, 2)
 	require.Equal(t, check.SeverityWarn, report.Severity)
-	require.Equal(t, check.SeverityInfo, finding(t, report, "index-cache-ratio").Severity)
+	require.Equal(t, check.SeverityWarn, finding(t, report, "unused-indexes").Severity)
+	require.Equal(t, check.SeverityWarn, finding(t, report, "low-usage-indexes").Severity)
 }

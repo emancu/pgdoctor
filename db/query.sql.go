@@ -654,6 +654,48 @@ func (q *Queries) IndexBloat(ctx context.Context) ([]IndexBloatRow, error) {
 	return items, nil
 }
 
+const indexCacheEfficiency = `-- name: IndexCacheEfficiency :many
+SELECT
+  (schemaname || '.' || indexrelname)::text AS index_name
+  , pg_relation_size(indexrelid) AS index_size_bytes
+  , CASE
+    WHEN coalesce(idx_blks_hit, 0) + coalesce(idx_blks_read, 0) = 0 THEN NULL
+    ELSE round(100.0 * idx_blks_hit / (idx_blks_hit + idx_blks_read), 2)
+  END AS cache_hit_ratio
+FROM pg_statio_user_indexes
+WHERE
+  schemaname = 'public'
+  AND pg_relation_size(indexrelid) > 10 * 1024 * 1024
+ORDER BY pg_relation_size(indexrelid) DESC
+`
+
+type IndexCacheEfficiencyRow struct {
+	IndexName      pgtype.Text
+	IndexSizeBytes pgtype.Int8
+	CacheHitRatio  pgtype.Numeric
+}
+
+// Per-index buffer cache hit ratios. Low ratios on large indexes indicate frequent disk I/O.
+func (q *Queries) IndexCacheEfficiency(ctx context.Context) ([]IndexCacheEfficiencyRow, error) {
+	rows, err := q.db.Query(ctx, indexCacheEfficiency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []IndexCacheEfficiencyRow
+	for rows.Next() {
+		var i IndexCacheEfficiencyRow
+		if err := rows.Scan(&i.IndexName, &i.IndexSizeBytes, &i.CacheHitRatio); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const indexUsageStats = `-- name: IndexUsageStats :many
 SELECT
   (n.nspname || '.' || tbl.relname)::text AS table_name
@@ -663,20 +705,12 @@ SELECT
   , pg_relation_size(psai.indexrelid) AS index_size_bytes
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
-  , CASE
-    WHEN coalesce(psaio.idx_blks_hit, 0) + coalesce(psaio.idx_blks_read, 0) = 0 THEN NULL
-    ELSE round(
-      100.0 * psaio.idx_blks_hit / (psaio.idx_blks_hit + psaio.idx_blks_read)
-      , 2
-    )
-  END AS cache_hit_ratio
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
 FROM pg_stat_user_indexes AS psai
 INNER JOIN pg_index AS x ON psai.indexrelid = x.indexrelid
 INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
-LEFT JOIN pg_statio_user_indexes AS psaio ON psai.indexrelid = psaio.indexrelid
 WHERE
   n.nspname = 'public'
 ORDER BY
@@ -691,11 +725,10 @@ type IndexUsageStatsRow struct {
 	IndexSizeBytes pgtype.Int8
 	IdxScan        pgtype.Int8
 	TableWrites    pgtype.Int8
-	CacheHitRatio  pgtype.Numeric
 	StatsReset     pgtype.Timestamptz
 }
 
-// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes, index-cache-ratio.
+// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
 func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, error) {
 	rows, err := q.db.Query(ctx, indexUsageStats)
 	if err != nil {
@@ -713,7 +746,6 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 			&i.IndexSizeBytes,
 			&i.IdxScan,
 			&i.TableWrites,
-			&i.CacheHitRatio,
 			&i.StatsReset,
 		); err != nil {
 			return nil, err
