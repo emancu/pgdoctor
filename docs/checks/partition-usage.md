@@ -123,9 +123,19 @@ Only superusers and roles with `pg_read_all_stats` can read other users' query t
 
 Queries referencing a partition leaf directly (e.g. `orders_2025_01`) are not attributed to the parent table — they touch exactly one partition by construction, so there is nothing to prune.
 
+### Keys constrained through a JOIN
+
+The key counts as used when it is constrained anywhere after `FROM`, including a `JOIN ... ON` condition. Such a query prunes when the planner parameterizes the partitioned side (a nested loop) and does not prune when it hash joins, which cannot be told from the query text. The check treats it as used, preferring silence over reporting a table whose access path may well be pruning. Confirm an individual query with:
+
+```sql
+EXPLAIN (GENERIC_PLAN, COSTS OFF) <query text with its $n placeholders>;  -- PostgreSQL 16+
+```
+
+`Subplans Removed: N` means pruning happens; all partitions listed means it does not.
+
 ### Subqueries and CTEs
 
-Queries with subqueries or CTEs may not be fully analyzed. In particular, a partition-key column filtered inside a subquery on a *different* table can be credited to the outer table, hiding a missing filter.
+Predicates inside a parenthesized subquery are ignored, so a filter on another table's identically named column does not count as constraining this table — without that, any subquery filtering `s.id` would silence a table partitioned by `id`. CTE bodies are still analyzed, so a CTE that shadows the table name may be misattributed.
 
 ### Table aliases
 

@@ -406,6 +406,58 @@ func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
 	}
 }
 
+// A partition key constrained through a JOIN condition can prune when the
+// planner parameterizes the partitioned side, so it must not be reported.
+func Test_PartitionUsage_KeyConstrainedInJoinCondition_NotFlagged(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "id", 6),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			// Ecto-shaped: the key is on the right of the operator, in ON, not WHERE.
+			makeQueryStats(
+				`SELECT DISTINCT ON (o0."id") o0."id", o0."reference" FROM "orders" AS o0 `+
+					`INNER JOIN "order_items" AS o1 ON o1."order_id" = o0."id" WHERE (o1."type" = $1)`,
+				2_404_213, 99_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
+	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+}
+
+// The same column name constrained inside a subquery on a different table must
+// not count — otherwise any subquery filtering "s.id" would silence a table
+// partitioned by "id".
+func Test_PartitionUsage_KeyConstrainedOnlyInSubquery_StillFlagged(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "id", 6),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats(
+				`SELECT * FROM orders WHERE customer_id = $1 `+
+					`AND EXISTS (SELECT 1 FROM shipments s WHERE s.id = $2)`,
+				5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, report.Results, 1)
+	require.Equal(t, findingIDPartitionKeyUnused, report.Results[0].ID)
+	require.Equal(t, check.SeverityFail, report.Results[0].Severity)
+}
+
 // A table referenced under a different schema must not be attributed to this one.
 func Test_PartitionUsage_CrossSchemaQueryNotAttributed(t *testing.T) {
 	t.Parallel()

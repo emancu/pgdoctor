@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`partition-usage`**: `partition-key-unused` now counts a partition key constrained anywhere after `FROM`, including `JOIN ... ON` conditions, instead of only in `WHERE`. Such queries prune whenever the planner parameterizes the partitioned side, and reporting them buried the genuinely unprunable ones. The finding is also renamed to "Queries Missing Partition Key", matching its `join-missing-partition-key` sibling ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: partition pruning is now judged per strategy — HASH and LIST need equality on the key (HASH on every key column), RANGE needs its leading column — and queries qualified by another schema are no longer attributed to a same-named table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`table-vacuum-health`**: `vacuum-stale` now lists only tables with real pending work and covers analyze staleness too ([#27](https://github.com/emancu/pgdoctor/pull/27)).
 - **`table-vacuum-health`**: `large-table-defaults` now shows when default settings would next trigger autovacuum, and no longer reports FAIL ([#28](https://github.com/emancu/pgdoctor/pull/28)).

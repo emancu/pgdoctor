@@ -75,7 +75,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if len(partitionedTables) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  "No partitioned tables found",
 		})
@@ -125,7 +125,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if len(queryStats) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
@@ -170,7 +170,7 @@ func checkPartitionKeyUsage(
 				continue
 			}
 
-			if !queryUsesPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
@@ -205,7 +205,7 @@ func checkPartitionKeyUsage(
 	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All queries on %d partitioned table(s) properly use partition keys", len(tables)),
 		})
@@ -219,7 +219,7 @@ func checkPartitionKeyUsage(
 
 	report.AddFinding(check.Finding{
 		ID:       "partition-key-unused",
-		Name:     "Partition Key Usage Analysis",
+		Name:     "Queries Missing Partition Key",
 		Severity: overallSeverity,
 		Details:  fmt.Sprintf("Found %d partitioned table(s) with queries not using partition key", len(tableRows)),
 		Table: &check.Table{
@@ -339,15 +339,57 @@ const (
 	strategyRange = "r"
 )
 
-// queryUsesPartitionKey checks if the query's WHERE clause filters on the
-// partition key in a way the given strategy can actually prune with.
-func queryUsesPartitionKey(queryText string, partitionKeys []string, strategy string) bool {
-	whereClause := extractWhereClause(queryText)
-	if whereClause == "" {
+// queryConstrainsPartitionKey reports whether the statement constrains the
+// partition key in a way the strategy can prune with, looking at everything
+// after FROM so JOIN conditions count alongside WHERE. A key constrained only
+// through a join prunes when the planner parameterizes the partitioned side,
+// and not when it hash joins, so this cannot be decided from query text —
+// treating it as constrained keeps the check quiet rather than reporting a
+// table whose access path may well be pruning.
+func queryConstrainsPartitionKey(queryText string, partitionKeys []string, strategy string) bool {
+	fromIdx := strings.Index(queryText, " from ")
+	if fromIdx == -1 {
 		return false
 	}
 
-	return clauseEnablesPruning(whereClause, partitionKeys, strategy)
+	return clauseEnablesPruning(maskSubqueries(queryText[fromIdx:]), partitionKeys, strategy)
+}
+
+// maskSubqueries blanks out parenthesized subqueries, so a predicate on another
+// table's identically named column — common for a key called "id" — is not read
+// as constraining this table. Only groups that open a SELECT are removed:
+// ActiveRecord and Ecto wrap ordinary predicates in parentheses, and those must
+// still be searched.
+func maskSubqueries(text string) string {
+	masked := []byte(text)
+
+	for i := 0; i < len(masked); i++ {
+		if masked[i] != '(' {
+			continue
+		}
+
+		if !strings.HasPrefix(strings.TrimLeft(text[i+1:], " "), "select") {
+			continue
+		}
+
+		depth := 0
+		for j := i; j < len(masked); j++ {
+			switch masked[j] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			masked[j] = ' '
+
+			if depth == 0 {
+				i = j
+				break
+			}
+		}
+	}
+
+	return string(masked)
 }
 
 // clauseEnablesPruning reports whether the clause constrains the partition key
@@ -545,41 +587,6 @@ func hasComparisonBefore(text string, mode operatorMode) bool {
 	return false
 }
 
-// extractWhereClause extracts the WHERE clause from a query. Clause end
-// markers are only honored outside parentheses, so a LIMIT or ORDER BY inside
-// a subquery does not truncate the outer clause.
-func extractWhereClause(queryText string) string {
-	_, after, ok := strings.Cut(queryText, " where ")
-	if !ok {
-		return ""
-	}
-
-	endMarkers := []string{" order by", " group by", " having", " limit", " offset", " for update", " for share", ";"}
-
-	depth := 0
-	for i := 0; i < len(after); i++ {
-		switch after[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case ' ', ';':
-			if depth > 0 {
-				continue
-			}
-			for _, marker := range endMarkers {
-				if strings.HasPrefix(after[i:], marker) {
-					return strings.TrimSpace(after[:i])
-				}
-			}
-		}
-	}
-
-	return strings.TrimSpace(after)
-}
-
 // checkJoinsMissingPartitionKey detects JOINs on partitioned tables that don't include the partition key.
 func checkJoinsMissingPartitionKey(
 	tables []db.PartitionedTablesWithKeysRow,
@@ -618,7 +625,7 @@ func checkJoinsMissingPartitionKey(
 			}
 
 			// Check if partition key appears after FROM (covers JOIN ON, WHERE, implicit joins).
-			if !queryUsesPartitionKeyAfterFrom(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
@@ -745,15 +752,4 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 // queryHasJoin checks if a query contains a JOIN clause.
 func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
-}
-
-// queryUsesPartitionKeyAfterFrom checks if the partition key is compared
-// anywhere after the FROM clause (covers JOIN ON conditions and WHERE).
-func queryUsesPartitionKeyAfterFrom(queryText string, partitionKeys []string, strategy string) bool {
-	fromIdx := strings.Index(queryText, " from ")
-	if fromIdx == -1 {
-		return false
-	}
-
-	return clauseEnablesPruning(queryText[fromIdx:], partitionKeys, strategy)
 }
