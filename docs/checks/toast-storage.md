@@ -144,10 +144,22 @@ Columns: `Table, Column, Type, TOAST, Fix`. `Fix` is a closed token:
 `default` = no explicit `SET COMPRESSION`, i.e. pglz for backward compatibility. `EXTERNAL`/`PLAIN` storage
 do not use compression, so they are never flagged.
 
-**Honest semantics**:
-- `ALTER TABLE ... SET COMPRESSION lz4` applies to newly written data only; existing TOAST stays pglz.
-- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums.
-- Reclaiming existing TOAST needs `pg_repack` or a dump/restore.
+**pglz vs lz4**:
+- lz4 compresses ~5x faster and decompresses ~2-3x faster than pglz; ratio is slightly worse (a few % larger).
+- Net effect: less CPU on TOAST-heavy writes and faster reads of large JSON/text values.
+- pglz remains the PostgreSQL default only because lz4 is a build-time option; every RDS build has it.
+
+**Adopting lz4**:
+- `ALTER TABLE ... SET COMPRESSION lz4` is a catalog-only change: instant, safe, brief lock, no data rewrite.
+- It applies to newly written values only. An UPDATE that modifies the column stores the new value as lz4;
+  an UPDATE that leaves the column untouched keeps its existing pglz datum indefinitely.
+- Mixed compression within a column is fully supported: each datum records its own method and reads work forever.
+- Reverting is the same operation in reverse (`SET COMPRESSION pglz`), again affecting new writes only.
+- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums; reclaiming existing
+  TOAST needs `pg_repack` or a dump/restore.
+- Only incompatibility: a dump restored onto a server built without lz4 (never RDS) cannot read lz4 datums.
+- Fleet alternative: `default_toast_compression = lz4` in the parameter group switches every unset column's
+  new writes without any DDL.
 
 ## How to Fix
 
