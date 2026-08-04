@@ -7,7 +7,9 @@ Analyzes index usage patterns to identify unused and inefficient indexes that wa
 ## What It Checks
 
 ### 1. Unused Indexes
-Indexes with zero scans that are larger than 500 MB. These indexes consume disk space and add overhead to INSERT/UPDATE/DELETE operations without providing query benefits. Details disclose the statistics window (since `pg_stat_database.stats_reset`) so "0 scans" is interpretable.
+Indexes with zero scans that are larger than 500 MB. These indexes consume disk space and add overhead to
+INSERT/UPDATE/DELETE operations without providing query benefits.
+Details disclose the statistics window (since `pg_stat_database.stats_reset`) so "0 scans" is interpretable.
 
 **Severity**: WARN
 
@@ -16,7 +18,9 @@ Indexes with zero scans that are larger than 500 MB. These indexes consume disk 
 - Unique indexes (enforce data integrity)
 
 ### 2. Low Usage Indexes
-Indexes larger than 500 MB with more than 10,000 table writes and a sustained scan rate below 1 per week, over a statistics window of at least 30 days. These indexes have high maintenance costs relative to their query benefits.
+Indexes larger than 500 MB with more than 10,000 table writes and a sustained scan rate below 1 per week,
+over a statistics window of at least 30 days.
+These indexes have high maintenance costs relative to their query benefits.
 
 **Severity**: WARN
 
