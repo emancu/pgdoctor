@@ -13,8 +13,16 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 **Formula**: `blocks_hit / (blocks_hit + blocks_read) * 100`
 
 **Thresholds**:
-- **WARN**: < 90% cache hit ratio
+- **INFO**: < 90% cache hit ratio
 - **OK**: ≥ 90% cache hit ratio
+
+### Per-Index Cache Hit Ratio
+
+Indexes with low buffer cache hit ratios, indicating frequent disk I/O:
+- < 90% cache hit ratio on indexes > 100 MB
+- < 95% cache hit ratio on indexes > 10 MB
+
+**Severity**: INFO
 
 ## Why Cache Hit Ratio Matters
 
@@ -110,6 +118,21 @@ For persistent low cache ratios despite tuning:
 - **Archival**: Move old data to separate storage
 - **Caching layer**: Add application-level cache (Redis, Memcached)
 
+### For `index-cache-ratio`
+
+Low cache hit ratio means frequent disk I/O.
+
+**Options to improve:**
+1. Increase `shared_buffers` (if memory available)
+2. Consider partial indexes to reduce size
+3. Review query patterns - may be scanning too much data
+4. If index is unused, consider dropping it
+
+```sql
+-- Check current shared_buffers
+SHOW shared_buffers;
+```
+
 ## False Positives
 
 Low cache ratios may be acceptable for:
@@ -121,4 +144,4 @@ Run this check during normal OLTP workload periods for accurate results.
 
 ## Query Details
 
-Queries `pg_stat_database` for the current database's block hit and read counters, calculating the cache hit percentage.
+Queries `pg_stat_database` for the current database's block hit and read counters, and `pg_statio_user_indexes` for per-index hit and read counters, calculating the cache hit percentages.
