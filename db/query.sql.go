@@ -354,6 +354,25 @@ func (q *Queries) HasPgStatStatements(ctx context.Context) (bool, error) {
 	return exists, err
 }
 
+const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one
+SELECT COUNT(*)::bigint
+FROM pg_stat_statements
+WHERE
+  query = '<insufficient privilege>'
+  AND dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
+`
+
+// Counts pg_stat_statements rows whose text the current role cannot read.
+// Only superusers and roles with pg_read_all_stats see other users' query
+// text; everyone else gets '<insufficient privilege>', which would silently
+// shrink the analyzed set and produce a confident PASS on partial data.
+func (q *Queries) HiddenQueryTextCount(ctx context.Context) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, hiddenQueryTextCount)
+	var count pgtype.Int8
+	err := row.Scan(&count)
+	return count, err
+}
+
 const highSeqScanTables = `-- name: HighSeqScanTables :many
 WITH table_indexes AS (
   SELECT
@@ -986,7 +1005,20 @@ func (q *Queries) PGVersion(ctx context.Context) (PGVersionRow, error) {
 }
 
 const partitionedTablesWithKeys = `-- name: PartitionedTablesWithKeys :many
-WITH partition_stats AS (
+WITH relevant_parents AS (
+  -- Restrict the size/stat aggregation below to the partitioned tables this
+  -- check actually reports on. Without this, pg_total_relation_size() runs for
+  -- every inherited relation in the database, including the excluded schemas.
+  SELECT c.oid
+  FROM pg_catalog.pg_class AS c
+  INNER JOIN pg_catalog.pg_namespace AS n ON c.relnamespace = n.oid
+  INNER JOIN pg_partitioned_table AS pt ON c.oid = pt.partrelid
+  WHERE
+    c.relkind = 'p'
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
+)
+
+, partition_stats AS (
   -- Single aggregation of all partition metrics from child tables
   SELECT
     i.inhparent
@@ -996,6 +1028,7 @@ WITH partition_stats AS (
     , COALESCE(SUM(s.seq_scan), 0)::bigint AS total_seq_scans
     , COALESCE(SUM(s.idx_scan), 0)::bigint AS total_idx_scans
   FROM pg_inherits AS i
+  INNER JOIN relevant_parents AS rp ON i.inhparent = rp.oid
   LEFT JOIN pg_stat_user_tables AS s ON i.inhrelid = s.relid
   GROUP BY i.inhparent
 )
@@ -1079,7 +1112,9 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
 SELECT
   queryid::bigint AS query_id
+  -- Lowercased for matching; the original casing is kept for display.
   , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
+  , REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query_display
   , calls::bigint AS calls
   , total_exec_time::double precision AS total_exec_time
   , mean_exec_time::double precision AS mean_exec_time
@@ -1089,12 +1124,16 @@ WHERE
   dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
   AND toplevel
   AND calls > 10
-  AND query NOT LIKE 'COPY%'
-  AND query NOT LIKE 'SET %'
-  AND query !~ '^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PREPARE|DEALLOCATE)'
-  AND query !~ '^(VACUUM|ANALYZE|REINDEX|CLUSTER)'
-  AND query !~ '^(CREATE|DROP|ALTER|TRUNCATE)'
-  AND (query ILIKE '%SELECT%' OR query ILIKE '%UPDATE%' OR query ILIKE '%DELETE%')
+  -- Only statements that scan the table can prune partitions, so match on the
+  -- leading keyword. An INSERT routes each row to a partition by its key value
+  -- and never prunes; matching '%UPDATE%' anywhere in the text used to accept
+  -- every INSERT that carried an "updated_at" column. Anchoring here also
+  -- excludes utility statements (COPY, SET, VACUUM, transaction control, DDL).
+  AND query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'
+  -- A CTE can still wrap an INSERT (WITH v AS (...) INSERT INTO ...), which the
+  -- leading keyword alone does not catch. Excluding INSERT INTO anywhere also
+  -- drops INSERT ... SELECT, whose target table is routed rather than pruned.
+  AND query !~* '\minsert\s+into\M'
 ORDER BY total_exec_time DESC
 LIMIT 500
 `
@@ -1102,6 +1141,7 @@ LIMIT 500
 type QueryStatsFromStatStatementsRow struct {
 	QueryID       pgtype.Int8
 	Query         pgtype.Text
+	QueryDisplay  pgtype.Text
 	Calls         pgtype.Int8
 	TotalExecTime pgtype.Float8
 	MeanExecTime  pgtype.Float8
@@ -1122,6 +1162,7 @@ func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStat
 		if err := rows.Scan(
 			&i.QueryID,
 			&i.Query,
+			&i.QueryDisplay,
 			&i.Calls,
 			&i.TotalExecTime,
 			&i.MeanExecTime,

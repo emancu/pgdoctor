@@ -5,10 +5,12 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 //go:embed query.sql
@@ -19,6 +21,7 @@ var readme string
 
 type PartitionUsageQueries interface {
 	HasPgStatStatements(context.Context) (bool, error)
+	HiddenQueryTextCount(context.Context) (pgtype.Int8, error)
 	PartitionedTablesWithKeys(context.Context) ([]db.PartitionedTablesWithKeysRow, error)
 	QueryStatsFromStatStatements(context.Context) ([]db.QueryStatsFromStatStatementsRow, error)
 }
@@ -59,6 +62,15 @@ const (
 	minSeqScansWarn   = int64(1000)
 	seqToIdxRatioWarn = int64(10)
 	seqToIdxRatioFail = int64(100)
+
+	// problemQueriesBrief is how many statements are listed at the default
+	// detail level; --detail verbose lists every one.
+	problemQueriesBrief = 3
+
+	// maxQueryTextWidth keeps the table inside a terminal. ORM-generated
+	// statements run to thousands of characters, and the queryid identifies
+	// them anyway.
+	maxQueryTextWidth = 120
 )
 
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
@@ -72,7 +84,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if len(partitionedTables) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  "No partitioned tables found",
 		})
@@ -97,6 +109,22 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
+	hiddenQueries, err := c.queries.HiddenQueryTextCount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counting hidden query texts: %w", err)
+	}
+
+	if hiddenQueries.Int64 > 0 {
+		report.AddFinding(check.Finding{
+			ID:       "query-text-restricted",
+			Name:     "Query Text Not Fully Visible",
+			Severity: check.SeverityWarn,
+			Details: fmt.Sprintf(
+				"%d pg_stat_statements entries are hidden from the current role, so partition key analysis covers only part of the workload. Grant pg_read_all_stats to see every query.",
+				hiddenQueries.Int64),
+		})
+	}
+
 	// Full query pattern analysis with pg_stat_statements
 	queryStats, err := c.queries.QueryStatsFromStatStatements(ctx)
 	if err != nil {
@@ -106,7 +134,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if len(queryStats) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
@@ -124,8 +152,8 @@ func checkPartitionKeyUsage(
 	queries []db.QueryStatsFromStatStatementsRow,
 	report *check.Report,
 ) {
-	var tableRows []check.TableRow
-	var prescriptionExamples []string
+	var affected []affectedTable
+	var problems []problemQuery
 	hasCritical := false
 
 	for _, table := range tables {
@@ -142,62 +170,65 @@ func checkPartitionKeyUsage(
 		partitionKeys := strings.Split(table.PartitionKeyColumns.String, ",")
 		tableName := table.TableName.String
 		schemaName := table.SchemaName.String
+		qualifiedName := fmt.Sprintf("%s.%s", schemaName, tableName)
 
-		var problemQueryCount int
+		var found []problemQuery
 		var totalCalls int64
 		var totalExecTime float64
-		var exampleQuery string
 
 		for _, q := range queries {
 			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
 				continue
 			}
 
-			if !queryUsesPartitionKey(q.Query.String, partitionKeys) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
-					problemQueryCount++
 					totalCalls += calls
 					totalExecTime += execTime
-					if exampleQuery == "" {
-						exampleQuery = fmt.Sprintf("Table: %s.%s (partition key: %s, %d partitions)\n  Example query (%d calls, %s total):\n    %s",
-							schemaName, tableName, table.PartitionKeyColumns.String, table.PartitionCount.Int64,
-							calls, check.FormatDurationMs(execTime), q.Query.String)
-					}
+					found = append(found, problemQuery{
+						table:    qualifiedName,
+						calls:    calls,
+						execTime: execTime,
+						queryID:  q.QueryID.Int64,
+						text:     q.QueryDisplay.String,
+					})
 				}
 			}
 		}
 
-		if problemQueryCount > 0 {
-			severity := check.SeverityWarn
-			if totalCalls >= minCallsFail || totalExecTime >= totalExecTimeFailMs {
-				severity = check.SeverityFail
-				hasCritical = true
-			}
-
-			tableRows = append(tableRows, check.TableRow{
-				Cells: []string{
-					fmt.Sprintf("%s.%s", schemaName, tableName),
-					table.PartitionKeyColumns.String,
-					fmt.Sprintf("%d", table.PartitionCount.Int64),
-					fmt.Sprintf("%d", problemQueryCount),
-					fmt.Sprintf("%d", totalCalls),
-					check.FormatDurationMs(totalExecTime),
-				},
-				Severity: severity,
-			})
-
-			if len(prescriptionExamples) < 3 {
-				prescriptionExamples = append(prescriptionExamples, exampleQuery)
-			}
+		if len(found) == 0 {
+			continue
 		}
+
+		// Severity is a property of the table's whole workload, not of any single
+		// statement, so every one of its rows carries the table's severity.
+		severity := check.SeverityWarn
+		if totalCalls >= minCallsFail || totalExecTime >= totalExecTimeFailMs {
+			severity = check.SeverityFail
+			hasCritical = true
+		}
+
+		for i := range found {
+			found[i].severity = severity
+		}
+
+		problems = append(problems, found...)
+		affected = append(affected, affectedTable{
+			qualifiedName: qualifiedName,
+			partitionKeys: table.PartitionKeyColumns.String,
+			partitions:    table.PartitionCount.Int64,
+			statements:    len(found),
+			calls:         totalCalls,
+			execTime:      totalExecTime,
+		})
 	}
 
-	if len(tableRows) == 0 {
+	if len(affected) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
-			Name:     "Partition Key Usage Analysis",
+			Name:     "Queries Missing Partition Key",
 			Severity: check.SeverityPass,
 			Details:  fmt.Sprintf("All queries on %d partitioned table(s) properly use partition keys", len(tables)),
 		})
@@ -209,32 +240,163 @@ func checkPartitionKeyUsage(
 		overallSeverity = check.SeverityFail
 	}
 
+	// Worst first, so the default detail level shows the statements that matter
+	// most across every table rather than whichever table came first.
+	slices.SortStableFunc(problems, func(a, b problemQuery) int {
+		switch {
+		case a.execTime > b.execTime:
+			return -1
+		case a.execTime < b.execTime:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	rows := make([]check.TableRow, 0, len(problems))
+	for _, problem := range problems {
+		rows = append(rows, check.TableRow{
+			Cells: []string{
+				problem.table,
+				check.FormatNumber(problem.calls),
+				check.FormatDurationMs(problem.execTime),
+				fmt.Sprintf("%d", problem.queryID),
+				clipQueryText(problem.text),
+			},
+			Severity: problem.severity,
+		})
+	}
+
 	report.AddFinding(check.Finding{
 		ID:       "partition-key-unused",
-		Name:     "Partition Key Usage Analysis",
+		Name:     "Queries Missing Partition Key",
 		Severity: overallSeverity,
-		Details:  fmt.Sprintf("Found %d partitioned table(s) with queries not using partition key", len(tableRows)),
+		Details:  problemDetails(affected, len(problems)),
 		Table: &check.Table{
-			Headers: []string{"Table", "Partition Key", "Partitions", "Problem Queries", "Total Calls", "Total Time"},
-			Rows:    tableRows,
+			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
+			Rows:         rows,
+			MaxRowsBrief: problemQueriesBrief,
 		},
 	})
 }
 
-// queryReferencesTable checks if a query text references a specific table.
-func queryReferencesTable(queryText, schemaName, tableName string) bool {
-	patterns := []string{
-		strings.ToLower(schemaName + "." + tableName),
-		strings.ToLower(tableName),
-		`"` + strings.ToLower(tableName) + `"`,
+// affectedTable summarizes one partitioned table's unprunable workload.
+type affectedTable struct {
+	qualifiedName string
+	partitionKeys string
+	partitions    int64
+	statements    int
+	calls         int64
+	execTime      float64
+}
+
+// problemQuery is one statement that does not constrain its table's partition key.
+type problemQuery struct {
+	table    string
+	calls    int64
+	execTime float64
+	queryID  int64
+	text     string
+	severity check.Severity
+}
+
+// problemDetails describes the affected tables, so the per-table totals stay
+// visible even when the statement list is capped at the default detail level.
+func problemDetails(affected []affectedTable, statements int) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)",
+		statements, len(affected))
+
+	for _, table := range affected {
+		fmt.Fprintf(&b, "\n  %s (key: %s, %d partitions) — %d statement(s), %s calls, %s",
+			table.qualifiedName, table.partitionKeys, table.partitions, table.statements,
+			check.FormatNumber(table.calls), check.FormatDurationMs(table.execTime))
 	}
 
-	for _, p := range patterns {
-		if containsSQLIdentifier(queryText, p) {
-			return true
+	b.WriteString("\nRead a statement in full: SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;")
+
+	return b.String()
+}
+
+// clipQueryText shortens a normalized statement to one terminal line, counting
+// runes so a multi-byte identifier or comment is never split mid-character.
+func clipQueryText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= maxQueryTextWidth {
+		return text
+	}
+
+	return string(runes[:maxQueryTextWidth-1]) + "…"
+}
+
+// queryReferencesTable checks if a query text references a specific table.
+// A reference qualified by a different schema does not count, so identically
+// named tables in sibling schemas are not credited with each other's queries.
+func queryReferencesTable(queryText, schemaName, tableName string) bool {
+	schemaName = strings.ToLower(schemaName)
+	tableName = strings.ToLower(tableName)
+
+	// Either identifier may be quoted independently, so cover all four forms.
+	for _, schema := range []string{schemaName, `"` + schemaName + `"`} {
+		for _, table := range []string{tableName, `"` + tableName + `"`} {
+			if containsSQLIdentifier(queryText, schema+"."+table) {
+				return true
+			}
 		}
 	}
+
+	return containsUnqualifiedIdentifier(queryText, tableName) ||
+		containsUnqualifiedIdentifier(queryText, `"`+tableName+`"`)
+}
+
+// containsUnqualifiedIdentifier reports whether identifier occurs with SQL
+// identifier boundaries and without a schema qualifier in front of it.
+func containsUnqualifiedIdentifier(queryText, identifier string) bool {
+	if identifier == "" {
+		return false
+	}
+
+	for searchFrom := 0; searchFrom < len(queryText); {
+		match := strings.Index(queryText[searchFrom:], identifier)
+		if match == -1 {
+			return false
+		}
+		match += searchFrom
+		matchEnd := match + len(identifier)
+
+		hasStartBoundary := match == 0 || !isSQLIdentifierByte(queryText[match-1])
+		hasEndBoundary := matchEnd == len(queryText) || !isSQLIdentifierByte(queryText[matchEnd])
+		if hasStartBoundary && hasEndBoundary && !isSchemaQualified(queryText[:match]) {
+			return true
+		}
+
+		searchFrom = match + 1
+	}
+
 	return false
+}
+
+// isSchemaQualified reports whether text ends with a qualifier such as
+// "tenant_a." or `"tenant_a".` that would bind the following identifier to
+// another schema.
+func isSchemaQualified(text string) bool {
+	// Skip the identifier's own opening quote, so tenant_a."orders" is seen as
+	// qualified even when the bare table name was the pattern that matched.
+	text = strings.TrimSuffix(text, `"`)
+
+	if !strings.HasSuffix(text, ".") {
+		return false
+	}
+
+	qualifier := strings.TrimSuffix(text, ".")
+	if qualifier == "" {
+		return false
+	}
+
+	last := qualifier[len(qualifier)-1]
+
+	return isSQLIdentifierByte(last) || last == '"'
 }
 
 // containsSQLIdentifier reports whether identifier occurs with SQL identifier
@@ -274,25 +436,151 @@ func isSQLIdentifierByte(b byte) bool {
 		b >= 0x80
 }
 
-// queryUsesPartitionKey checks if the query's WHERE clause uses any partition key column.
-func queryUsesPartitionKey(queryText string, partitionKeys []string) bool {
-	whereClause := extractWhereClause(queryText)
-	if whereClause == "" {
+// Partition strategies as stored in pg_partitioned_table.partstrat.
+const (
+	strategyHash  = "h"
+	strategyList  = "l"
+	strategyRange = "r"
+)
+
+// queryConstrainsPartitionKey reports whether the statement constrains the
+// partition key in a way the strategy can prune with, looking at everything
+// after FROM so JOIN conditions count alongside WHERE. A key constrained only
+// through a join prunes when the planner parameterizes the partitioned side,
+// and not when it hash joins, so this cannot be decided from query text —
+// treating it as constrained keeps the check quiet rather than reporting a
+// table whose access path may well be pruning.
+func queryConstrainsPartitionKey(queryText string, partitionKeys []string, strategy string, tableName string) bool {
+	clause := searchableClause(queryText)
+	if clause == "" {
 		return false
 	}
 
-	return clauseFiltersAnyColumn(whereClause, partitionKeys)
+	return clauseEnablesPruning(maskForeignSubqueries(clause, tableName), partitionKeys, strategy)
+}
+
+// searchableClause returns the part of the statement that can constrain the
+// partition key. Everything after FROM covers JOIN conditions alongside WHERE,
+// but a plain UPDATE has no FROM, so fall back to its WHERE clause.
+func searchableClause(queryText string) string {
+	if fromIdx := strings.Index(queryText, " from "); fromIdx != -1 {
+		return queryText[fromIdx:]
+	}
+
+	if whereIdx := strings.Index(queryText, " where "); whereIdx != -1 {
+		return queryText[whereIdx:]
+	}
+
+	return ""
+}
+
+// maskForeignSubqueries blanks out parenthesized subqueries that do not scan the
+// target table, so a predicate on another table's identically named column —
+// common for a key called "id" — is not read as constraining this one. A
+// subquery that does reference the target table is kept, since its predicate may
+// be the one enabling pruning. Only groups that open a SELECT are removed:
+// ActiveRecord and Ecto wrap ordinary predicates in parentheses, and those must
+// still be searched.
+func maskForeignSubqueries(text, tableName string) string {
+	tableName = strings.ToLower(tableName)
+	masked := []byte(text)
+
+	for i := 0; i < len(masked); i++ {
+		if masked[i] != '(' {
+			continue
+		}
+
+		if !strings.HasPrefix(strings.TrimLeft(text[i+1:], " "), "select") {
+			continue
+		}
+
+		if end := matchingParen(text, i); end != -1 &&
+			containsUnqualifiedIdentifier(text[i:end], tableName) {
+			continue
+		}
+
+		end := matchingParen(text, i)
+		if end == -1 {
+			end = len(masked)
+		}
+
+		for j := i; j < end; j++ {
+			masked[j] = ' '
+		}
+
+		i = end
+	}
+
+	return string(masked)
+}
+
+// matchingParen returns the index just past the ')' closing the '(' at open,
+// or -1 when the parentheses are unbalanced.
+func matchingParen(text string, open int) int {
+	depth := 0
+	for i := open; i < len(text); i++ {
+		switch text[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+
+	return -1
+}
+
+// clauseEnablesPruning reports whether the clause constrains the partition key
+// in a way the strategy can prune with:
+//
+//   - hash: every key column needs equality, since the hash is only determined
+//     once every column is known. A range comparison never prunes.
+//   - list and range: the leading key column must be constrained, with any
+//     comparison. PostgreSQL prunes LIST partitions for inequalities too — it
+//     excludes partitions whose listed values cannot satisfy the predicate.
+//
+// An unrecognized strategy falls back to "any key column, any pruning operator".
+func clauseEnablesPruning(clause string, partitionKeys []string, strategy string) bool {
+	columns := normalizeColumns(partitionKeys)
+	if len(columns) == 0 {
+		return false
+	}
+
+	switch strategy {
+	case strategyHash:
+		for _, col := range columns {
+			if !clauseFiltersColumn(clause, col, equalityOnly) {
+				return false
+			}
+		}
+		return true
+
+	case strategyList, strategyRange:
+		return clauseFiltersColumn(clause, columns[0], anyPruningOperator)
+
+	default:
+		return clauseFiltersAnyColumn(clause, columns)
+	}
+}
+
+func normalizeColumns(columns []string) []string {
+	normalized := make([]string, 0, len(columns))
+	for _, col := range columns {
+		if col = strings.ToLower(strings.TrimSpace(col)); col != "" {
+			normalized = append(normalized, col)
+		}
+	}
+
+	return normalized
 }
 
 // clauseFiltersAnyColumn reports whether the clause filters on any of the columns.
 func clauseFiltersAnyColumn(clause string, columns []string) bool {
-	for _, col := range columns {
-		col = strings.ToLower(strings.TrimSpace(col))
-		if col == "" {
-			continue
-		}
-
-		if clauseFiltersColumn(clause, col) {
+	for _, col := range normalizeColumns(columns) {
+		if clauseFiltersColumn(clause, col, anyPruningOperator) {
 			return true
 		}
 	}
@@ -300,11 +588,22 @@ func clauseFiltersAnyColumn(clause string, columns []string) bool {
 	return false
 }
 
+// operatorMode selects which comparisons count as constraining a column.
+type operatorMode int
+
+const (
+	// anyPruningOperator accepts every btree comparison, as range pruning uses.
+	anyPruningOperator operatorMode = iota
+	// equalityOnly accepts only equality forms, the sole way hash and list
+	// partitioning can prune.
+	equalityOnly
+)
+
 // clauseFiltersColumn reports whether col appears in clause as a comparison
 // that can drive partition pruning, with SQL identifier boundaries so a key
 // such as "id" does not match inside "customer_id". Bare, quoted, and
 // table-qualified references all satisfy the boundary rule.
-func clauseFiltersColumn(clause, col string) bool {
+func clauseFiltersColumn(clause, col string, mode operatorMode) bool {
 	for searchFrom := 0; searchFrom < len(clause); {
 		match := strings.Index(clause[searchFrom:], col)
 		if match == -1 {
@@ -316,7 +615,7 @@ func clauseFiltersColumn(clause, col string) bool {
 		hasStartBoundary := match == 0 || !isSQLIdentifierByte(clause[match-1])
 		hasEndBoundary := matchEnd == len(clause) || !isSQLIdentifierByte(clause[matchEnd])
 		if hasStartBoundary && hasEndBoundary &&
-			(hasComparisonAfter(clause[matchEnd:]) || hasComparisonBefore(clause[:match])) {
+			(hasComparisonAfter(clause[matchEnd:], mode) || hasComparisonBefore(clause[:match], mode)) {
 			return true
 		}
 
@@ -329,6 +628,25 @@ func clauseFiltersColumn(clause, col string) bool {
 // pruningOperators are the btree comparison operators partition pruning can
 // use, longest first so "<=" is not read as "<".
 var pruningOperators = []string{"<=", ">=", "=", "<", ">"}
+
+// operatorsFor returns the comparison operators the mode accepts.
+func operatorsFor(mode operatorMode) []string {
+	if mode == equalityOnly {
+		return []string{"="}
+	}
+
+	return pruningOperators
+}
+
+// keywordsFor returns the comparison keywords the mode accepts. BETWEEN is a
+// range constraint, so hash and list partitioning cannot prune with it.
+func keywordsFor(mode operatorMode) []string {
+	if mode == equalityOnly {
+		return []string{"in ", "in(", "is null"}
+	}
+
+	return []string{"in ", "in(", "between ", "is null"}
+}
 
 // operatorBytes are bytes that can form part of a SQL operator name. They mark
 // a match such as "<" in "<@" or "<>" as a different, non-pruning operator.
@@ -354,19 +672,24 @@ func trimTrailingIdentifier(text string) string {
 // quote and spaces) with a comparison that enables partition pruning, i.e. the
 // column is on the left-hand side. A bare column mention (in ORDER BY or a
 // SELECT list) does not count.
-func hasComparisonAfter(rest string) bool {
+func hasComparisonAfter(rest string, mode operatorMode) bool {
 	rest = strings.TrimPrefix(rest, `"`)
 	rest = strings.TrimLeft(rest, " ")
 
+	// Match against every pruning operator, not just the accepted ones, so a
+	// rejected operator does not fall through to the keyword check.
 	for _, op := range pruningOperators {
 		if strings.HasPrefix(rest, op) {
 			trailing := rest[len(op):]
 			// Reject compound operators such as <>, <@ and >>.
-			return trailing == "" || !isOperatorByte(trailing[0])
+			if trailing != "" && isOperatorByte(trailing[0]) {
+				return false
+			}
+			return slices.Contains(operatorsFor(mode), op)
 		}
 	}
 
-	for _, keyword := range []string{"in ", "in(", "between ", "is null"} {
+	for _, keyword := range keywordsFor(mode) {
 		if strings.HasPrefix(rest, keyword) {
 			return true
 		}
@@ -378,7 +701,7 @@ func hasComparisonAfter(rest string) bool {
 // hasComparisonBefore reports whether text ends with a comparison that enables
 // partition pruning, i.e. the column is on the right-hand side ($1 <= created_at).
 // PostgreSQL commutes these operators, so they prune just like the left-hand form.
-func hasComparisonBefore(text string) bool {
+func hasComparisonBefore(text string, mode operatorMode) bool {
 	text = strings.TrimSuffix(text, `"`)
 
 	// Skip a table qualifier between the operator and the column, as in
@@ -393,46 +716,14 @@ func hasComparisonBefore(text string) bool {
 		if strings.HasSuffix(text, op) {
 			leading := text[:len(text)-len(op)]
 			// Reject compound operators such as <>, != and @>.
-			return leading == "" || !isOperatorByte(leading[len(leading)-1])
+			if leading != "" && isOperatorByte(leading[len(leading)-1]) {
+				return false
+			}
+			return slices.Contains(operatorsFor(mode), op)
 		}
 	}
 
 	return false
-}
-
-// extractWhereClause extracts the WHERE clause from a query. Clause end
-// markers are only honored outside parentheses, so a LIMIT or ORDER BY inside
-// a subquery does not truncate the outer clause.
-func extractWhereClause(queryText string) string {
-	_, after, ok := strings.Cut(queryText, " where ")
-	if !ok {
-		return ""
-	}
-
-	endMarkers := []string{" order by", " group by", " having", " limit", " offset", " for update", " for share", ";"}
-
-	depth := 0
-	for i := 0; i < len(after); i++ {
-		switch after[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case ' ', ';':
-			if depth > 0 {
-				continue
-			}
-			for _, marker := range endMarkers {
-				if strings.HasPrefix(after[i:], marker) {
-					return strings.TrimSpace(after[:i])
-				}
-			}
-		}
-	}
-
-	return strings.TrimSpace(after)
 }
 
 // checkJoinsMissingPartitionKey detects JOINs on partitioned tables that don't include the partition key.
@@ -473,7 +764,7 @@ func checkJoinsMissingPartitionKey(
 			}
 
 			// Check if partition key appears after FROM (covers JOIN ON, WHERE, implicit joins).
-			if !queryUsesPartitionKeyAfterFrom(q.Query.String, partitionKeys) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
@@ -600,15 +891,4 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 // queryHasJoin checks if a query contains a JOIN clause.
 func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
-}
-
-// queryUsesPartitionKeyAfterFrom checks if the partition key is compared
-// anywhere after the FROM clause (covers JOIN ON conditions and WHERE).
-func queryUsesPartitionKeyAfterFrom(queryText string, partitionKeys []string) bool {
-	fromIdx := strings.Index(queryText, " from ")
-	if fromIdx == -1 {
-		return false
-	}
-
-	return clauseFiltersAnyColumn(queryText[fromIdx:], partitionKeys)
 }
