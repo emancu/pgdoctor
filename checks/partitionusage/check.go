@@ -192,7 +192,7 @@ func checkPartitionKeyUsage(
 						calls:    calls,
 						execTime: execTime,
 						queryID:  q.QueryID.Int64,
-						text:     q.QueryDisplay.String,
+						text:     q.Query.String,
 					})
 				}
 			}

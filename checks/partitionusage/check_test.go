@@ -109,13 +109,11 @@ func makePartitionedTableWithScans(schema, name, partitionKey string, seqScans, 
 }
 
 // Helper to create a QueryStatsFromStatStatementsRow.
-// Lowercases the matching text and keeps the original for display, mirroring
-// the LOWER() and query_display columns in query.sql.
+// Lowercased, mirroring the LOWER() in query.sql.
 func makeQueryStats(query string, calls int64, totalExecTime float64) db.QueryStatsFromStatStatementsRow {
 	return db.QueryStatsFromStatStatementsRow{
 		QueryID:       pgtype.Int8{Int64: 12345, Valid: true},
 		Query:         pgtype.Text{String: strings.ToLower(query), Valid: true},
-		QueryDisplay:  pgtype.Text{String: query, Valid: true},
 		Calls:         pgtype.Int8{Int64: calls, Valid: true},
 		TotalExecTime: pgtype.Float8{Float64: totalExecTime, Valid: true},
 		MeanExecTime:  pgtype.Float8{Float64: totalExecTime / float64(calls), Valid: true},
@@ -861,9 +859,7 @@ func Test_PartitionUsage_ProblemQueriesListed(t *testing.T) {
 	require.Contains(t, examples.Table.Rows[0].Cells[4], `"status" = $1`)
 	require.Contains(t, examples.Table.Rows[1].Cells[4], `"customer_id" = $1`)
 
-	// Original casing is preserved for display, and the queryid is shown so the
-	// full text can be looked up.
-	require.Contains(t, examples.Table.Rows[0].Cells[4], "SELECT")
+	// The queryid is shown so the full text can be looked up.
 	require.Equal(t, "12345", examples.Table.Rows[0].Cells[3])
 	require.Contains(t, examples.Details, "pg_stat_statements WHERE queryid")
 }

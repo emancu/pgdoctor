@@ -49,6 +49,24 @@ jobs:
 
   codegen:
     runs-on: ubuntu-latest
+
+    # sqlc resolves every query against a live server. The queries reference
+    # columns added in PostgreSQL 17 (pg_replication_slots.invalidation_reason),
+    # so generation fails on older majors. pg_stat_statements only needs to be
+    # installed, not preloaded — sqlc reads its catalog entries, never its data.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -56,8 +74,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
+
+      - name: Prepare database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
+
       - name: Verify generated code is up to date
         run: |
+          sqlc generate
           go generate ./...
           git diff --exit-code
 
