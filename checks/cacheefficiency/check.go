@@ -148,9 +148,9 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.IndexName.String,
 				check.FormatBytes(row.IndexSizeBytes.Int64),
 				fmt.Sprintf("%.1f%%", cacheRatio),
+				row.IndexName.String,
 			},
 			Severity: check.SeverityInfo,
 		})
@@ -175,7 +175,7 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		Details:  fmt.Sprintf("Found %d hot indexes over 500MB with cache hit ratio below 75%%", len(tableRows)),
 		Debug:    debug,
 		Table: &check.Table{
-			Headers: []string{"Index", "Size", "Hit %"},
+			Headers: []string{"Size", "Hit %", "Index"},
 			Rows:    tableRows,
 		},
 	})
@@ -237,9 +237,9 @@ func checkTableCacheRatio(rows []db.TableCacheEfficiencyRow, report *check.Repor
 
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.TableName.String,
 				check.FormatBytes(row.TableSizeBytes.Int64),
 				fmt.Sprintf("%.1f%%", cacheRatio),
+				row.TableName.String,
 			},
 			Severity: check.SeverityInfo,
 		})
@@ -264,7 +264,7 @@ func checkTableCacheRatio(rows []db.TableCacheEfficiencyRow, report *check.Repor
 		Details:  fmt.Sprintf("Found %d hot tables over 500MB with heap cache hit ratio below 75%%", len(tableRows)),
 		Debug:    debug,
 		Table: &check.Table{
-			Headers: []string{"Table", "Size", "Hit %"},
+			Headers: []string{"Size", "Hit %", "Table"},
 			Rows:    tableRows,
 		},
 	})

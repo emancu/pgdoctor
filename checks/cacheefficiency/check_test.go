@@ -342,9 +342,9 @@ func Test_IndexCacheRatio_Informational(t *testing.T) {
 
 	f := findFinding(t, report, "index-cache-ratio")
 	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.Equal(t, []string{"Index", "Size", "Hit %"}, f.Table.Headers)
+	require.Equal(t, []string{"Size", "Hit %", "Index"}, f.Table.Headers)
 	require.Len(t, f.Table.Rows, 1)
-	require.Equal(t, []string{"public.idx_orders_created", "600.0MiB", "70.0%"}, f.Table.Rows[0].Cells)
+	require.Equal(t, []string{"600.0MiB", "70.0%", "public.idx_orders_created"}, f.Table.Rows[0].Cells)
 	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
 	// Info must not escalate the report.
 	require.Equal(t, check.SeverityPass, report.Severity)
@@ -484,9 +484,9 @@ func Test_TableCacheRatio_Informational(t *testing.T) {
 
 	f := findFinding(t, report, "table-cache-ratio")
 	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.Equal(t, []string{"Table", "Size", "Hit %"}, f.Table.Headers)
+	require.Equal(t, []string{"Size", "Hit %", "Table"}, f.Table.Headers)
 	require.Len(t, f.Table.Rows, 1)
-	require.Equal(t, []string{"public.orders", "600.0MiB", "70.0%"}, f.Table.Rows[0].Cells)
+	require.Equal(t, []string{"600.0MiB", "70.0%", "public.orders"}, f.Table.Rows[0].Cells)
 	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
 	// Info must not escalate the report.
 	require.Equal(t, check.SeverityPass, report.Severity)
