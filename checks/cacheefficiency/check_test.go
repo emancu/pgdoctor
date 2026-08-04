@@ -447,8 +447,8 @@ func Test_IndexCacheRatio_DebugTopIndexes(t *testing.T) {
 
 	f := findFinding(t, report, "index-cache-ratio")
 	require.Contains(t, f.Debug, "Top indexes by scans:")
-	require.Contains(t, f.Debug, "#1  public.idx_small_hot  hit 99.0%  share 45.0%  scans 90.0K")
-	require.Contains(t, f.Debug, "#2  public.idx_big_cold  hit 70.0%  share 30.0%  scans 60.0K")
+	require.Contains(t, f.Debug, "#1  hit 99.0%  share 45.0%  scans 90.0K  public.idx_small_hot")
+	require.Contains(t, f.Debug, "#2  hit 70.0%  share 30.0%  scans 60.0K  public.idx_big_cold")
 	require.NotContains(t, f.Debug, "idx_unranked")
 	require.Less(t, strings.Index(f.Debug, "#1"), strings.Index(f.Debug, "#2"))
 }
@@ -462,7 +462,7 @@ func Test_IndexCacheRatio_DebugOnPass(t *testing.T) {
 
 	f := findFinding(t, report, "index-cache-ratio")
 	require.Equal(t, check.SeverityPass, f.Severity)
-	require.Contains(t, f.Debug, "#1  public.idx_healthy")
+	require.Contains(t, f.Debug, "scans 90.0K  public.idx_healthy")
 }
 
 func runWithTableRows(t *testing.T, rows []db.TableCacheEfficiencyRow) *check.Report {
@@ -589,8 +589,8 @@ func Test_TableCacheRatio_DebugTopTables(t *testing.T) {
 
 	f := findFinding(t, report, "table-cache-ratio")
 	require.Contains(t, f.Debug, "Top tables by reads:")
-	require.Contains(t, f.Debug, "#1  public.small_hot  hit 99.0%  share 45.0%  reads 90.0K")
-	require.Contains(t, f.Debug, "#2  public.big_cold  hit 70.0%  share 30.0%  reads 60.0K")
+	require.Contains(t, f.Debug, "#1  hit 99.0%  share 45.0%  reads 90.0K  public.small_hot")
+	require.Contains(t, f.Debug, "#2  hit 70.0%  share 30.0%  reads 60.0K  public.big_cold")
 	require.NotContains(t, f.Debug, "unranked")
 	require.Less(t, strings.Index(f.Debug, "#1"), strings.Index(f.Debug, "#2"))
 }
@@ -604,5 +604,5 @@ func Test_TableCacheRatio_DebugOnPass(t *testing.T) {
 
 	f := findFinding(t, report, "table-cache-ratio")
 	require.Equal(t, check.SeverityPass, f.Severity)
-	require.Contains(t, f.Debug, "#1  public.healthy")
+	require.Contains(t, f.Debug, "reads 90.0K  public.healthy")
 }

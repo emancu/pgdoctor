@@ -200,8 +200,8 @@ func topIndexesDebug(rows []db.IndexCacheEfficiencyRow) string {
 			hit = fmt.Sprintf("%.1f%%", r.Float64)
 		}
 		share, _ := row.ScanShare.Float64Value()
-		fmt.Fprintf(&b, "\n#%-2d %s  hit %s  share %.1f%%  scans %s",
-			row.ScanRank.Int64, row.IndexName.String, hit, share.Float64*100, check.FormatNumber(row.IdxScan.Int64))
+		fmt.Fprintf(&b, "\n#%-2d hit %s  share %.1f%%  scans %s  %s",
+			row.ScanRank.Int64, hit, share.Float64*100, check.FormatNumber(row.IdxScan.Int64), row.IndexName.String)
 	}
 	return b.String()
 }
@@ -289,8 +289,8 @@ func topTablesDebug(rows []db.TableCacheEfficiencyRow) string {
 			hit = fmt.Sprintf("%.1f%%", r.Float64)
 		}
 		share, _ := row.ReadShare.Float64Value()
-		fmt.Fprintf(&b, "\n#%-2d %s  hit %s  share %.1f%%  reads %s",
-			row.ReadRank.Int64, row.TableName.String, hit, share.Float64*100, check.FormatNumber(row.Reads.Int64))
+		fmt.Fprintf(&b, "\n#%-2d hit %s  share %.1f%%  reads %s  %s",
+			row.ReadRank.Int64, hit, share.Float64*100, check.FormatNumber(row.Reads.Int64), row.TableName.String)
 	}
 	return b.String()
 }
