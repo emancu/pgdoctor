@@ -677,7 +677,8 @@ FROM pg_statio_user_indexes AS psio
 INNER JOIN ranked ON psio.indexrelid = ranked.indexrelid
 WHERE
   psio.schemaname = 'public'
-  AND pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024
+  -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
+  AND (pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024 OR ranked.scan_rank <= 20)
 ORDER BY pg_relation_size(psio.indexrelid) DESC
 `
 

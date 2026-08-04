@@ -5,6 +5,8 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -143,11 +145,14 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		})
 	}
 
+	debug := topIndexesDebug(rows)
+
 	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "index-cache-ratio",
 			Name:     "Index Cache Efficiency",
 			Severity: check.SeverityPass,
+			Debug:    debug,
 		})
 		return
 	}
@@ -157,11 +162,37 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		Name:     "Index Cache Efficiency",
 		Severity: check.SeverityInfo,
 		Details:  fmt.Sprintf("Found %d hot indexes over 500MB with cache hit ratio below 75%%", len(tableRows)),
+		Debug:    debug,
 		Table: &check.Table{
 			Headers: []string{"Index", "Size", "Hit %"},
 			Rows:    tableRows,
 		},
 	})
+}
+
+// topIndexesDebug lists the top-20 scan ranking so the hot gate is verifiable.
+func topIndexesDebug(rows []db.IndexCacheEfficiencyRow) string {
+	top := make([]db.IndexCacheEfficiencyRow, 0, hotRankMax)
+	for _, row := range rows {
+		if row.ScanRank.Int64 <= hotRankMax {
+			top = append(top, row)
+		}
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].ScanRank.Int64 < top[j].ScanRank.Int64 })
+
+	var b strings.Builder
+	b.WriteString("Top indexes by scans:")
+	for _, row := range top {
+		hit := "-"
+		if row.CacheHitRatio.Valid {
+			r, _ := row.CacheHitRatio.Float64Value()
+			hit = fmt.Sprintf("%.1f%%", r.Float64)
+		}
+		share, _ := row.ScanShare.Float64Value()
+		fmt.Fprintf(&b, "\n#%-2d %s  hit %s  share %.1f%%  scans %s",
+			row.ScanRank.Int64, row.IndexName.String, hit, share.Float64*100, check.FormatNumber(row.IdxScan.Int64))
+	}
+	return b.String()
 }
 
 // indexIsHot gates on absolute scan volume plus a top-rank or traffic-share signal.

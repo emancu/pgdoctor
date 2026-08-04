@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -413,4 +414,33 @@ func Test_IndexCacheRatio_QueryError(t *testing.T) {
 	}
 	_, err := cacheefficiency.New(queryer).Check(context.Background())
 	require.ErrorContains(t, err, "cache-efficiency")
+}
+
+func Test_IndexCacheRatio_DebugTopIndexes(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+		indexRow("public.idx_big_cold", mb(600), 60000, 2, 0.30, 70.0),
+		indexRow("public.idx_small_hot", mb(100), 90000, 1, 0.45, 99.0),
+		indexRow("public.idx_unranked", mb(700), 500, 30, 0.001, 50.0),
+	})
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Contains(t, f.Debug, "Top indexes by scans:")
+	require.Contains(t, f.Debug, "#1  public.idx_small_hot  hit 99.0%  share 45.0%  scans 90.0K")
+	require.Contains(t, f.Debug, "#2  public.idx_big_cold  hit 70.0%  share 30.0%  scans 60.0K")
+	require.NotContains(t, f.Debug, "idx_unranked")
+	require.Less(t, strings.Index(f.Debug, "#1"), strings.Index(f.Debug, "#2"))
+}
+
+func Test_IndexCacheRatio_DebugOnPass(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+		indexRow("public.idx_healthy", mb(600), 90000, 1, 0.45, 99.0),
+	})
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Contains(t, f.Debug, "#1  public.idx_healthy")
 }
