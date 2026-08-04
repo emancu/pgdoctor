@@ -654,6 +654,73 @@ func (q *Queries) IndexBloat(ctx context.Context) ([]IndexBloatRow, error) {
 	return items, nil
 }
 
+const indexCacheEfficiency = `-- name: IndexCacheEfficiency :many
+WITH ranked AS (
+  SELECT
+    indexrelid
+    , coalesce(idx_scan, 0) AS idx_scan
+    , rank() OVER (ORDER BY coalesce(idx_scan, 0) DESC) AS scan_rank
+    , coalesce(idx_scan, 0)::numeric / NULLIF(sum(coalesce(idx_scan, 0)) OVER (), 0) AS scan_share
+  FROM pg_stat_user_indexes
+)
+SELECT
+  (psio.schemaname || '.' || psio.indexrelname)::text AS index_name
+  , pg_relation_size(psio.indexrelid) AS index_size_bytes
+  , ranked.idx_scan AS idx_scan
+  , ranked.scan_rank AS scan_rank
+  , ranked.scan_share AS scan_share
+  , CASE
+    WHEN coalesce(psio.idx_blks_hit, 0) + coalesce(psio.idx_blks_read, 0) = 0 THEN NULL
+    ELSE round(100.0 * psio.idx_blks_hit / (psio.idx_blks_hit + psio.idx_blks_read), 2)
+  END AS cache_hit_ratio
+FROM pg_statio_user_indexes AS psio
+INNER JOIN ranked ON psio.indexrelid = ranked.indexrelid
+WHERE
+  psio.schemaname = 'public'
+  -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
+  AND (pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024 OR ranked.scan_rank <= 20)
+ORDER BY pg_relation_size(psio.indexrelid) DESC
+`
+
+type IndexCacheEfficiencyRow struct {
+	IndexName      pgtype.Text
+	IndexSizeBytes pgtype.Int8
+	IdxScan        pgtype.Int8
+	ScanRank       pgtype.Int8
+	ScanShare      pgtype.Numeric
+	CacheHitRatio  pgtype.Numeric
+}
+
+// Per-index buffer cache hit ratios with scan rank and share across all user
+// indexes. Rank/share are computed before the size floor so a small index still
+// counts toward the traffic universe; the outer filters only limit what we list.
+func (q *Queries) IndexCacheEfficiency(ctx context.Context) ([]IndexCacheEfficiencyRow, error) {
+	rows, err := q.db.Query(ctx, indexCacheEfficiency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []IndexCacheEfficiencyRow
+	for rows.Next() {
+		var i IndexCacheEfficiencyRow
+		if err := rows.Scan(
+			&i.IndexName,
+			&i.IndexSizeBytes,
+			&i.IdxScan,
+			&i.ScanRank,
+			&i.ScanShare,
+			&i.CacheHitRatio,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const indexUsageStats = `-- name: IndexUsageStats :many
 SELECT
   (n.nspname || '.' || tbl.relname)::text AS table_name
@@ -663,20 +730,12 @@ SELECT
   , pg_relation_size(psai.indexrelid) AS index_size_bytes
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
-  , CASE
-    WHEN coalesce(psaio.idx_blks_hit, 0) + coalesce(psaio.idx_blks_read, 0) = 0 THEN NULL
-    ELSE round(
-      100.0 * psaio.idx_blks_hit / (psaio.idx_blks_hit + psaio.idx_blks_read)
-      , 2
-    )
-  END AS cache_hit_ratio
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
 FROM pg_stat_user_indexes AS psai
 INNER JOIN pg_index AS x ON psai.indexrelid = x.indexrelid
 INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
-LEFT JOIN pg_statio_user_indexes AS psaio ON psai.indexrelid = psaio.indexrelid
 WHERE
   n.nspname = 'public'
 ORDER BY
@@ -691,11 +750,10 @@ type IndexUsageStatsRow struct {
 	IndexSizeBytes pgtype.Int8
 	IdxScan        pgtype.Int8
 	TableWrites    pgtype.Int8
-	CacheHitRatio  pgtype.Numeric
 	StatsReset     pgtype.Timestamptz
 }
 
-// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes, index-cache-ratio.
+// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
 func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, error) {
 	rows, err := q.db.Query(ctx, indexUsageStats)
 	if err != nil {
@@ -713,7 +771,6 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 			&i.IndexSizeBytes,
 			&i.IdxScan,
 			&i.TableWrites,
-			&i.CacheHitRatio,
 			&i.StatsReset,
 		); err != nil {
 			return nil, err
@@ -1958,6 +2015,75 @@ func (q *Queries) TableBloat(ctx context.Context) ([]TableBloatRow, error) {
 			&i.ModificationsSinceAnalyze,
 			&i.DeadTuplePercent,
 			&i.TotalSizeBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const tableCacheEfficiency = `-- name: TableCacheEfficiency :many
+WITH ranked AS (
+  SELECT
+    relid
+    , coalesce(seq_scan, 0) + coalesce(idx_scan, 0) AS reads
+    , rank() OVER (ORDER BY coalesce(seq_scan, 0) + coalesce(idx_scan, 0) DESC) AS read_rank
+    , (coalesce(seq_scan, 0) + coalesce(idx_scan, 0))::numeric
+      / NULLIF(sum(coalesce(seq_scan, 0) + coalesce(idx_scan, 0)) OVER (), 0) AS read_share
+  FROM pg_stat_user_tables
+)
+SELECT
+  (psio.schemaname || '.' || psio.relname)::text AS table_name
+  -- heap main fork only; TOAST has its own statio columns excluded from the ratio
+  , pg_relation_size(psio.relid) AS table_size_bytes
+  , ranked.reads AS reads
+  , ranked.read_rank AS read_rank
+  , ranked.read_share AS read_share
+  , CASE
+    WHEN coalesce(psio.heap_blks_hit, 0) + coalesce(psio.heap_blks_read, 0) = 0 THEN NULL
+    ELSE round(100.0 * psio.heap_blks_hit / (psio.heap_blks_hit + psio.heap_blks_read), 2)
+  END AS cache_hit_ratio
+FROM pg_statio_user_tables AS psio
+INNER JOIN ranked ON psio.relid = ranked.relid
+WHERE
+  psio.schemaname = 'public'
+  -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
+  AND (pg_relation_size(psio.relid) >= 500 * 1024 * 1024 OR ranked.read_rank <= 20)
+ORDER BY pg_relation_size(psio.relid) DESC
+`
+
+type TableCacheEfficiencyRow struct {
+	TableName      pgtype.Text
+	TableSizeBytes pgtype.Int8
+	Reads          pgtype.Int8
+	ReadRank       pgtype.Int8
+	ReadShare      pgtype.Numeric
+	CacheHitRatio  pgtype.Numeric
+}
+
+// Per-table heap buffer cache hit ratios with read rank and share across all user
+// tables. Read activity is seq_scan + idx_scan; rank/share are computed before the
+// size floor so a small table still counts toward the traffic universe.
+func (q *Queries) TableCacheEfficiency(ctx context.Context) ([]TableCacheEfficiencyRow, error) {
+	rows, err := q.db.Query(ctx, tableCacheEfficiency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TableCacheEfficiencyRow
+	for rows.Next() {
+		var i TableCacheEfficiencyRow
+		if err := rows.Scan(
+			&i.TableName,
+			&i.TableSizeBytes,
+			&i.Reads,
+			&i.ReadRank,
+			&i.ReadShare,
+			&i.CacheHitRatio,
 		); err != nil {
 			return nil, err
 		}

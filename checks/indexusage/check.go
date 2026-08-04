@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/emancu/pgdoctor/check"
@@ -24,10 +23,6 @@ const (
 	lowUsageSizeFloorBytes = 500 * check.MiB
 	lowUsageWriteThreshold = 10000
 	lowUsageMinWindowDays  = 30
-	cacheLowThreshold      = 90.0
-	cacheWarnThreshold     = 95.0
-	cacheMinSizeMB         = 10
-	cacheFailSizeMB        = 100
 )
 
 type IndexUsageQueries interface {
@@ -79,7 +74,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	statsReset := rows[0].StatsReset
 	checkUnusedIndexes(rows, statsReset, report)
 	checkLowUsageIndexes(rows, statsReset, report)
-	checkIndexCacheRatio(rows, report)
 
 	return report, nil
 }
@@ -200,59 +194,5 @@ func reportLowUsage(lowUsage []db.IndexUsageStatsRow, report *check.Report) {
 			Headers: []string{"Table", "Index", "Size", "Scans", "Writes"},
 			Rows:    tableRows,
 		},
-	})
-}
-
-func checkIndexCacheRatio(rows []db.IndexUsageStatsRow, report *check.Report) {
-	var lowCacheIndexes []string
-	failCount := 0
-	warnCount := 0
-
-	for _, row := range rows {
-		if !row.CacheHitRatio.Valid {
-			continue
-		}
-
-		cacheRatio, _ := row.CacheHitRatio.Float64Value()
-		sizeMB := float64(row.IndexSizeBytes.Int64) / (1024 * 1024)
-
-		if cacheRatio.Float64 < cacheLowThreshold && sizeMB > cacheFailSizeMB {
-			failCount++
-			if len(lowCacheIndexes) < 10 {
-				lowCacheIndexes = append(lowCacheIndexes, fmt.Sprintf("%s.%s (%.1f%%, %.1f MB)",
-					row.TableName.String, row.IndexName.String, cacheRatio.Float64, sizeMB))
-			}
-		} else if cacheRatio.Float64 < cacheWarnThreshold && sizeMB > cacheMinSizeMB {
-			warnCount++
-			if len(lowCacheIndexes) < 10 {
-				lowCacheIndexes = append(lowCacheIndexes, fmt.Sprintf("%s.%s (%.1f%%, %.1f MB)",
-					row.TableName.String, row.IndexName.String, cacheRatio.Float64, sizeMB))
-			}
-		}
-	}
-
-	totalIssues := failCount + warnCount
-	if totalIssues == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "index-cache-ratio",
-			Name:     "Index Cache Efficiency",
-			Severity: check.SeverityPass,
-		})
-		return
-	}
-
-	details := fmt.Sprintf("Found %d indexes with low cache hit ratios:\n%s",
-		totalIssues,
-		strings.Join(lowCacheIndexes, "\n"),
-	)
-	if totalIssues > len(lowCacheIndexes) {
-		details += fmt.Sprintf("\n... and %d more", totalIssues-len(lowCacheIndexes))
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "index-cache-ratio",
-		Name:     "Index Cache Efficiency",
-		Severity: check.SeverityInfo,
-		Details:  details,
 	})
 }
