@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/partitionusage"
@@ -373,11 +374,13 @@ func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
 			shouldBeOK:   true,
 		},
 		{
-			name:         "list with range operator does not prune",
+			// Verified with EXPLAIN: PostgreSQL excludes LIST partitions whose
+			// listed values cannot satisfy an inequality.
+			name:         "list with range operator prunes",
 			strategy:     "l",
 			partitionKey: "status",
 			query:        "SELECT * FROM orders WHERE status > $1",
-			shouldBeOK:   false,
+			shouldBeOK:   true,
 		},
 		{
 			name:         "range composite with leading column prunes",
@@ -405,6 +408,105 @@ func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
 				},
 				queryStats: []db.QueryStatsFromStatStatementsRow{
 					makeQueryStats(tc.query, 5000, 4_000_000),
+				},
+			}
+
+			report, err := partitionusage.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			if tc.shouldBeOK {
+				require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+			} else {
+				require.NotEqual(t, check.SeverityPass, keyFinding(t, report).Severity)
+			}
+		})
+	}
+}
+
+// A plain UPDATE has no FROM clause, so its WHERE must still be inspected.
+func Test_PartitionUsage_UpdateWithoutFrom(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		query      string
+		shouldBeOK bool
+	}{
+		{"key in WHERE prunes", "UPDATE orders SET status = $1 WHERE created_at = $2", true},
+		{"key absent", "UPDATE orders SET status = $1 WHERE customer_id = $2", false},
+		{"DELETE keeps working", "DELETE FROM orders WHERE created_at < $1", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable("public", "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					makeQueryStats(tc.query, 5000, 4_000_000),
+				},
+			}
+
+			report, err := partitionusage.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			if tc.shouldBeOK {
+				require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+			} else {
+				require.NotEqual(t, check.SeverityPass, keyFinding(t, report).Severity)
+			}
+		})
+	}
+}
+
+// The target table's own subquery carries the predicate that prunes it, while a
+// subquery on another table must not count.
+func Test_PartitionUsage_TargetTableInSubquery_NotFlagged(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStats("SELECT * FROM (SELECT * FROM orders WHERE created_at = $1) o", 5000, 4_000_000),
+		},
+	}
+
+	report, err := partitionusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+}
+
+// A schema qualifier may be quoted independently of the table name.
+func Test_PartitionUsage_MixedQuotingSchemaScoping(t *testing.T) {
+	t.Parallel()
+
+	const query = `SELECT * FROM tenant_a."orders" WHERE customer_id = $1`
+
+	testCases := []struct {
+		name       string
+		schema     string
+		shouldBeOK bool
+	}{
+		{"attributed to its own schema", "tenant_a", false},
+		{"not attributed to a sibling schema", "tenant_b", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable(tc.schema, "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					makeQueryStats(query, 5000, 4_000_000),
 				},
 			}
 
@@ -790,10 +892,11 @@ func Test_PartitionUsage_NoProblemQueries_NoTable(t *testing.T) {
 func Test_PartitionUsage_ExampleQueryTextIsClipped(t *testing.T) {
 	t.Parallel()
 
+	// A multi-byte identifier straddling the clip boundary must not be split.
 	longQuery := `SELECT "orders"."id", "orders"."reference", "orders"."customer_id", ` +
-		`"orders"."provider_id", "orders"."employee_id", "orders"."location_id" ` +
-		`FROM "orders" WHERE "orders"."status" = $1`
-	require.Greater(t, len(longQuery), 80, "fixture must exceed the clip width")
+		`"orders"."provider_id", "orders"."ubicación", "orders"."employee_id", ` +
+		`"orders"."location_id" FROM "orders" WHERE "orders"."status" = $1`
+	require.Greater(t, len([]rune(longQuery)), 120, "fixture must exceed the clip width")
 
 	queryer := &mockQueryer{
 		tables: []db.PartitionedTablesWithKeysRow{
@@ -809,8 +912,9 @@ func Test_PartitionUsage_ExampleQueryTextIsClipped(t *testing.T) {
 
 	cell := keyFinding(t, report).Table.Rows[0].Cells[4]
 
-	require.LessOrEqual(t, len([]rune(cell)), 80)
+	require.LessOrEqual(t, len([]rune(cell)), 120)
 	require.True(t, strings.HasSuffix(cell, "…"), "clipped text is marked with an ellipsis")
+	require.True(t, utf8.ValidString(cell), "clipping must not split a multi-byte rune")
 }
 
 func Test_PartitionUsage_Metadata(t *testing.T) {

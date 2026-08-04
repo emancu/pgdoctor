@@ -1130,6 +1130,10 @@ WHERE
   -- every INSERT that carried an "updated_at" column. Anchoring here also
   -- excludes utility statements (COPY, SET, VACUUM, transaction control, DDL).
   AND query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'
+  -- A CTE can still wrap an INSERT (WITH v AS (...) INSERT INTO ...), which the
+  -- leading keyword alone does not catch. Excluding INSERT INTO anywhere also
+  -- drops INSERT ... SELECT, whose target table is routed rather than pruned.
+  AND query !~* '\minsert\s+into\M'
 ORDER BY total_exec_time DESC
 LIMIT 500
 `

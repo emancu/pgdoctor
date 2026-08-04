@@ -4,8 +4,8 @@ Detects queries on partitioned tables that don't use partition keys in their WHE
 
 ## Requirements
 
-- **pg_stat_statements extension** must be installed and enabled for full query pattern analysis
-- PostgreSQL 15+ — query pattern analysis needs the `toplevel` column, added in `pg_stat_statements` 1.9 (PostgreSQL 14). On older servers the check reports SKIP with that reason; the other subchecks are unaffected.
+- **pg_stat_statements >= 1.9** (PostgreSQL 14+) for query pattern analysis; older versions lack the `toplevel` column and the check reports SKIP
+- PostgreSQL 15+
 
 If `pg_stat_statements` is not installed, this check will report a WARNING and skip query pattern analysis. The sequential scan analysis will still run as it uses `pg_stat_user_tables` statistics.
 
@@ -114,8 +114,10 @@ The key must appear in a comparison that can drive partition pruning, and which 
 | Strategy | Prunes with | Key columns required |
 |---|---|---|
 | `RANGE` | `=`, `<`, `<=`, `>`, `>=`, `IN`, `BETWEEN`, `IS NULL` | the leading key column |
-| `LIST` | `=`, `IN`, `IS NULL` | the key column |
+| `LIST` | `=`, `<`, `<=`, `>`, `>=`, `IN`, `BETWEEN`, `IS NULL` | the key column |
 | `HASH` | `=`, `IN`, `IS NULL` | every key column |
+
+`LIST` prunes on inequalities too — PostgreSQL excludes partitions whose listed values cannot satisfy the predicate. `HASH` needs every key column with equality, because the hash is only determined once all of them are known.
 
 Mentions in `ORDER BY` or the select list don't count, and neither do `<>` or `IS NOT NULL`, which prune nothing. A comparison written with the key on the right (`$1 <= created_at`) counts — PostgreSQL commutes it.
 
@@ -143,7 +145,11 @@ EXPLAIN (GENERIC_PLAN, COSTS OFF) <query text with its $n placeholders>;  -- Pos
 
 ### Subqueries and CTEs
 
-Predicates inside a parenthesized subquery are ignored, so a filter on another table's identically named column does not count as constraining this table — without that, any subquery filtering `s.id` would silence a table partitioned by `id`. CTE bodies are still analyzed, so a CTE that shadows the table name may be misattributed.
+Predicates inside a parenthesized subquery are ignored *unless* the subquery scans the target table — without that, any subquery filtering `s.id` would silence a table partitioned by `id`, while `FROM (SELECT * FROM orders WHERE created_at = $1) o` would be wrongly reported. CTE bodies are still analyzed, so a CTE that shadows the table name may be misattributed.
+
+### Table aliases are not resolved
+
+A comparison on the key column counts wherever it appears after `FROM`, without checking which relation it belongs to. So for a table partitioned by `id`, `JOIN customers c ON c.id = o.customer_id` is read as constraining the key and the query is not reported. Short, common key names are most affected. Resolving this needs real alias resolution — see [#30](https://github.com/emancu/pgdoctor/issues/30).
 
 ### Table aliases
 

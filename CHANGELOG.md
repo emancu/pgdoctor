@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage, FAIL from 85% ([#31](https://github.com/emancu/pgdoctor/pull/31)).
-- **`index-usage`**: `index-cache-ratio` is now informational and no longer escalates the report ([#34](https://github.com/emancu/pgdoctor/pull/34)).
-- **`index-usage`**: `unused-indexes` reports only indexes over 500MB and discloses the statistics window ([#34](https://github.com/emancu/pgdoctor/pull/34)).
-- **`index-usage`**: `low-usage-indexes` now flags sustained low read rates instead of lifetime scan counts ([#34](https://github.com/emancu/pgdoctor/pull/34)).
-
 ### Added
 
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
@@ -24,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
 - **`partition-usage`**: analyzes complete `pg_stat_statements` query text (current database, top-level statements only), matches tables and partition keys on SQL identifier boundaries, and requires a pruning-capable comparison — partition-leaf queries, lookalike column names, and `ORDER BY`-only key mentions no longer skew results ([#25](https://github.com/emancu/pgdoctor/pull/25)).
+- **`partition-usage`**: a plain `UPDATE` is analyzed again — it has no `FROM` clause, so scanning only after `FROM` reported every update regardless of its `WHERE` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`partition-usage`**: `LIST` partitions now count inequalities as pruning, matching PostgreSQL, which excludes partitions whose listed values cannot satisfy the predicate. Only `HASH` requires equality on every key column ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`partition-usage`**: a subquery that scans the target table keeps its predicate, so `FROM (SELECT … FROM orders WHERE created_at = $1) o` is no longer reported; subqueries on other tables are still ignored ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`partition-usage`**: schema scoping handles independently quoted identifiers, so `tenant_a."orders"` is attributed to `tenant_a` and not to a sibling schema ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`partition-usage`**: a CTE wrapping an `INSERT` no longer slips past the statement-type filter ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: no longer reports `INSERT` statements as missing the partition key. Statement type is matched on the leading keyword, where before `ILIKE '%UPDATE%'` accepted every insert carrying an `updated_at` column — which on Rails and Ecto schemas meant the highest-traffic writes on every partitioned table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
 ### Removed
@@ -34,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
+- **`pk-types`**: reports int4/int2 primary keys only from 45% capacity usage, FAIL from 85% ([#31](https://github.com/emancu/pgdoctor/pull/31)).
+- **`index-usage`**: `index-cache-ratio` is now informational and no longer escalates the report ([#34](https://github.com/emancu/pgdoctor/pull/34)).
+- **`index-usage`**: `unused-indexes` reports only indexes over 500MB and discloses the statistics window ([#34](https://github.com/emancu/pgdoctor/pull/34)).
+- **`index-usage`**: `low-usage-indexes` now flags sustained low read rates instead of lifetime scan counts ([#34](https://github.com/emancu/pgdoctor/pull/34)).
 - **`partition-usage`**: `partition-key-unused` now reports one row per offending statement — table, calls, total time, `queryid` and clipped text — instead of one aggregate row per table, so a finding can be investigated without querying `pg_stat_statements` by hand. Per-table totals moved above the table and are always shown; the statement list is capped at three by default and complete under `--detail verbose` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: `partition-key-unused` now counts a partition key constrained anywhere after `FROM`, including `JOIN ... ON` conditions, instead of only in `WHERE`. Such queries prune whenever the planner parameterizes the partitioned side, and reporting them buried the genuinely unprunable ones. The finding is also renamed to "Queries Missing Partition Key", matching its `join-missing-partition-key` sibling ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: partition pruning is now judged per strategy — HASH and LIST need equality on the key (HASH on every key column), RANGE needs its leading column — and queries qualified by another schema are no longer attributed to a same-named table ([#32](https://github.com/emancu/pgdoctor/pull/32)).

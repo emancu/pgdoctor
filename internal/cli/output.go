@@ -174,8 +174,6 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 		truncated = true
 	}
 
-	// Size columns to the rows actually displayed, so a long cell in a hidden
-	// row does not stretch the table.
 	widths := make([]int, len(table.Headers))
 	for i, header := range table.Headers {
 		widths[i] = len(header)

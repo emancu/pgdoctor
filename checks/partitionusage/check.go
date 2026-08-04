@@ -62,6 +62,15 @@ const (
 	minSeqScansWarn   = int64(1000)
 	seqToIdxRatioWarn = int64(10)
 	seqToIdxRatioFail = int64(100)
+
+	// problemQueriesBrief is how many statements are listed at the default
+	// detail level; --detail verbose lists every one.
+	problemQueriesBrief = 3
+
+	// maxQueryTextWidth keeps the table inside a terminal. ORM-generated
+	// statements run to thousands of characters, and the queryid identifies
+	// them anyway.
+	maxQueryTextWidth = 120
 )
 
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
@@ -172,7 +181,7 @@ func checkPartitionKeyUsage(
 				continue
 			}
 
-			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
@@ -291,14 +300,6 @@ type problemQuery struct {
 	severity check.Severity
 }
 
-// problemQueriesBrief is how many statements are listed at the default detail
-// level; --detail verbose lists every one.
-const problemQueriesBrief = 3
-
-// maxQueryTextWidth keeps the table inside a terminal. ORM-generated statements
-// run to thousands of characters, and the queryid identifies them anyway.
-const maxQueryTextWidth = 80
-
 // problemDetails describes the affected tables, so the per-table totals stay
 // visible even when the statement list is capped at the default detail level.
 func problemDetails(affected []affectedTable, statements int) string {
@@ -318,13 +319,15 @@ func problemDetails(affected []affectedTable, statements int) string {
 	return b.String()
 }
 
-// clipQueryText shortens a normalized statement to one terminal line.
+// clipQueryText shortens a normalized statement to one terminal line, counting
+// runes so a multi-byte identifier or comment is never split mid-character.
 func clipQueryText(text string) string {
-	if len(text) <= maxQueryTextWidth {
+	runes := []rune(text)
+	if len(runes) <= maxQueryTextWidth {
 		return text
 	}
 
-	return text[:maxQueryTextWidth-1] + "…"
+	return string(runes[:maxQueryTextWidth-1]) + "…"
 }
 
 // queryReferencesTable checks if a query text references a specific table.
@@ -334,13 +337,12 @@ func queryReferencesTable(queryText, schemaName, tableName string) bool {
 	schemaName = strings.ToLower(schemaName)
 	tableName = strings.ToLower(tableName)
 
-	qualified := []string{
-		schemaName + "." + tableName,
-		`"` + schemaName + `"."` + tableName + `"`,
-	}
-	for _, pattern := range qualified {
-		if containsSQLIdentifier(queryText, pattern) {
-			return true
+	// Either identifier may be quoted independently, so cover all four forms.
+	for _, schema := range []string{schemaName, `"` + schemaName + `"`} {
+		for _, table := range []string{tableName, `"` + tableName + `"`} {
+			if containsSQLIdentifier(queryText, schema+"."+table) {
+				return true
+			}
 		}
 	}
 
@@ -379,6 +381,10 @@ func containsUnqualifiedIdentifier(queryText, identifier string) bool {
 // "tenant_a." or `"tenant_a".` that would bind the following identifier to
 // another schema.
 func isSchemaQualified(text string) bool {
+	// Skip the identifier's own opening quote, so tenant_a."orders" is seen as
+	// qualified even when the bare table name was the pattern that matched.
+	text = strings.TrimSuffix(text, `"`)
+
 	if !strings.HasSuffix(text, ".") {
 		return false
 	}
@@ -444,21 +450,39 @@ const (
 // and not when it hash joins, so this cannot be decided from query text —
 // treating it as constrained keeps the check quiet rather than reporting a
 // table whose access path may well be pruning.
-func queryConstrainsPartitionKey(queryText string, partitionKeys []string, strategy string) bool {
-	fromIdx := strings.Index(queryText, " from ")
-	if fromIdx == -1 {
+func queryConstrainsPartitionKey(queryText string, partitionKeys []string, strategy string, tableName string) bool {
+	clause := searchableClause(queryText)
+	if clause == "" {
 		return false
 	}
 
-	return clauseEnablesPruning(maskSubqueries(queryText[fromIdx:]), partitionKeys, strategy)
+	return clauseEnablesPruning(maskForeignSubqueries(clause, tableName), partitionKeys, strategy)
 }
 
-// maskSubqueries blanks out parenthesized subqueries, so a predicate on another
-// table's identically named column — common for a key called "id" — is not read
-// as constraining this table. Only groups that open a SELECT are removed:
+// searchableClause returns the part of the statement that can constrain the
+// partition key. Everything after FROM covers JOIN conditions alongside WHERE,
+// but a plain UPDATE has no FROM, so fall back to its WHERE clause.
+func searchableClause(queryText string) string {
+	if fromIdx := strings.Index(queryText, " from "); fromIdx != -1 {
+		return queryText[fromIdx:]
+	}
+
+	if whereIdx := strings.Index(queryText, " where "); whereIdx != -1 {
+		return queryText[whereIdx:]
+	}
+
+	return ""
+}
+
+// maskForeignSubqueries blanks out parenthesized subqueries that do not scan the
+// target table, so a predicate on another table's identically named column —
+// common for a key called "id" — is not read as constraining this one. A
+// subquery that does reference the target table is kept, since its predicate may
+// be the one enabling pruning. Only groups that open a SELECT are removed:
 // ActiveRecord and Ecto wrap ordinary predicates in parentheses, and those must
 // still be searched.
-func maskSubqueries(text string) string {
+func maskForeignSubqueries(text, tableName string) string {
+	tableName = strings.ToLower(tableName)
 	masked := []byte(text)
 
 	for i := 0; i < len(masked); i++ {
@@ -470,33 +494,53 @@ func maskSubqueries(text string) string {
 			continue
 		}
 
-		depth := 0
-		for j := i; j < len(masked); j++ {
-			switch masked[j] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-			}
-			masked[j] = ' '
-
-			if depth == 0 {
-				i = j
-				break
-			}
+		if end := matchingParen(text, i); end != -1 &&
+			containsUnqualifiedIdentifier(text[i:end], tableName) {
+			continue
 		}
+
+		end := matchingParen(text, i)
+		if end == -1 {
+			end = len(masked)
+		}
+
+		for j := i; j < end; j++ {
+			masked[j] = ' '
+		}
+
+		i = end
 	}
 
 	return string(masked)
 }
 
+// matchingParen returns the index just past the ')' closing the '(' at open,
+// or -1 when the parentheses are unbalanced.
+func matchingParen(text string, open int) int {
+	depth := 0
+	for i := open; i < len(text); i++ {
+		switch text[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+
+	return -1
+}
+
 // clauseEnablesPruning reports whether the clause constrains the partition key
 // in a way the strategy can prune with:
 //
-//   - hash: every key column needs equality; a range comparison never prunes.
-//   - list: the (single) key column needs equality.
-//   - range: the leading key column must be constrained; trailing columns
-//     alone cannot prune.
+//   - hash: every key column needs equality, since the hash is only determined
+//     once every column is known. A range comparison never prunes.
+//   - list and range: the leading key column must be constrained, with any
+//     comparison. PostgreSQL prunes LIST partitions for inequalities too — it
+//     excludes partitions whose listed values cannot satisfy the predicate.
 //
 // An unrecognized strategy falls back to "any key column, any pruning operator".
 func clauseEnablesPruning(clause string, partitionKeys []string, strategy string) bool {
@@ -514,10 +558,7 @@ func clauseEnablesPruning(clause string, partitionKeys []string, strategy string
 		}
 		return true
 
-	case strategyList:
-		return clauseFiltersColumn(clause, columns[0], equalityOnly)
-
-	case strategyRange:
+	case strategyList, strategyRange:
 		return clauseFiltersColumn(clause, columns[0], anyPruningOperator)
 
 	default:
@@ -723,7 +764,7 @@ func checkJoinsMissingPartitionKey(
 			}
 
 			// Check if partition key appears after FROM (covers JOIN ON, WHERE, implicit joins).
-			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String) {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
 				calls := q.Calls.Int64
 				execTime := q.TotalExecTime.Float64
 				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
