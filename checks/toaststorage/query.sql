@@ -113,6 +113,9 @@ SELECT
     , ARRAY[]::text []
   ) AS column_compression_info
   -- PG14+ GUC; safe form returns NULL on PG13 where it does not exist
-  , current_setting('default_toast_compression', true) AS default_toast_compression
 FROM toast_info AS ti
 ORDER BY ti.toast_size DESC;
+
+-- name: ToastDefaultCompression :one
+-- PG14+ GUC; the safe form returns NULL where it does not exist.
+SELECT current_setting('default_toast_compression', true)::text AS default_toast_compression;
