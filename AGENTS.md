@@ -317,7 +317,15 @@ When adding a check, ask: **is this useful during an active incident?** If yes, 
 
 ### Modifying Existing Check
 
-**Never edit generated files** (`db/`, `checks.go`).
+**Never edit generated files** (`db/`, `checks.go`). CI runs `sqlc generate` and fails on any difference.
+
+Running `sqlc generate` needs **sqlc v1.30.0** and a live **PostgreSQL 17+** server with `pg_stat_statements` installed. Older majors fail because the queries reference newer catalog columns (`pg_replication_slots.invalidation_reason`). The extension only has to exist, not be preloaded — sqlc reads its catalog entries and never its data:
+
+```bash
+docker run -d --name pgdoctor-sqlc -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+psql postgres://postgres:postgres@localhost:5432/postgres -c 'CREATE EXTENSION pg_stat_statements;'
+sqlc generate
+```
 
 - Changing SQL: edit `query.sql`, run `sqlc generate`, update `check.go` if signature changed
 - Changing logic: edit `check.go` directly

@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/invalidindexes"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,11 +34,20 @@ func newMockQueryerWithError(err error) *mockInvalidIndexesQueryer {
 }
 
 func brokenIndex(schema, table, index string) db.BrokenIndexesRow {
-	return db.BrokenIndexesRow{SchemaName: schema, TableName: table, IndexName: index, IsLeftover: false}
+	return indexRow(schema, table, index, false)
 }
 
 func leftoverIndex(schema, table, index string) db.BrokenIndexesRow {
-	return db.BrokenIndexesRow{SchemaName: schema, TableName: table, IndexName: index, IsLeftover: true}
+	return indexRow(schema, table, index, true)
+}
+
+func indexRow(schema, table, index string, leftover bool) db.BrokenIndexesRow {
+	return db.BrokenIndexesRow{
+		SchemaName: pgtype.Text{String: schema, Valid: true},
+		TableName:  pgtype.Text{String: table, Valid: true},
+		IndexName:  pgtype.Text{String: index, Valid: true},
+		IsLeftover: pgtype.Bool{Bool: leftover, Valid: true},
+	}
 }
 
 // onlyFinding returns the single finding the check always emits.

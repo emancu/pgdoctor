@@ -31,10 +31,10 @@ ORDER BY is_leftover, n.nspname, tbl.relname, idx.relname
 `
 
 type BrokenIndexesRow struct {
-	SchemaName string
-	TableName  string
-	IndexName  string
-	IsLeftover bool
+	SchemaName pgtype.Text
+	TableName  pgtype.Text
+	IndexName  pgtype.Text
+	IsLeftover pgtype.Bool
 }
 
 // Invalid indexes, flagging _ccnew/_ccold REINDEX CONCURRENTLY leftovers via
@@ -1112,9 +1112,7 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
 SELECT
   queryid::bigint AS query_id
-  -- Original casing, so it can be displayed as written. Matching lowercases it
-  -- once per row in Go rather than fetching a second copy of every statement.
-  , REGEXP_REPLACE(query, '\s+', ' ', 'g')::text AS query
+  , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
   , calls::bigint AS calls
   , total_exec_time::double precision AS total_exec_time
   , mean_exec_time::double precision AS mean_exec_time

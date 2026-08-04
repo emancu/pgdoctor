@@ -139,49 +139,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
 	} else {
-		analyzed := prepareQueries(queryStats)
-
-		checkPartitionKeyUsage(partitionedTables, analyzed, report)
-		checkJoinsMissingPartitionKey(partitionedTables, analyzed, report)
+		checkPartitionKeyUsage(partitionedTables, queryStats, report)
+		checkJoinsMissingPartitionKey(partitionedTables, queryStats, report)
 	}
 
 	return report, nil
 }
 
-// analyzedQuery is one pg_stat_statements entry prepared for matching.
-type analyzedQuery struct {
-	// matchText is the statement lowercased, since matching is case-insensitive.
-	matchText string
-	// display is the statement as written, for reporting.
-	display  string
-	queryID  int64
-	calls    int64
-	execTime float64
-}
-
-// prepareQueries lowercases each statement once. Both subchecks compare every
-// statement against every partitioned table, so doing it here keeps the work
-// linear in the number of statements — and fetching one copy of the text from
-// the server rather than two keeps the transfer half the size.
-func prepareQueries(rows []db.QueryStatsFromStatStatementsRow) []analyzedQuery {
-	analyzed := make([]analyzedQuery, 0, len(rows))
-	for _, row := range rows {
-		analyzed = append(analyzed, analyzedQuery{
-			matchText: strings.ToLower(row.Query.String),
-			display:   row.Query.String,
-			queryID:   row.QueryID.Int64,
-			calls:     row.Calls.Int64,
-			execTime:  row.TotalExecTime.Float64,
-		})
-	}
-
-	return analyzed
-}
-
 // checkPartitionKeyUsage analyzes queries to find those not using partition keys.
 func checkPartitionKeyUsage(
 	tables []db.PartitionedTablesWithKeysRow,
-	queries []analyzedQuery,
+	queries []db.QueryStatsFromStatStatementsRow,
 	report *check.Report,
 ) {
 	var affected []affectedTable
@@ -209,20 +177,22 @@ func checkPartitionKeyUsage(
 		var totalExecTime float64
 
 		for _, q := range queries {
-			if !queryReferencesTable(q.matchText, schemaName, tableName) {
+			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
 				continue
 			}
 
-			if !queryConstrainsPartitionKey(q.matchText, partitionKeys, table.PartitionStrategy.String, tableName) {
-				if q.calls >= minCallsWarn || q.execTime >= totalExecTimeWarnMs {
-					totalCalls += q.calls
-					totalExecTime += q.execTime
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
+				calls := q.Calls.Int64
+				execTime := q.TotalExecTime.Float64
+				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
+					totalCalls += calls
+					totalExecTime += execTime
 					found = append(found, problemQuery{
 						table:    qualifiedName,
-						calls:    q.calls,
-						execTime: q.execTime,
-						queryID:  q.queryID,
-						text:     q.display,
+						calls:    calls,
+						execTime: execTime,
+						queryID:  q.QueryID.Int64,
+						text:     q.Query.String,
 					})
 				}
 			}
@@ -759,7 +729,7 @@ func hasComparisonBefore(text string, mode operatorMode) bool {
 // checkJoinsMissingPartitionKey detects JOINs on partitioned tables that don't include the partition key.
 func checkJoinsMissingPartitionKey(
 	tables []db.PartitionedTablesWithKeysRow,
-	queries []analyzedQuery,
+	queries []db.QueryStatsFromStatStatementsRow,
 	report *check.Report,
 ) {
 	var tableRows []check.TableRow
@@ -785,20 +755,22 @@ func checkJoinsMissingPartitionKey(
 
 		for _, q := range queries {
 			// Only check queries with JOINs that reference this table.
-			if !queryHasJoin(q.matchText) {
+			if !queryHasJoin(q.Query.String) {
 				continue
 			}
 
-			if !queryReferencesTable(q.matchText, schemaName, tableName) {
+			if !queryReferencesTable(q.Query.String, schemaName, tableName) {
 				continue
 			}
 
 			// Check if partition key appears after FROM (covers JOIN ON, WHERE, implicit joins).
-			if !queryConstrainsPartitionKey(q.matchText, partitionKeys, table.PartitionStrategy.String, tableName) {
-				if q.calls >= minCallsWarn || q.execTime >= totalExecTimeWarnMs {
+			if !queryConstrainsPartitionKey(q.Query.String, partitionKeys, table.PartitionStrategy.String, tableName) {
+				calls := q.Calls.Int64
+				execTime := q.TotalExecTime.Float64
+				if calls >= minCallsWarn || execTime >= totalExecTimeWarnMs {
 					problemJoinCount++
-					totalCalls += q.calls
-					totalExecTime += q.execTime
+					totalCalls += calls
+					totalExecTime += execTime
 				}
 			}
 		}
