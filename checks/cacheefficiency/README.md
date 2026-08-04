@@ -27,6 +27,17 @@ A rarely-read index is uncached by design, so only hot-path indexes are reported
 
 **Severity**: INFO
 
+### Per-Table Cache Hit Ratio
+
+Lists a table only when it is a hot, disk-bound heap — all of the following hold:
+- **hot**: top 20 by reads (`seq_scan` + `idx_scan`) OR ≥ 1% of table-read traffic, AND ≥ 10,000 reads
+- heap size (`pg_relation_size`, main fork, excludes TOAST) ≥ 500 MB
+- heap cache hit ratio (`heap_blks_hit` / (`heap_blks_hit` + `heap_blks_read`)) < 75%
+
+Index blocks are covered by the sibling `index-cache-ratio` finding; TOAST blocks are excluded.
+
+**Severity**: INFO
+
 ## Why Cache Hit Ratio Matters
 
 ### Performance Impact
@@ -136,6 +147,17 @@ traffic, with ≥ 10,000 scans — yet served under 75% from cache: hot-path dis
 SHOW shared_buffers;
 ```
 
+### For `table-cache-ratio`
+
+Listed tables are large heaps (≥ 500 MB) and hot — top 20 by reads or ≥ 1% of read
+traffic, with ≥ 10,000 reads — yet their heap blocks are served under 75% from cache:
+hot-path disk I/O on the table itself (index and TOAST blocks are measured separately).
+
+**Options to improve:**
+1. Increase `shared_buffers` (if memory available)
+2. Reduce heap width or bloat so hot rows pack into fewer pages
+3. Review query patterns - sequential scans may be pulling cold pages
+
 ## False Positives
 
 Low cache ratios may be acceptable for:
@@ -150,4 +172,6 @@ Run this check during normal OLTP workload periods for accurate results.
 Queries `pg_stat_database` for the current database's block hit and read counters,
 and joins `pg_statio_user_indexes` with `pg_stat_user_indexes` for per-index hit,
 read, and scan counters, ranking each index by scan count and computing its share
-of total index-scan traffic to identify hot indexes.
+of total index-scan traffic to identify hot indexes. The per-table query mirrors
+this over `pg_statio_user_tables` and `pg_stat_user_tables`, ranking by heap reads
+(`seq_scan` + `idx_scan`) and measuring the heap-block hit ratio.

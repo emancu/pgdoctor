@@ -1,4 +1,4 @@
-// Package cacheefficiency implements checks for database-wide and per-index buffer cache hit ratios.
+// Package cacheefficiency implements checks for database-wide, per-index, and per-table buffer cache hit ratios.
 package cacheefficiency
 
 import (
@@ -24,6 +24,9 @@ const (
 	indexCacheRatioThreshold = 75.0
 	indexCacheSizeFloorBytes = 500 * check.MiB
 
+	tableCacheRatioThreshold = 75.0
+	tableCacheSizeFloorBytes = 500 * check.MiB
+
 	hotRankMax   = 20
 	hotShareMin  = 0.01
 	hotScanFloor = 10000
@@ -32,6 +35,7 @@ const (
 type CacheEfficiencyQueries interface {
 	DatabaseCacheEfficiency(context.Context) (db.DatabaseCacheEfficiencyRow, error)
 	IndexCacheEfficiency(context.Context) ([]db.IndexCacheEfficiencyRow, error)
+	TableCacheEfficiency(context.Context) ([]db.TableCacheEfficiencyRow, error)
 }
 
 type checker struct {
@@ -43,7 +47,7 @@ func Metadata() check.Metadata {
 		Category:    check.CategoryPerformance,
 		CheckID:     "cache-efficiency",
 		Name:        "Cache Efficiency",
-		Description: "Analyzes database-wide and per-index buffer cache hit ratios",
+		Description: "Analyzes database-wide, per-index, and per-table buffer cache hit ratios",
 		Readme:      readme,
 		SQL:         querySQL,
 	}
@@ -75,6 +79,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	checkIndexCacheRatio(indexRows, report)
+
+	tableRows, err := c.queries.TableCacheEfficiency(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+	}
+
+	checkTableCacheRatio(tableRows, report)
 
 	return report, nil
 }
@@ -201,4 +212,85 @@ func indexIsHot(idxScan, rank int64, share float64) bool {
 		return false
 	}
 	return rank <= hotRankMax || share >= hotShareMin
+}
+
+func checkTableCacheRatio(rows []db.TableCacheEfficiencyRow, report *check.Report) {
+	var tableRows []check.TableRow
+	for _, row := range rows {
+		if !row.CacheHitRatio.Valid {
+			continue
+		}
+
+		ratio, _ := row.CacheHitRatio.Float64Value()
+		cacheRatio := ratio.Float64
+
+		if cacheRatio >= tableCacheRatioThreshold {
+			continue
+		}
+		if row.TableSizeBytes.Int64 < tableCacheSizeFloorBytes {
+			continue
+		}
+		share, _ := row.ReadShare.Float64Value()
+		if !indexIsHot(row.Reads.Int64, row.ReadRank.Int64, share.Float64) {
+			continue
+		}
+
+		tableRows = append(tableRows, check.TableRow{
+			Cells: []string{
+				row.TableName.String,
+				check.FormatBytes(row.TableSizeBytes.Int64),
+				fmt.Sprintf("%.1f%%", cacheRatio),
+			},
+			Severity: check.SeverityInfo,
+		})
+	}
+
+	debug := topTablesDebug(rows)
+
+	if len(tableRows) == 0 {
+		report.AddFinding(check.Finding{
+			ID:       "table-cache-ratio",
+			Name:     "Table Cache Efficiency",
+			Severity: check.SeverityPass,
+			Debug:    debug,
+		})
+		return
+	}
+
+	report.AddFinding(check.Finding{
+		ID:       "table-cache-ratio",
+		Name:     "Table Cache Efficiency",
+		Severity: check.SeverityInfo,
+		Details:  fmt.Sprintf("Found %d hot tables over 500MB with heap cache hit ratio below 75%%", len(tableRows)),
+		Debug:    debug,
+		Table: &check.Table{
+			Headers: []string{"Table", "Size", "Hit %"},
+			Rows:    tableRows,
+		},
+	})
+}
+
+// topTablesDebug lists the top-20 read ranking so the hot gate is verifiable.
+func topTablesDebug(rows []db.TableCacheEfficiencyRow) string {
+	top := make([]db.TableCacheEfficiencyRow, 0, hotRankMax)
+	for _, row := range rows {
+		if row.ReadRank.Int64 <= hotRankMax {
+			top = append(top, row)
+		}
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].ReadRank.Int64 < top[j].ReadRank.Int64 })
+
+	var b strings.Builder
+	b.WriteString("Top tables by reads:")
+	for _, row := range top {
+		hit := "-"
+		if row.CacheHitRatio.Valid {
+			r, _ := row.CacheHitRatio.Float64Value()
+			hit = fmt.Sprintf("%.1f%%", r.Float64)
+		}
+		share, _ := row.ReadShare.Float64Value()
+		fmt.Fprintf(&b, "\n#%-2d %s  hit %s  share %.1f%%  reads %s",
+			row.ReadRank.Int64, row.TableName.String, hit, share.Float64*100, check.FormatNumber(row.Reads.Int64))
+	}
+	return b.String()
 }

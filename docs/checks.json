@@ -4,7 +4,7 @@
       "id": "cache-efficiency",
       "name": "Cache Efficiency",
       "category": "performance",
-      "description": "Analyzes database-wide and per-index buffer cache hit ratios"
+      "description": "Analyzes database-wide, per-index, and per-table buffer cache hit ratios"
     },
     {
       "id": "connection-efficiency",

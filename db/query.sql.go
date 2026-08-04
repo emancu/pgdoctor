@@ -2030,6 +2030,75 @@ func (q *Queries) TableBloat(ctx context.Context) ([]TableBloatRow, error) {
 	return items, nil
 }
 
+const tableCacheEfficiency = `-- name: TableCacheEfficiency :many
+WITH ranked AS (
+  SELECT
+    relid
+    , coalesce(seq_scan, 0) + coalesce(idx_scan, 0) AS reads
+    , rank() OVER (ORDER BY coalesce(seq_scan, 0) + coalesce(idx_scan, 0) DESC) AS read_rank
+    , (coalesce(seq_scan, 0) + coalesce(idx_scan, 0))::numeric
+      / NULLIF(sum(coalesce(seq_scan, 0) + coalesce(idx_scan, 0)) OVER (), 0) AS read_share
+  FROM pg_stat_user_tables
+)
+SELECT
+  (psio.schemaname || '.' || psio.relname)::text AS table_name
+  -- heap main fork only; TOAST has its own statio columns excluded from the ratio
+  , pg_relation_size(psio.relid) AS table_size_bytes
+  , ranked.reads AS reads
+  , ranked.read_rank AS read_rank
+  , ranked.read_share AS read_share
+  , CASE
+    WHEN coalesce(psio.heap_blks_hit, 0) + coalesce(psio.heap_blks_read, 0) = 0 THEN NULL
+    ELSE round(100.0 * psio.heap_blks_hit / (psio.heap_blks_hit + psio.heap_blks_read), 2)
+  END AS cache_hit_ratio
+FROM pg_statio_user_tables AS psio
+INNER JOIN ranked ON psio.relid = ranked.relid
+WHERE
+  psio.schemaname = 'public'
+  -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
+  AND (pg_relation_size(psio.relid) >= 500 * 1024 * 1024 OR ranked.read_rank <= 20)
+ORDER BY pg_relation_size(psio.relid) DESC
+`
+
+type TableCacheEfficiencyRow struct {
+	TableName      pgtype.Text
+	TableSizeBytes pgtype.Int8
+	Reads          pgtype.Int8
+	ReadRank       pgtype.Int8
+	ReadShare      pgtype.Numeric
+	CacheHitRatio  pgtype.Numeric
+}
+
+// Per-table heap buffer cache hit ratios with read rank and share across all user
+// tables. Read activity is seq_scan + idx_scan; rank/share are computed before the
+// size floor so a small table still counts toward the traffic universe.
+func (q *Queries) TableCacheEfficiency(ctx context.Context) ([]TableCacheEfficiencyRow, error) {
+	rows, err := q.db.Query(ctx, tableCacheEfficiency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TableCacheEfficiencyRow
+	for rows.Next() {
+		var i TableCacheEfficiencyRow
+		if err := rows.Scan(
+			&i.TableName,
+			&i.TableSizeBytes,
+			&i.Reads,
+			&i.ReadRank,
+			&i.ReadShare,
+			&i.CacheHitRatio,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const tableFreezeAge = `-- name: TableFreezeAge :many
 SELECT
   (n.nspname || '.' || c.relname)::text AS table_name

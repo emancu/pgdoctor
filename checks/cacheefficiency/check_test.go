@@ -18,8 +18,10 @@ import (
 type mockCacheEfficiencyQueryer struct {
 	row        db.DatabaseCacheEfficiencyRow
 	indexRows  []db.IndexCacheEfficiencyRow
+	tableRows  []db.TableCacheEfficiencyRow
 	err        error
 	indexError error
+	tableError error
 }
 
 func (m *mockCacheEfficiencyQueryer) DatabaseCacheEfficiency(context.Context) (db.DatabaseCacheEfficiencyRow, error) {
@@ -34,6 +36,13 @@ func (m *mockCacheEfficiencyQueryer) IndexCacheEfficiency(context.Context) ([]db
 		return nil, m.indexError
 	}
 	return m.indexRows, nil
+}
+
+func (m *mockCacheEfficiencyQueryer) TableCacheEfficiency(context.Context) ([]db.TableCacheEfficiencyRow, error) {
+	if m.tableError != nil {
+		return nil, m.tableError
+	}
+	return m.tableRows, nil
 }
 
 func newMockQueryer(row db.DatabaseCacheEfficiencyRow) *mockCacheEfficiencyQueryer {
@@ -57,6 +66,17 @@ func indexRow(name string, sizeBytes, idxScan, rank int64, share, ratio float64)
 		IdxScan:        pgtype.Int8{Int64: idxScan, Valid: true},
 		ScanRank:       pgtype.Int8{Int64: rank, Valid: true},
 		ScanShare:      makeNumeric(share),
+		CacheHitRatio:  makeNumeric(ratio),
+	}
+}
+
+func tableRow(name string, sizeBytes, reads, rank int64, share, ratio float64) db.TableCacheEfficiencyRow {
+	return db.TableCacheEfficiencyRow{
+		TableName:      pgtype.Text{String: name, Valid: true},
+		TableSizeBytes: pgtype.Int8{Int64: sizeBytes, Valid: true},
+		Reads:          pgtype.Int8{Int64: reads, Valid: true},
+		ReadRank:       pgtype.Int8{Int64: rank, Valid: true},
+		ReadShare:      makeNumeric(share),
 		CacheHitRatio:  makeNumeric(ratio),
 	}
 }
@@ -443,4 +463,146 @@ func Test_IndexCacheRatio_DebugOnPass(t *testing.T) {
 	f := findFinding(t, report, "index-cache-ratio")
 	require.Equal(t, check.SeverityPass, f.Severity)
 	require.Contains(t, f.Debug, "#1  public.idx_healthy")
+}
+
+func runWithTableRows(t *testing.T, rows []db.TableCacheEfficiencyRow) *check.Report {
+	t.Helper()
+
+	queryer := &mockCacheEfficiencyQueryer{row: healthyDBRow(), tableRows: rows}
+	report, err := cacheefficiency.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+	return report
+}
+
+func Test_TableCacheRatio_Informational(t *testing.T) {
+	t.Parallel()
+
+	report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+		tableRow("public.orders", mb(600), 60000, 5, 0.5, 70.0),
+	})
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Equal(t, check.SeverityInfo, f.Severity)
+	require.Equal(t, []string{"Table", "Size", "Hit %"}, f.Table.Headers)
+	require.Len(t, f.Table.Rows, 1)
+	require.Equal(t, []string{"public.orders", "600.0MiB", "70.0%"}, f.Table.Rows[0].Cells)
+	require.Equal(t, check.SeverityInfo, f.Table.Rows[0].Severity)
+	// Info must not escalate the report.
+	require.Equal(t, check.SeverityPass, report.Severity)
+}
+
+func Test_TableCacheRatio_Gate(t *testing.T) {
+	t.Parallel()
+
+	// hot = (read_rank <= 20 OR read_share >= 1%) AND reads >= 10,000.
+	tests := []struct {
+		name   string
+		size   int64
+		reads  int64
+		rank   int64
+		share  float64
+		ratio  float64
+		listed bool
+	}{
+		{"rank 20 + low share - listed", mb(600), 50000, 20, 0.001, 70.0, true},
+		{"rank 21 + low share - not listed", mb(600), 50000, 21, 0.001, 70.0, false},
+		{"rank 21 + share exactly 1% - listed", mb(600), 50000, 21, 0.01, 70.0, true},
+		{"rank 21 + share just below 1% - not listed", mb(600), 50000, 21, 0.009, 70.0, false},
+		{"read floor exactly 10,000 - listed", mb(600), 10000, 5, 0.5, 70.0, true},
+		{"read floor 9,999 - not listed", mb(600), 9999, 5, 0.5, 70.0, false},
+		{"hot + ok-ratio - not listed", mb(600), 50000, 5, 0.5, 80.0, false},
+		{"hot + exactly 75% ratio - not listed", mb(600), 50000, 5, 0.5, 75.0, false},
+		{"hot + small - not listed", mb(400), 50000, 5, 0.5, 70.0, false},
+		{"hot + exactly 500MB - listed", mb(500), 50000, 5, 0.5, 70.0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+				tableRow("public.t", tt.size, tt.reads, tt.rank, tt.share, tt.ratio),
+			})
+			f := findFinding(t, report, "table-cache-ratio")
+
+			if tt.listed {
+				require.Equal(t, check.SeverityInfo, f.Severity)
+				require.Len(t, f.Table.Rows, 1)
+			} else {
+				require.Equal(t, check.SeverityPass, f.Severity)
+				require.Nil(t, f.Table)
+			}
+		})
+	}
+}
+
+func Test_TableCacheRatio_NullRatioSkipped(t *testing.T) {
+	t.Parallel()
+
+	// Hot, big table whose ratio is NULL (no heap block activity) must still be skipped.
+	report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+		{
+			TableName:      pgtype.Text{String: "public.idle", Valid: true},
+			TableSizeBytes: pgtype.Int8{Int64: mb(600), Valid: true},
+			Reads:          pgtype.Int8{Int64: 20000, Valid: true},
+			ReadRank:       pgtype.Int8{Int64: 5, Valid: true},
+			ReadShare:      makeNumeric(0.5),
+			CacheHitRatio:  pgtype.Numeric{Valid: false},
+		},
+	})
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Nil(t, f.Table)
+}
+
+func Test_TableCacheRatio_NoTables_Pass(t *testing.T) {
+	t.Parallel()
+
+	report := runWithTableRows(t, nil)
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Nil(t, f.Table)
+}
+
+func Test_TableCacheRatio_QueryError(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockCacheEfficiencyQueryer{
+		row:        healthyDBRow(),
+		tableError: fmt.Errorf("connection refused"),
+	}
+	_, err := cacheefficiency.New(queryer).Check(context.Background())
+	require.ErrorContains(t, err, "cache-efficiency")
+}
+
+func Test_TableCacheRatio_DebugTopTables(t *testing.T) {
+	t.Parallel()
+
+	report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+		tableRow("public.big_cold", mb(600), 60000, 2, 0.30, 70.0),
+		tableRow("public.small_hot", mb(100), 90000, 1, 0.45, 99.0),
+		tableRow("public.unranked", mb(700), 500, 30, 0.001, 50.0),
+	})
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Contains(t, f.Debug, "Top tables by reads:")
+	require.Contains(t, f.Debug, "#1  public.small_hot  hit 99.0%  share 45.0%  reads 90.0K")
+	require.Contains(t, f.Debug, "#2  public.big_cold  hit 70.0%  share 30.0%  reads 60.0K")
+	require.NotContains(t, f.Debug, "unranked")
+	require.Less(t, strings.Index(f.Debug, "#1"), strings.Index(f.Debug, "#2"))
+}
+
+func Test_TableCacheRatio_DebugOnPass(t *testing.T) {
+	t.Parallel()
+
+	report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+		tableRow("public.healthy", mb(600), 90000, 1, 0.45, 99.0),
+	})
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Equal(t, check.SeverityPass, f.Severity)
+	require.Contains(t, f.Debug, "#1  public.healthy")
 }
