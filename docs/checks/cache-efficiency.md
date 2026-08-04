@@ -19,8 +19,7 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 ### Per-Index Cache Hit Ratio
 
 Lists an index only when it is a hot, disk-bound index — all of the following hold:
-- **frequently used**: ≥ 100 index scans/day over the stats window (or lifetime
-  `idx_scan` ≥ 10,000 when `stats_reset` is NULL and the window is unknown)
+- **hot**: top 20 by `idx_scan` OR ≥ 1% of index-scan traffic, AND ≥ 10,000 scans
 - size ≥ 500 MB
 - cache hit ratio < 75%
 
@@ -124,8 +123,8 @@ For persistent low cache ratios despite tuning:
 
 ### For `index-cache-ratio`
 
-Listed indexes are large (≥ 500 MB), frequently scanned (≥ 100 scans/day), yet
-served under 75% from cache — hot-path disk I/O.
+Listed indexes are large (≥ 500 MB) and hot — top 20 by scans or ≥ 1% of scan
+traffic, with ≥ 10,000 scans — yet served under 75% from cache: hot-path disk I/O.
 
 **Options to improve:**
 1. Increase `shared_buffers` (if memory available)
@@ -150,5 +149,5 @@ Run this check during normal OLTP workload periods for accurate results.
 
 Queries `pg_stat_database` for the current database's block hit and read counters,
 and joins `pg_statio_user_indexes` with `pg_stat_user_indexes` for per-index hit,
-read, and scan counters, deriving cache hit percentages and scan rate over the
-`stats_reset` window.
+read, and scan counters, ranking each index by scan count and computing its share
+of total index-scan traffic to identify hot indexes.

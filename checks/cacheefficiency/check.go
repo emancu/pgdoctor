@@ -5,11 +5,9 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 //go:embed query.sql
@@ -21,10 +19,12 @@ var readme string
 const (
 	cacheLowThreshold = 60.0
 
-	indexCacheRatioThreshold    = 75.0
-	indexCacheSizeFloorBytes    = 500 * check.MiB
-	indexCacheMinScansPerDay    = 100.0
-	indexCacheLifetimeScanFloor = 10000
+	indexCacheRatioThreshold = 75.0
+	indexCacheSizeFloorBytes = 500 * check.MiB
+
+	hotRankMax   = 20
+	hotShareMin  = 0.01
+	hotScanFloor = 10000
 )
 
 type CacheEfficiencyQueries interface {
@@ -128,7 +128,8 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		if row.IndexSizeBytes.Int64 < indexCacheSizeFloorBytes {
 			continue
 		}
-		if !indexFrequentlyUsed(row.IdxScan.Int64, row.StatsReset) {
+		share, _ := row.ScanShare.Float64Value()
+		if !indexIsHot(row.IdxScan.Int64, row.ScanRank.Int64, share.Float64) {
 			continue
 		}
 
@@ -155,7 +156,7 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 		ID:       "index-cache-ratio",
 		Name:     "Index Cache Efficiency",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("Found %d frequently-scanned indexes over 500MB with cache hit ratio below 75%%", len(tableRows)),
+		Details:  fmt.Sprintf("Found %d hot indexes over 500MB with cache hit ratio below 75%%", len(tableRows)),
 		Table: &check.Table{
 			Headers: []string{"Index", "Size", "Hit %"},
 			Rows:    tableRows,
@@ -163,13 +164,10 @@ func checkIndexCacheRatio(rows []db.IndexCacheEfficiencyRow, report *check.Repor
 	})
 }
 
-// indexFrequentlyUsed gates on scan rate over the stats window; a NULL or
-// sub-day window falls back to the lifetime scan count.
-func indexFrequentlyUsed(idxScan int64, statsReset pgtype.Timestamptz) bool {
-	if statsReset.Valid {
-		if windowDays := time.Since(statsReset.Time).Hours() / 24; windowDays >= 1 {
-			return float64(idxScan)/windowDays >= indexCacheMinScansPerDay
-		}
+// indexIsHot gates on absolute scan volume plus a top-rank or traffic-share signal.
+func indexIsHot(idxScan, rank int64, share float64) bool {
+	if idxScan < hotScanFloor {
+		return false
 	}
-	return idxScan >= indexCacheLifetimeScanFloor
+	return rank <= hotRankMax || share >= hotShareMin
 }

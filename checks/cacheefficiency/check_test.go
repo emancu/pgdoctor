@@ -3,8 +3,8 @@ package cacheefficiency_test
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
@@ -45,27 +45,22 @@ func newMockQueryerWithError(err error) *mockCacheEfficiencyQueryer {
 
 func makeNumeric(value float64) pgtype.Numeric {
 	var n pgtype.Numeric
-	_ = n.Scan(fmt.Sprintf("%.2f", value))
+	_ = n.Scan(strconv.FormatFloat(value, 'f', -1, 64))
 	return n
 }
 
-func indexRow(name string, sizeBytes, idxScan int64, ratio float64, statsReset pgtype.Timestamptz) db.IndexCacheEfficiencyRow {
+func indexRow(name string, sizeBytes, idxScan, rank int64, share, ratio float64) db.IndexCacheEfficiencyRow {
 	return db.IndexCacheEfficiencyRow{
 		IndexName:      pgtype.Text{String: name, Valid: true},
 		IndexSizeBytes: pgtype.Int8{Int64: sizeBytes, Valid: true},
 		IdxScan:        pgtype.Int8{Int64: idxScan, Valid: true},
+		ScanRank:       pgtype.Int8{Int64: rank, Valid: true},
+		ScanShare:      makeNumeric(share),
 		CacheHitRatio:  makeNumeric(ratio),
-		StatsReset:     statsReset,
 	}
 }
 
 func mb(n int64) int64 { return n * 1024 * 1024 }
-
-func windowDaysAgo(days int) pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: time.Now().AddDate(0, 0, -days), Valid: true}
-}
-
-func nullWindow() pgtype.Timestamptz { return pgtype.Timestamptz{Valid: false} }
 
 func findFinding(t *testing.T, report *check.Report, id string) check.Finding {
 	t.Helper()
@@ -321,7 +316,7 @@ func Test_IndexCacheRatio_Informational(t *testing.T) {
 	t.Parallel()
 
 	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
-		indexRow("public.idx_orders_created", mb(600), 6000, 70.0, windowDaysAgo(30)),
+		indexRow("public.idx_orders_created", mb(600), 60000, 5, 0.5, 70.0),
 	})
 
 	f := findFinding(t, report, "index-cache-ratio")
@@ -337,26 +332,26 @@ func Test_IndexCacheRatio_Informational(t *testing.T) {
 func Test_IndexCacheRatio_Gate(t *testing.T) {
 	t.Parallel()
 
-	// A 30-day window turns idx_scan into a scans/day rate: 3300 = 110/day (hot),
-	// 2700 = 90/day (cold), 3000 = 100/day (exactly at the frequency floor).
-	window := windowDaysAgo(30)
-
+	// hot = (scan_rank <= 20 OR scan_share >= 1%) AND idx_scan >= 10,000.
 	tests := []struct {
-		name       string
-		size       int64
-		idxScan    int64
-		ratio      float64
-		statsReset pgtype.Timestamptz
-		listed     bool
+		name    string
+		size    int64
+		idxScan int64
+		rank    int64
+		share   float64
+		ratio   float64
+		listed  bool
 	}{
-		{"hot + big + low-ratio - listed", mb(600), 3300, 70.0, window, true},
-		{"hot + big + ok-ratio - not listed", mb(600), 3300, 80.0, window, false},
-		{"cold + big + low-ratio - not listed", mb(600), 2700, 70.0, window, false},
-		{"hot + small - not listed", mb(400), 3300, 70.0, window, false},
-		{"exactly 500MB + hot + low-ratio - listed", mb(500), 3300, 70.0, window, true},
-		{"exactly 75% ratio - not listed", mb(600), 3300, 75.0, window, false},
-		{"NULL window, lifetime >=10k - listed", mb(600), 20000, 70.0, nullWindow(), true},
-		{"NULL window, lifetime <10k - not listed", mb(600), 5000, 70.0, nullWindow(), false},
+		{"rank 20 + low share - listed", mb(600), 50000, 20, 0.001, 70.0, true},
+		{"rank 21 + low share - not listed", mb(600), 50000, 21, 0.001, 70.0, false},
+		{"rank 21 + share exactly 1% - listed", mb(600), 50000, 21, 0.01, 70.0, true},
+		{"rank 21 + share just below 1% - not listed", mb(600), 50000, 21, 0.009, 70.0, false},
+		{"scan floor exactly 10,000 - listed", mb(600), 10000, 5, 0.5, 70.0, true},
+		{"scan floor 9,999 - not listed", mb(600), 9999, 5, 0.5, 70.0, false},
+		{"hot + ok-ratio - not listed", mb(600), 50000, 5, 0.5, 80.0, false},
+		{"hot + exactly 75% ratio - not listed", mb(600), 50000, 5, 0.5, 75.0, false},
+		{"hot + small - not listed", mb(400), 50000, 5, 0.5, 70.0, false},
+		{"hot + exactly 500MB - listed", mb(500), 50000, 5, 0.5, 70.0, true},
 	}
 
 	for _, tt := range tests {
@@ -364,7 +359,7 @@ func Test_IndexCacheRatio_Gate(t *testing.T) {
 			t.Parallel()
 
 			report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
-				indexRow("public.idx_x", tt.size, tt.idxScan, tt.ratio, tt.statsReset),
+				indexRow("public.idx_x", tt.size, tt.idxScan, tt.rank, tt.share, tt.ratio),
 			})
 			f := findFinding(t, report, "index-cache-ratio")
 
@@ -388,8 +383,9 @@ func Test_IndexCacheRatio_NullRatioSkipped(t *testing.T) {
 			IndexName:      pgtype.Text{String: "public.idx_idle", Valid: true},
 			IndexSizeBytes: pgtype.Int8{Int64: mb(600), Valid: true},
 			IdxScan:        pgtype.Int8{Int64: 20000, Valid: true},
+			ScanRank:       pgtype.Int8{Int64: 5, Valid: true},
+			ScanShare:      makeNumeric(0.5),
 			CacheHitRatio:  pgtype.Numeric{Valid: false},
-			StatsReset:     windowDaysAgo(30),
 		},
 	})
 
