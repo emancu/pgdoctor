@@ -146,6 +146,10 @@ func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timest
 		if row.IsPrimary || row.IsUnique {
 			continue
 		}
+		// Zero-scan indexes belong to unused-indexes; low-usage covers 1..low-rate.
+		if row.IdxScan.Int64 == 0 {
+			continue
+		}
 		if row.TableWrites.Int64 < lowUsageWriteThreshold {
 			continue
 		}

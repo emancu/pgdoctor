@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`index-usage`**: `low-usage-indexes` now requires at least one scan, so zero-scan indexes are reported only by `unused-indexes` instead of by both findings ([#50](https://github.com/emancu/pgdoctor/pull/50)).
 - **`partition-usage`**: `partition-key-unused` now states the period its call and time totals cover — `pg_stat_statements` counters are cumulative since the last reset, so the numbers were uninterpretable on their own ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
