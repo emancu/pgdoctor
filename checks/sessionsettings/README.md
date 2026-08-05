@@ -46,9 +46,6 @@ Common production problems caused by misconfigured settings:
 - Memory pressure from long-running aggregations
 - Inability to identify performance regressions
 
-These degrade a workload but never take the database down, so every finding stays at WARN — urgent, without
-escalating to FAIL.
-
 ## How to Fix
 
 Configure role settings using `ALTER ROLE`:
