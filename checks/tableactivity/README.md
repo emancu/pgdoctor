@@ -9,15 +9,18 @@ Both findings are **informational** — they characterize the workload, they do 
 
 ## High Churn Tables (`high-churn-tables`)
 
-Churn is write velocity: `n_tup_ins + n_tup_upd + n_tup_del` since statistics were last reset. This finding lists
-tables above 1 million total writes.
+Churn is cumulative write activity: `n_tup_ins + n_tup_upd + n_tup_del` since statistics were last reset — a
+lifetime count, not a rate. This finding lists tables above 1 million total writes.
 
-High churn is a property of the workload, not a fault. It matters because every write leaves dead tuples behind for
-vacuum to clean, so churn sets the pace of:
+High churn is a property of the workload, not a fault. Updates and deletes leave dead tuples behind for vacuum,
+so on update/delete-heavy tables churn sets the pace of:
 
-- **Vacuum pressure** — more dead tuples per unit time, so autovacuum must run more often to keep up.
+- **Vacuum pressure** — more dead tuples, so autovacuum must run more often to keep up.
 - **Bloat velocity** — when vacuum falls behind, dead tuples accumulate into table and index bloat.
-- **WAL volume** — every write is logged, driving replication traffic and backup size.
+- **WAL volume** — every write (inserts included) is logged, driving replication traffic and backup size.
+
+Insert-only tables can exceed the threshold too; they create no dead tuples, so for them churn speaks to WAL,
+statistics freshness, and growth — not vacuum debt.
 
 Read it as context for the vacuum checks: a table flagged by `table-vacuum-health` or `table-bloat` is easier to
 interpret once you know whether it is high-churn.
