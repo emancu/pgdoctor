@@ -154,7 +154,7 @@ func TestTableBloat_LargeBloated_Warning(t *testing.T) {
 	assert.Contains(t, largeBloatFinding.Details, "Found 1 large table(s)")
 }
 
-func TestTableBloat_LargeBloated_Critical(t *testing.T) {
+func TestTableBloat_LargeBloated_BigTierStaysWarn(t *testing.T) {
 	t.Parallel()
 
 	const oneGB = 1024 * 1024 * 1024
@@ -171,13 +171,13 @@ func TestTableBloat_LargeBloated_Critical(t *testing.T) {
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
-	assert.Equal(t, check.SeverityFail, report.Severity)
+	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	largeBloatFinding := report.Results[1]
-	assert.Equal(t, check.SeverityFail, largeBloatFinding.Severity)
+	assert.Equal(t, check.SeverityWarn, largeBloatFinding.Severity)
 	require.NotNil(t, largeBloatFinding.Table)
 	require.Len(t, largeBloatFinding.Table.Rows, 1)
-	assert.Equal(t, check.SeverityFail, largeBloatFinding.Table.Rows[0].Severity)
+	assert.Equal(t, check.SeverityWarn, largeBloatFinding.Table.Rows[0].Severity)
 }
 
 func TestTableBloat_MixedSeverity(t *testing.T) {
@@ -192,7 +192,7 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 			makeTableRow("public.t1", 100000, 80000, 45.0, 200*1024*1024, &recentVacuum, nil, 5),
 			// High dead tuples - warning
 			makeTableRow("public.t2", 100000, 25000, 25.0, 150*1024*1024, &recentVacuum, nil, 3),
-			// Large bloated - critical
+			// Large bloated - big tier (still WARN)
 			makeTableRow("public.t4", 100000000, 30000000, 30.0, 15*oneGB, &recentVacuum, nil, 10),
 			// Large bloated - warning
 			makeTableRow("public.t5", 10000000, 1500000, 15.0, 2*oneGB, &recentVacuum, nil, 8),
@@ -204,11 +204,11 @@ func TestTableBloat_MixedSeverity(t *testing.T) {
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
-	assert.Equal(t, check.SeverityFail, report.Severity)
+	assert.Equal(t, check.SeverityWarn, report.Severity)
 	assert.Len(t, report.Results, 2)
 
 	assert.Equal(t, check.SeverityWarn, report.Results[0].Severity, "high-dead-tuples severity")
-	assert.Equal(t, check.SeverityFail, report.Results[1].Severity, "large-bloated-tables severity")
+	assert.Equal(t, check.SeverityWarn, report.Results[1].Severity, "large-bloated-tables severity")
 
 	for _, finding := range report.Results {
 		assert.NotNil(t, finding.Table)
@@ -247,10 +247,10 @@ func TestTableBloat_EdgeCases_ExactThresholds(t *testing.T) {
 			expectedLargeSeverity:    check.SeverityWarn,
 		},
 		{
-			name:                     "exactly 10GB + 20% dead - critical",
+			name:                     "exactly 10GB + 20% dead - big tier stays warn",
 			row:                      makeTableRow("public.t6", 40000000, 10000000, 20.0, tenGB, &recentVacuum, nil, 15),
 			expectedHighDeadSeverity: check.SeverityWarn, // 20% triggers high-dead too
-			expectedLargeSeverity:    check.SeverityFail,
+			expectedLargeSeverity:    check.SeverityWarn,
 		},
 	}
 
@@ -303,14 +303,14 @@ func TestTableBloat_FindingSeverityEscalation(t *testing.T) {
 			rowSeverities: []check.Severity{check.SeverityWarn},
 		},
 		{
-			name: "large-bloated-tables escalates to fail with a critical row",
+			name: "large-bloated-tables stays warn with a big-tier row",
 			rows: []db.TableBloatRow{
 				makeTableRow("public.t1", 50000000, 15000000, 25.0, 12*oneGB, &recentVacuum, nil, 15),
 				makeTableRow("public.t2", 10000000, 1500000, 15.0, 2*oneGB, &recentVacuum, nil, 8),
 			},
 			findingIdx:    1,
-			severity:      check.SeverityFail,
-			rowSeverities: []check.Severity{check.SeverityFail, check.SeverityWarn},
+			severity:      check.SeverityWarn,
+			rowSeverities: []check.Severity{check.SeverityWarn, check.SeverityWarn},
 		},
 		{
 			name: "large-bloated-tables stays warn with only warning rows",

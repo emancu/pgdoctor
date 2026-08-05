@@ -69,17 +69,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-// maxRowSeverity floors at Warn: these findings only exist once a row warrants attention.
-func maxRowSeverity(rows []check.TableRow) check.Severity {
-	severity := check.SeverityWarn
-	for _, row := range rows {
-		if row.Severity > severity {
-			severity = row.Severity
-		}
-	}
-	return severity
-}
-
 func getDeadTuplePercent(row db.TableBloatRow) float64 {
 	if !row.DeadTuplePercent.Valid {
 		return 0
@@ -136,26 +125,23 @@ func checkHighDeadTuples(rows []db.TableBloatRow, report *check.Report) {
 	})
 }
 
-// checkLargeBloatedTables identifies large tables with notable bloat.
+// checkLargeBloatedTables identifies large tables with notable bloat (WARN-only: chronic waste, never stops the DB).
 func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	const oneGB = int64(1024 * 1024 * 1024)
 	const tenGB = int64(10 * 1024 * 1024 * 1024)
 
-	var critical []db.TableBloatRow // >10GB with >20%
-	var warning []db.TableBloatRow  // >1GB with >10%
+	var bloated []db.TableBloatRow // >10GB with >20%, or >1GB with >10%
 
 	for _, row := range rows {
 		size := row.TotalSizeBytes.Int64
 		pct := getDeadTuplePercent(row)
 
-		if size >= tenGB && pct >= 20 {
-			critical = append(critical, row)
-		} else if size >= oneGB && pct >= 10 {
-			warning = append(warning, row)
+		if (size >= tenGB && pct >= 20) || (size >= oneGB && pct >= 10) {
+			bloated = append(bloated, row)
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if len(bloated) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "large-bloated-tables",
 			Name:     "Large Table Bloat",
@@ -166,23 +152,9 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	}
 
 	headers := []string{"Table", "Size", "Dead %", "Wasted Space (est)"}
-	var tableRows []check.TableRow
+	tableRows := make([]check.TableRow, 0, len(bloated))
 
-	for _, row := range critical {
-		pct := getDeadTuplePercent(row)
-		wastedBytes := int64(float64(row.TotalSizeBytes.Int64) * pct / 100)
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				row.TableName.String,
-				check.FormatBytes(row.TotalSizeBytes.Int64),
-				fmt.Sprintf("%.1f%%", pct),
-				check.FormatBytes(wastedBytes),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
+	for _, row := range bloated {
 		pct := getDeadTuplePercent(row)
 		wastedBytes := int64(float64(row.TotalSizeBytes.Int64) * pct / 100)
 		tableRows = append(tableRows, check.TableRow{
@@ -199,8 +171,8 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 	report.AddFinding(check.Finding{
 		ID:       "large-bloated-tables",
 		Name:     "Large Table Bloat",
-		Severity: maxRowSeverity(tableRows),
-		Details:  fmt.Sprintf("Found %d large table(s) with significant bloat, wasting disk space", len(critical)+len(warning)),
+		Severity: check.SeverityWarn,
+		Details:  fmt.Sprintf("Found %d large table(s) with significant bloat, wasting disk space", len(bloated)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
