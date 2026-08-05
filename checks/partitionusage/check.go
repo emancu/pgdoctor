@@ -309,8 +309,6 @@ func problemDetails(affected []affectedTable, statements int, statsReset pgtype.
 			check.FormatNumber(table.calls), check.FormatDurationMs(table.execTime))
 	}
 
-	b.WriteString("\nRead a statement in full: SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;")
-
 	return b.String()
 }
 

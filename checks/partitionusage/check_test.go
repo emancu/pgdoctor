@@ -861,7 +861,6 @@ func Test_PartitionUsage_ProblemQueriesListed(t *testing.T) {
 
 	// The queryid is shown so the full text can be looked up.
 	require.Equal(t, "12345", examples.Table.Rows[0].Cells[3])
-	require.Contains(t, examples.Details, "pg_stat_statements WHERE queryid")
 }
 
 func Test_PartitionUsage_NoProblemQueries_NoTable(t *testing.T) {
@@ -929,6 +928,7 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	// The full normalized query text is analyzed, scoped to the current
 	// database and top-level statements.
 	require.Contains(t, metadata.SQL, `LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query`)
+	require.Contains(t, metadata.Readme, "SELECT query FROM pg_stat_statements WHERE queryid")
 	require.Contains(t, metadata.SQL, "AND toplevel")
 	require.Contains(t, metadata.SQL, "d.datname = current_database()")
 	// Statement type is matched on the leading keyword. Substring matching let
@@ -969,7 +969,6 @@ func Test_PartitionUsage_TableOutput(t *testing.T) {
 
 	require.Contains(t, result.Details, "1 statement(s) not using the partition key")
 	require.Contains(t, result.Details, "public.orders (key: created_at, 12 partitions)")
-	require.Contains(t, result.Details, "pg_stat_statements WHERE queryid")
 }
 
 func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
