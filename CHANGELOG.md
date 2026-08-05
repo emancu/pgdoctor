@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`connection-efficiency`**: `sessions-abandoned` now caps at WARN — its cumulative ratio of already-closed sessions cannot exhaust `max_connections`, so it flags an application bug, not an imminent incident ([#47](https://github.com/emancu/pgdoctor/pull/47)).
+- **`connection-efficiency`**: `sessions-abandoned` warns above 7% and no longer reports FAIL ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 - **`toast-storage`**: `compression-algorithm` now counts effective pglz (explicit, or unset while `default_toast_compression` is pglz) and moves its big-TOAST itemization to `--detail debug` ([#41](https://github.com/emancu/pgdoctor/pull/41)).

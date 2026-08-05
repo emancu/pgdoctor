@@ -15,9 +15,6 @@ PostgreSQL 14 introduced session-level statistics in `pg_stat_database` that tra
 - PostgreSQL 14 or later (session statistics don't exist in earlier versions)
 - For versions < 14, the check reports OK and skips validation
 
-Connection pool utilization is covered by `connection-health/idle-ratio`, which reads current connection
-state rather than a cumulative snapshot.
-
 ## Subchecks
 
 ### sessions-abandoned
@@ -27,12 +24,12 @@ state rather than a cumulative snapshot.
 **Metric**: Count of sessions where client disconnected without proper cleanup.
 
 **Thresholds**:
-- `<=1%` - Normal (OK)
-- `>1%` - Elevated abandonment (WARN)
+- `<=7%` - Normal (OK)
+- `>7%` - Elevated abandonment (WARN)
 
-This ratio is cumulative since the last stats reset and counts sessions that are already closed, so it cannot
-exhaust `max_connections`. It flags an application connection-handling bug worth fixing, never an imminent
-incident, and never escalates past WARN.
+**Why it matters**: abandoned sessions are clients that vanished without disconnecting — crashed processes,
+dropped networks, or missing connection cleanup in application shutdown paths. The counter is cumulative over
+closed sessions, so it points at a client-side hygiene bug to fix in the application, not at database health.
 
 **What it means**:
 - Client closed connection without sending termination message

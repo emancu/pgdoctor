@@ -174,21 +174,21 @@ func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "at warn threshold (1%)",
+			name:             "below warn threshold (5%)",
 			totalSessions:    1000,
-			abandoned:        10,
-			expectedSeverity: check.SeverityPass, // <= 1% is OK
+			abandoned:        50,
+			expectedSeverity: check.SeverityPass, // <= 7% is OK
 		},
 		{
-			name:             "warning (2%)",
+			name:             "warning (8%)",
 			totalSessions:    1000,
-			abandoned:        20,
+			abandoned:        80,
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "high (6%) caps at warn",
+			name:             "high (20%) caps at warn",
 			totalSessions:    1000,
-			abandoned:        60,
+			abandoned:        200,
 			expectedSeverity: check.SeverityWarn,
 		},
 	}
@@ -312,7 +312,7 @@ func Test_ConnectionEfficiency_Prescriptions(t *testing.T) {
 	// Trigger all warnings.
 	stats := db.SessionStatisticsRow{
 		TotalSessions:     int64Val(1000),
-		SessionsAbandoned: int64Val(20), // 2% (warn)
+		SessionsAbandoned: int64Val(80), // 8% (warn)
 		SessionsFatal:     int64Val(20), // 2% (warn)
 		SessionsKilled:    int64Val(20), // 2% (warn)
 	}
@@ -342,7 +342,7 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 			name: "one warning",
 			stats: func() db.SessionStatisticsRow {
 				s := healthyStats()
-				s.SessionsAbandoned = int64Val(20) // 2% = warn
+				s.SessionsAbandoned = int64Val(100) // 10% = warn
 				return s
 			}(),
 			expectedSeverity: check.SeverityWarn,

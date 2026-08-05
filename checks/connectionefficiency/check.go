@@ -20,6 +20,7 @@ var readme string
 const (
 	// Termination rate thresholds (as percentage of total sessions).
 	terminationWarnPercent = 1.0 // >1% abnormal terminations = warning
+	abandonedWarnPercent   = 7.0 // >7% abandoned sessions = warning
 	terminationFailPercent = 5.0 // >5% abnormal terminations = critical
 )
 
@@ -98,7 +99,7 @@ func checkSessionsAbandoned(stats db.SessionStatisticsRow, totalSessions int64, 
 	sessionsAbandoned := getInt64(stats.SessionsAbandoned)
 	abandonedPercent := float64(sessionsAbandoned) / float64(totalSessions) * 100
 
-	if abandonedPercent <= terminationWarnPercent {
+	if abandonedPercent <= abandonedWarnPercent {
 		report.AddFinding(check.Finding{
 			ID:       "sessions-abandoned",
 			Name:     "Abandoned Sessions",
