@@ -122,6 +122,7 @@ func Test_UUIDDefaults_UUIDGenerateV4(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "random v4 defaults")
+	require.Contains(t, report.Results[0].Details, "causes index bloat")
 }
 
 func Test_UUIDDefaults_Multiple(t *testing.T) {
