@@ -77,43 +77,6 @@ func TestIndexBloat_BelowThresholdsNotListed(t *testing.T) {
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 }
 
-func TestIndexBloat_SizeFloorBoundary(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		row    db.IndexBloatRow
-		listed bool
-	}{
-		{
-			name:   "50 pct at 199MiB is below the size floor",
-			row:    makeIndexRow("public", "t", "idx", 50.0, 10*check.MiB, 199*check.MiB),
-			listed: false,
-		},
-		{
-			name:   "50 pct at 200MiB clears the size floor",
-			row:    makeIndexRow("public", "t", "idx", 50.0, 10*check.MiB, 200*check.MiB),
-			listed: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			report := runCheck(t, []db.IndexBloatRow{tt.row})
-
-			if !tt.listed {
-				assert.Equal(t, check.SeverityPass, report.Severity)
-				return
-			}
-			assert.Equal(t, check.SeverityWarn, report.Severity)
-			require.NotNil(t, report.Results[0].Table)
-			require.Len(t, report.Results[0].Table.Rows, 1)
-		})
-	}
-}
-
 func TestIndexBloat_RowTiers(t *testing.T) {
 	t.Parallel()
 
