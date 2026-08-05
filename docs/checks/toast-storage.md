@@ -85,12 +85,14 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ### toast-ratio
 
-Lists TOAST-heavy tables: TOAST >=50% of total size, or TOAST >=10GB absolute. Sorted by TOAST size desc.
+Lists TOAST-heavy tables: TOAST >=50% of total size, or >=10GB absolute. Sorted by TOAST size.
 
-- **INFO**: a storage characteristic, not a defect; no action expected — context for I/O and backup reasoning.
+**Severity**: INFO
 
-A high ratio or large absolute TOAST usually reflects large values (JSON, text, binary) that may be worth
-extracting, externalizing, or archiving — see How to Fix.
+**Why it matters**: when most of a table lives in TOAST, every fetch of a wide value pays extra page reads
+through the TOAST index, the main table's size understates the real I/O and backup weight, and cache is spent
+on blob chunks. These are the tables where retention policies, S3 offload, or column splits pay off most, and
+where compression choices (see compression-algorithm) move real gigabytes.
 
 ### toast-bloat
 
@@ -118,26 +120,32 @@ Identifies specific columns causing TOAST usage:
 
 ### compression-algorithm
 
-Informational (PostgreSQL 14+ only): columns whose TOAST is effectively pglz where lz4 is available.
+Counts columns whose new writes still compress with pglz where lz4 is available (PostgreSQL 14+).
+A column with no explicit `SET COMPRESSION` follows `default_toast_compression` at write time, so unset
+columns on an lz4-default instance already write lz4 and are not counted. `EXTERNAL`/`PLAIN` storage never
+compresses and is never counted.
 
-- **INFO**: never escalates the check severity.
-- Details carry the full aggregate, count-first: `N column(s) on M table(s) use pglz compression`.
-- Effective-aware: a column counts as pglz when it has explicit pglz, or is unset while
-  `default_toast_compression` is pglz. Unset columns on an lz4-default DB do not count.
-- No table in normal output. Itemization lives in `Finding.Debug` (shown at `--detail debug`):
-  every TOAST-tracked column above 1 GiB, labeled with its effective method, sorted by TOAST size desc,
-  name last — e.g. `#  1.9GiB  effective pglz  public.events.payload`. Present on the PASS path too.
+**Severity**: INFO
 
-`default` = no explicit `SET COMPRESSION`, i.e. it follows `default_toast_compression`. `EXTERNAL`/`PLAIN`
-storage do not use compression, so they are never tracked.
+**Why it matters**: pglz spends roughly 5x more CPU compressing and 2-3x more decompressing than lz4, for a
+compression ratio only a few percent better. On TOAST-heavy tables that is measurable write overhead and a
+slower read of every large JSON/text value.
+
+**What to do**: prefer flipping `default_toast_compression` (see compression-default) over per-column DDL;
+for columns explicitly set to pglz, `ALTER TABLE t ALTER COLUMN c SET COMPRESSION lz4`. The columns worth
+acting on first — those with over 1GiB of TOAST — are listed under `--detail debug`, each labeled with the
+compression its new writes use.
 
 ### compression-default
 
-Informational (PostgreSQL 14+ only): the cluster `default_toast_compression` GUC.
+Checks the cluster-wide `default_toast_compression` setting (PostgreSQL 14+).
 
-- **INFO** when the default is not lz4: unset columns compress new writes with pglz; lz4 is strictly better.
-- **PASS** when the default is already lz4.
-- Set fleet-wide via the parameter group (`default_toast_compression = lz4`); no DDL, new writes only.
+**Severity**: WARN when not lz4
+
+**Why it matters**: every column without an explicit compression setting follows this GUC at write time — on
+pglz, each of them pays the pglz CPU tax on every TOAST write and read. One parameter-group change
+(`default_toast_compression = lz4`) migrates all new writes with no DDL, no locks, no downtime, and reverts
+the same way.
 
 **pglz vs lz4**:
 - lz4 compresses ~5x faster and decompresses ~2-3x faster than pglz; ratio is slightly worse (a few % larger).
@@ -156,11 +164,11 @@ Informational (PostgreSQL 14+ only): the cluster `default_toast_compression` GUC
 - Fleet alternative: `default_toast_compression = lz4` in the parameter group switches every unset column's
   new writes without any DDL.
 
-**Transition honesty**:
-- After flipping the default (or a column's `SET COMPRESSION`), existing TOAST datums keep pglz; the catalog
-  records only the column's current setting, so it cannot see the on-disk pglz/lz4 mix.
-- Ground truth per table is a manual, scan-priced count: `SELECT pg_column_compression(col), count(*) FROM tab
-  GROUP BY 1`. This is why the Debug list keeps showing big-TOAST columns regardless of the current setting.
+**After switching**:
+- Existing TOAST datums keep their old method; only new writes change. To recompress existing data use
+  `pg_repack` or dump/restore — `VACUUM FULL`/`CLUSTER` do not reliably recompress out-of-line datums.
+- The catalog records settings, not data. To see a table's real pglz/lz4 mix, run the (scan-priced)
+  `SELECT pg_column_compression(col), count(*) FROM tab GROUP BY 1;`
 
 ## How to Fix
 

@@ -86,8 +86,8 @@ func Test_ToastStorage_CompressionDefault_FiresWithoutToast(t *testing.T) {
 	checktest.AssertSeverityInvariant(t, report)
 	def := report.Results[0]
 	require.Equal(t, "compression-default", def.ID)
-	require.Equal(t, check.SeverityInfo, def.Severity)
-	require.Equal(t, check.SeverityPass, report.Severity)
+	require.Equal(t, check.SeverityWarn, def.Severity)
+	require.Equal(t, check.SeverityWarn, report.Severity)
 }
 
 func Test_ToastStorage_Heavy_MergedGate_Info(t *testing.T) {
@@ -384,7 +384,8 @@ func Test_ToastStorage_CompressionAlgorithm_DoesNotEscalate(t *testing.T) {
 	f := compressionFinding(t, report)
 	require.NotNil(t, f)
 	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.Equal(t, check.SeverityPass, report.Severity, "Info finding must not escalate the report")
+	// compression-default WARNs on the pglz GUC; the Info finding itself adds nothing above that.
+	require.Equal(t, check.SeverityWarn, report.Severity)
 }
 
 func Test_ToastStorage_CompressionAlgorithm_DebugFloorBoundary(t *testing.T) {
@@ -498,7 +499,7 @@ func Test_ToastStorage_CompressionAlgorithm_SkipsOnPG13(t *testing.T) {
 	require.Nil(t, findingByID(report, findingIDCompressionDefault), "compression-default should not run on PG < 14")
 }
 
-func Test_ToastStorage_CompressionDefault_PglzInfo(t *testing.T) {
+func Test_ToastStorage_CompressionDefault_PglzWarns(t *testing.T) {
 	t.Parallel()
 
 	row := makeToastRow("public", "events", "pg_toast.pg_toast_34561", 5*check.GiB, 2*check.GiB, 7*check.GiB, 28.0)
@@ -512,10 +513,10 @@ func Test_ToastStorage_CompressionDefault_PglzInfo(t *testing.T) {
 
 	f := findingByID(report, findingIDCompressionDefault)
 	require.NotNil(t, f)
-	require.Equal(t, check.SeverityInfo, f.Severity)
+	require.Equal(t, check.SeverityWarn, f.Severity)
 	require.Contains(t, f.Details, "default_toast_compression is pglz")
 	require.Nil(t, f.Table)
-	require.Equal(t, check.SeverityPass, report.Severity, "Info finding must not escalate the report")
+	require.Equal(t, check.SeverityWarn, report.Severity)
 }
 
 func Test_ToastStorage_CompressionDefault_Lz4Pass(t *testing.T) {

@@ -477,7 +477,7 @@ func checkCompressionDefaultFinding(ctx context.Context, current string, report 
 	report.AddFinding(check.Finding{
 		ID:       "compression-default",
 		Name:     "Default TOAST Compression",
-		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("default_toast_compression is %s; unset columns compress new writes with %s — lz4 is strictly better here", current, current),
+		Severity: check.SeverityWarn,
+		Details:  fmt.Sprintf("default_toast_compression is %s; set it to lz4 in the parameter group (new writes only, no DDL)", current),
 	})
 }

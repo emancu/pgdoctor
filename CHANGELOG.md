@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
-- **`toast-storage`**: new informational `compression-default` finding — flags a cluster `default_toast_compression` that is not lz4 ([#41](https://github.com/emancu/pgdoctor/pull/41)).
+- **`toast-storage`**: new `compression-default` finding — warns when the cluster `default_toast_compression` is not lz4 ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 ### Fixed
 
