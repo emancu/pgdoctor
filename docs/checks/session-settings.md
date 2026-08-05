@@ -104,9 +104,8 @@ When using pgdoctor as a library, you can configure roles and timeout thresholds
 ```go
 cfg := check.Config{
     "session-settings": {
-        "roles":        "app_ro,app_rw",
-        "timeout_warn": "2000",   // above this → WARN (default: 5000)
-        "timeout_fail": "5000",   // above this → FAIL (default: 10000)
+        "roles":   "app_ro,app_rw",
+        "timeout": "2000",   // above this → "Too high" WARN (default: 5000)
     },
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
@@ -117,8 +116,7 @@ pgdoctor.Run(ctx, conn, pgdoctor.Options{
 | Key | Description | Default |
 |-----|-------------|---------|
 | `roles` | Comma-separated list of roles to check | Discovered dynamically |
-| `timeout_warn` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a WARN | `5000` |
-| `timeout_fail` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a FAIL | `10000` |
+| `timeout` | Threshold (ms) above which the timeouts are a `Too high` WARN | `5000` |
 
 When no config is provided, roles are discovered dynamically and default thresholds apply.
 
