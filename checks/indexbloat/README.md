@@ -7,8 +7,11 @@ Bloated indexes waste disk space and slow down queries.
 Estimates B-tree index bloat using page layout math and reports a single
 finding. An index is listed when:
 
-- Bloat >= 50%, **or**
+- Bloat >= 50% **and** index size >= 200 MiB, **or**
 - Wasted space >= 2 GiB
+
+The size floor drops small indexes: a sub-200 MiB index at 70% bloat wastes
+too little to be worth a REINDEX. Any index wasting >= 2 GiB is always listed.
 
 Listed indexes are tiered by row severity:
 
