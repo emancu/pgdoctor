@@ -129,14 +129,14 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "statement_timeout disabled for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "statement_timeout", "0"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
 			Name: "statement_timeout too high for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "statement_timeout", "15000"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
@@ -162,7 +162,7 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "statement_timeout disabled for both roles",
 			Rows: overrideBothRoles("statement_timeout", "0"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		// Idle timeout tests
@@ -199,18 +199,18 @@ func Test_SessionSettings(t *testing.T) {
 			},
 		},
 		{
-			// PG17+ present with value 0 must still FAIL (regression guard).
+			// PG17+ present with value 0 must WARN (regression guard).
 			Name: "transaction_timeout disabled for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "transaction_timeout", "0"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
 			Name: "transaction_timeout too high for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "transaction_timeout", "15000"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
@@ -225,21 +225,21 @@ func Test_SessionSettings(t *testing.T) {
 			Name: "log_min_duration_statement disabled for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "log_min_duration_statement", "-1"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
 			Name: "log_min_duration_statement too low for app_ro",
 			Rows: overrideOptimalSessionSettings("app_ro", "log_min_duration_statement", "100"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 		{
 			Name: "log_min_duration_statement too low for both roles",
 			Rows: overrideBothRoles("log_min_duration_statement", "100"),
 			Expect: []ExpectedResultCheck{
-				{ID: "session-settings", Sev: check.SeverityFail},
+				{ID: "session-settings", Sev: check.SeverityWarn},
 			},
 		},
 	}
@@ -276,16 +276,16 @@ func Test_SessionSettings_MultipleIssues(t *testing.T) {
 
 	settings := map[string]map[string]string{
 		"app_ro": {
-			"statement_timeout":                   "0",     // disabled - FAIL
+			"statement_timeout":                   "0",     // disabled - WARN
 			"idle_in_transaction_session_timeout": "0",     // disabled - WARN
-			"transaction_timeout":                 "15000", // too high - FAIL
-			"log_min_duration_statement":          "-1",    // disabled - FAIL
+			"transaction_timeout":                 "15000", // too high - WARN
+			"log_min_duration_statement":          "-1",    // disabled - WARN
 		},
 		"app_rw": {
 			"statement_timeout":                   "7000",  // high - WARN
 			"idle_in_transaction_session_timeout": "60000", // OK
-			"transaction_timeout":                 "0",     // disabled - FAIL
-			"log_min_duration_statement":          "100",   // too low - FAIL
+			"transaction_timeout":                 "0",     // disabled - WARN
+			"log_min_duration_statement":          "100",   // too low - WARN
 		},
 	}
 
@@ -305,19 +305,11 @@ func Test_SessionSettings_MultipleIssues(t *testing.T) {
 	// Should have multiple issues detected in the table
 	require.Greater(t, len(result.Table.Rows), 5, "Should detect multiple configuration issues")
 
-	// Verify we have both FAIL and WARN severities in table rows
-	hasFail := false
-	hasWarn := false
+	// The check caps at WARN: every issue is a WARN, none escalate to FAIL.
+	require.Equal(t, check.SeverityWarn, result.Severity, "Report caps at WARN")
 	for _, row := range result.Table.Rows {
-		if row.Severity == check.SeverityFail {
-			hasFail = true
-		}
-		if row.Severity == check.SeverityWarn {
-			hasWarn = true
-		}
+		require.Equal(t, check.SeverityWarn, row.Severity, "Every issue row should be WARN")
 	}
-	require.True(t, hasFail, "Should have at least one FAIL severity in table rows")
-	require.True(t, hasWarn, "Should have at least one WARN severity in table rows")
 }
 
 func Test_SessionSettings_BothRolesCheckedEqually(t *testing.T) {
@@ -566,11 +558,11 @@ func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
 	require.Equal(t, 2, warnCount, "Both statement_timeout and transaction_timeout should WARN")
 }
 
-func Test_SessionSettings_CustomThresholds_Fail(t *testing.T) {
+func Test_SessionSettings_CustomThresholds_TooHigh(t *testing.T) {
 	t.Parallel()
 
 	// With tighter thresholds: warn=2000, fail=5000
-	// statement_timeout=7000 is above 5000 → FAIL
+	// statement_timeout=7000 is above 5000 → "Too high" (WARN, the check caps there)
 	settings := map[string]map[string]string{
 		"app_ro": {
 			"statement_timeout":                   "7000",
@@ -595,17 +587,17 @@ func Test_SessionSettings_CustomThresholds_Fail(t *testing.T) {
 	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
-	require.Equal(t, check.SeverityFail, result.Severity, "7000ms should FAIL when threshold is 5000")
+	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms above the fail threshold caps at WARN")
 	require.NotNil(t, result.Table)
 
-	failCount := 0
+	warnCount := 0
 	for _, row := range result.Table.Rows {
-		if row.Severity == check.SeverityFail {
-			failCount++
+		if row.Severity == check.SeverityWarn {
+			warnCount++
 			require.Equal(t, "Too high", row.Cells[4], "Status should be 'Too high'")
 		}
 	}
-	require.Equal(t, 2, failCount, "Both statement_timeout and transaction_timeout should FAIL")
+	require.Equal(t, 2, warnCount, "Both statement_timeout and transaction_timeout should be 'Too high' WARN")
 }
 
 func Test_SessionSettings_DefaultThresholds(t *testing.T) {

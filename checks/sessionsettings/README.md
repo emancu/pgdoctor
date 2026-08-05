@@ -11,6 +11,9 @@ By default, application roles are **discovered dynamically** — any login-capab
 - **idle_in_transaction_session_timeout**: Timeout for idle transactions
 - **log_min_duration_statement**: Threshold for logging slow queries
 
+Every misconfiguration reports as WARN: a wrong timeout degrades a workload but never
+takes the database down, so it stays urgent without escalating to FAIL.
+
 ## Precedence model
 
 For each `(role, setting)` pair, the check resolves the value the role would actually see when it connects to the current database, walking the PostgreSQL GUC hierarchy from most-specific to least-specific:
@@ -105,8 +108,8 @@ When using pgdoctor as a library, you can configure roles and timeout thresholds
 cfg := check.Config{
     "session-settings": {
         "roles":        "app_ro,app_rw",
-        "timeout_warn": "2000",   // above this → WARN (default: 5000)
-        "timeout_fail": "5000",   // above this → FAIL (default: 10000)
+        "timeout_warn": "2000",   // above this → "High" WARN (default: 5000)
+        "timeout_fail": "5000",   // above this → "Too high" WARN (default: 10000)
     },
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
@@ -117,8 +120,8 @@ pgdoctor.Run(ctx, conn, pgdoctor.Options{
 | Key | Description | Default |
 |-----|-------------|---------|
 | `roles` | Comma-separated list of roles to check | Discovered dynamically |
-| `timeout_warn` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a WARN | `5000` |
-| `timeout_fail` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` produce a FAIL | `10000` |
+| `timeout_warn` | Threshold (ms) above which the timeouts are a `High` WARN | `5000` |
+| `timeout_fail` | Threshold (ms) above which the timeouts are a `Too high` WARN | `10000` |
 
 When no config is provided, roles are discovered dynamically and default thresholds apply.
 

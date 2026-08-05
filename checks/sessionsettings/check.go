@@ -208,7 +208,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 			Current:   "0ms (disabled)",
 			Expected:  expectedTimeout,
 			Status:    "MUST be set",
-			Severity:  check.SeverityFail,
+			Severity:  check.SeverityWarn,
 		})
 	} else if stmtTimeout > c.timeoutFail {
 		checks = append(checks, settingCheck{
@@ -217,7 +217,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 			Current:   fmt.Sprintf("%dms", stmtTimeout),
 			Expected:  expectedTimeout,
 			Status:    "Too high",
-			Severity:  check.SeverityFail,
+			Severity:  check.SeverityWarn,
 		})
 	} else if stmtTimeout > c.timeoutWarn {
 		checks = append(checks, settingCheck{
@@ -271,7 +271,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 				Current:   "0ms (disabled)",
 				Expected:  expectedTimeout,
 				Status:    "MUST be set (PG17+)",
-				Severity:  check.SeverityFail,
+				Severity:  check.SeverityWarn,
 			})
 		} else if txTimeout > c.timeoutFail {
 			checks = append(checks, settingCheck{
@@ -280,7 +280,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 				Current:   fmt.Sprintf("%dms", txTimeout),
 				Expected:  expectedTimeout,
 				Status:    "Too high",
-				Severity:  check.SeverityFail,
+				Severity:  check.SeverityWarn,
 			})
 		} else if txTimeout > c.timeoutWarn {
 			checks = append(checks, settingCheck{
@@ -321,7 +321,7 @@ func checkLogStatements(s dbSessionSettings, user string) ([]settingCheck, error
 			Current:   "-1 (disabled)",
 			Expected:  "2000ms",
 			Status:    "Disabled",
-			Severity:  check.SeverityFail,
+			Severity:  check.SeverityWarn,
 		})
 	} else if minDuration < 500 {
 		checks = append(checks, settingCheck{
@@ -330,7 +330,7 @@ func checkLogStatements(s dbSessionSettings, user string) ([]settingCheck, error
 			Current:   fmt.Sprintf("%dms", minDuration),
 			Expected:  "2000ms",
 			Status:    "Too low",
-			Severity:  check.SeverityFail,
+			Severity:  check.SeverityWarn,
 		})
 	} else {
 		checks = append(checks, settingCheck{
