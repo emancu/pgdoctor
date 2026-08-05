@@ -11,8 +11,7 @@ By default, application roles are **discovered dynamically** — any login-capab
 - **idle_in_transaction_session_timeout**: Timeout for idle transactions
 - **log_min_duration_statement**: Threshold for logging slow queries
 
-Every misconfiguration reports as WARN: a wrong timeout degrades a workload but never
-takes the database down, so it stays urgent without escalating to FAIL.
+Every misconfiguration reports as **WARN**.
 
 ## Precedence model
 
@@ -46,6 +45,9 @@ Common production problems caused by misconfigured settings:
 - Lock queues causing cascading failures
 - Memory pressure from long-running aggregations
 - Inability to identify performance regressions
+
+These degrade a workload but never take the database down, so every finding stays at WARN — urgent, without
+escalating to FAIL.
 
 ## How to Fix
 
