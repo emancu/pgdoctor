@@ -107,17 +107,6 @@ Identifies TOAST tables with excessive dead tuples:
 
 **Impact**: Dead tuples in TOAST waste storage and slow sequential scans of TOAST data.
 
-### wide-columns
-
-Identifies specific columns causing TOAST usage:
-- **WARN**: JSONB columns with avg_width >5KB
-- **WARN**: Any columns with avg_width >10KB
-
-**Why important**: Identifying which columns cause TOAST helps target optimization:
-- Extract frequently-queried fields from JSONB to separate columns
-- Move large text/binary data to external storage (S3)
-- Implement data retention policies for growing columns
-
 ### compression-algorithm
 
 Counts columns whose new writes still compress with pglz where lz4 is available (PostgreSQL 14+).
@@ -175,6 +164,25 @@ the same way.
 ### For `toast-ratio`
 
 TOAST-heavy tables (>=50% ratio or >=10GB) indicate large values dominating storage. Solutions depend on data type:
+
+**Find which column carries the TOAST.** The catalog exposes TOAST size per table, not per column, so
+attribution costs a scan of the suspect columns — run it off-peak or on a replica:
+
+```sql
+-- Average stored size per candidate column; the largest is the TOAST driver
+SELECT avg(pg_column_size(payload)) AS payload, avg(pg_column_size(content)) AS content FROM events;
+
+-- Compression method actually applied to a column's values
+SELECT pg_column_compression(payload), count(*) FROM events GROUP BY 1;
+```
+
+Once the driving column is known, the remedies are structural:
+- **Side-table split**: move the wide value to a companion table keyed by the parent id, so hot-path reads
+  never pull it in.
+- **Explicit ORM select-lists**: drop `SELECT *`; a query that omits the wide column pays no TOAST fetch.
+- **`SET STORAGE EXTERNAL`**: for already-compressed or incompressible data (images, gzipped blobs), skip the
+  wasted compression pass.
+- **External object store (S3)**: for true blobs, keep only a key reference in the row.
 
 **For JSONB columns:**
 ```sql
@@ -251,34 +259,6 @@ VACUUM FULL schema.table_name;
 pg_repack --table schema.table_name --no-order
 ```
 
-### For `wide-columns`
-
-Columns with large average widths (>5KB for JSONB, >10KB for text) need optimization:
-
-**For JSONB columns:**
-```sql
--- Strip nulls to save space
-CREATE OR REPLACE FUNCTION strip_nulls_trigger()
-RETURNS trigger AS $$
-BEGIN
-  NEW.payload = jsonb_strip_nulls(NEW.payload);
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER strip_nulls_before_insert
-  BEFORE INSERT OR UPDATE ON events
-  FOR EACH ROW EXECUTE FUNCTION strip_nulls_trigger();
-
--- Extract hot fields to separate columns (see toast-ratio fix above)
-```
-
-**For large text columns:**
-```sql
--- Split hot metadata from cold content (see toast-ratio fix above)
--- Or implement data retention (archive old data)
-```
-
 ### For `compression-algorithm`
 
 Columns using default/pglz compression should use lz4 (PostgreSQL 14+):
@@ -312,12 +292,10 @@ CRITICAL (Fix immediately - hours of backup time or $$$ storage):
 
 HIGH PRIORITY (Plan fix within 2-4 weeks):
 ├─► toast-bloat >30% (autovacuum issues)
-├─► toast-ratio >=10GB TOAST with >100K inserts/day
-└─► wide-columns with JSONB >10KB average
+└─► toast-ratio >=10GB TOAST with >100K inserts/day
 
 MEDIUM PRIORITY (Plan within quarter):
 ├─► toast-ratio 1-10GB TOAST (monitor growth rate)
-├─► wide-columns with text >20KB average
 └─► compression-algorithm using pglz (easy fix, performance improvement)
 
 LOW PRIORITY (Monitor, optimize opportunistically):

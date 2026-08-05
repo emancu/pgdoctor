@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`table-bloat`**: retired the `stale-vacuum` finding — vacuum freshness is covered by `table-vacuum-health/vacuum-stale` ([#26](https://github.com/emancu/pgdoctor/pull/26)).
 - **`table-vacuum-health`**: retired the `analyze-needed` finding — absorbed by `vacuum-stale` ([#27](https://github.com/emancu/pgdoctor/pull/27)).
 - **`toast-storage`**: retired the `large-toast` finding — absorbed by the merged `toast-ratio`; its ID and 10GB/100GB WARN/FAIL tiers are gone ([#41](https://github.com/emancu/pgdoctor/pull/41)).
+- **`toast-storage`**: retired the `wide-columns` finding — it measured stored width (a TOAST pointer for large values) and could not detect wide columns ([#45](https://github.com/emancu/pgdoctor/pull/45)).
 
 ### Changed
 
