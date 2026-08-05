@@ -300,7 +300,7 @@ type problemQuery struct {
 func problemDetails(affected []affectedTable, statements int, statsReset pgtype.Timestamptz) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s), %s",
+	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)%s",
 		statements, len(affected), statsWindow(statsReset))
 
 	for _, table := range affected {
@@ -316,11 +316,13 @@ func problemDetails(affected []affectedTable, statements int, statsReset pgtype.
 // are cumulative since the last reset, so "52K calls" is meaningless without it —
 // it could be an hour of traffic or two years of it.
 func statsWindow(statsReset pgtype.Timestamptz) string {
+	// That the counters are cumulative goes without saying; only the period is
+	// worth the words. An unknown reset time leaves nothing useful to add.
 	if !statsReset.Valid {
-		return "counted since the statistics were last reset (reset time unknown)"
+		return ""
 	}
 
-	return fmt.Sprintf("counted over the %s since pg_stat_statements was reset",
+	return fmt.Sprintf(" over the last %s",
 		check.FormatDurationSec(int64(time.Since(statsReset.Time).Seconds())))
 }
 
