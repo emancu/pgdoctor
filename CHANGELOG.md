@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **docs**: `toast-storage`, `index-usage`, and `cache-efficiency` READMEs restructured to the standard section layout ([#55](https://github.com/emancu/pgdoctor/pull/55)).
 - **`connection-health`**: `long-idle` now counts connections idle over 1 hour (was 30 minutes) and tiers relative to `max_connections` — WARN above 10%, FAIL above 25% — so pooled warm floors no longer misfire as leaks ([#48](https://github.com/emancu/pgdoctor/pull/48)).
 
 ### Fixed
