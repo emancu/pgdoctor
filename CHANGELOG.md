@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`uuid-defaults`**: `random-uuid-indexed` states that random v4 defaults "cause" index bloat, dropping the "may cause" hedge ([#54](https://github.com/emancu/pgdoctor/pull/54)).
 - **`connection-efficiency`**: `sessions-abandoned` warns above 7% and no longer reports FAIL ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 

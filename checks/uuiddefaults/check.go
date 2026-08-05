@@ -88,7 +88,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		ID:       "random-uuid-indexed",
 		Name:     "Indexed UUID Columns Using Random v4 Defaults",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d indexed UUID column(s) using random v4 defaults - may cause index bloat", len(indexedRandomUUIDs)),
+		Details:  fmt.Sprintf("Found %d indexed UUID column(s) using random v4 defaults - causes index bloat", len(indexedRandomUUIDs)),
 		Table: &check.Table{
 			Headers: []string{"Table", "Column", "Default"},
 			Rows:    tableRows,
