@@ -1042,7 +1042,7 @@ FROM pg_stat_activity
 WHERE
   state = 'idle'
   AND pid != pg_backend_pid()
-  AND (now() - state_change) > interval '30 minutes'
+  AND (now() - state_change) > interval '1 hour'
 ORDER BY state_change ASC
 `
 
@@ -1057,7 +1057,7 @@ type LongIdleConnectionsRow struct {
 	ConnectionAgeSeconds pgtype.Int8
 }
 
-// Identifies connections that have been idle for too long (potential pool leak).
+// Identifies connections idle past the 1h idle_session_timeout backstop (unreaped pool accumulation).
 func (q *Queries) LongIdleConnections(ctx context.Context) ([]LongIdleConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, longIdleConnections)
 	if err != nil {

@@ -125,17 +125,26 @@ Idle-in-transaction connections:
 
 ### long-idle
 
-Detects connections that have been idle for >30 minutes.
+Counts connections idle for more than 1 hour, sized against `max_connections`. One hour is the point past
+the usual `idle_session_timeout` backstop, so anything still idle beyond it is genuinely unreaped.
 
 **Thresholds:**
-- Warning: ≥10 connections idle >30 minutes
-- Critical: ≥50 connections idle >30 minutes
+- Warning: idle-over-1h count exceeds 10% of `max_connections`
+- Critical: idle-over-1h count exceeds 25% of `max_connections`
 
-**What it means:**
-Long-idle connections may indicate:
-- Connection leak (app not returning connections)
-- Oversized minimum pool size
-- Abandoned connections from crashed clients
+**Why it matters:**
+Every idle connection still holds a `max_connections` slot, so a growing pool of them starves new sessions
+while doing no work. Pooled fleets keep a warm floor of idle connections *by design* — PgBouncer's
+`min_pool_size` holds spare backends open so bursts don't pay reconnect latency — which is why an absolute
+count means nothing on its own: a healthy floor and a leak look identical until you weigh them against
+capacity. The leak signal is the idle-over-1h population large relative to `max_connections`; a true leak
+is confirmed when that count keeps climbing across runs instead of resting at a steady floor.
+
+**What to do:**
+Identify the source from `pg_stat_activity` (`usename`, `application_name`), then inspect that service's
+pool configuration and shutdown handling — leaks trace to connections not released on error paths or on
+process exit. `idle_session_timeout` is the database-side backstop that reaps sessions idle past a bound
+regardless of client behaviour.
 
 ## How to Fix
 
@@ -235,11 +244,11 @@ WHERE state = 'idle in transaction'
 Fix connection leaks in application:
 
 ```bash
-# Step 1: Identify leaked connections
+# Step 1: Identify the source apps holding idle connections
 SELECT pid, usename, application_name, state_change, query
 FROM pg_stat_activity
 WHERE state = 'idle'
-  AND state_change < NOW() - INTERVAL '30 minutes'
+  AND state_change < NOW() - INTERVAL '1 hour'
 ORDER BY state_change;
 
 # Step 2: Kill old idle connections

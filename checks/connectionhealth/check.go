@@ -27,8 +27,9 @@ const (
 	// in low-traffic databases.
 	minConnectionsForIdleCheck = int64(20)
 
-	longIdleWarnCount = 10
-	longIdleFailCount = 50
+	// Capacity-relative: absolute counts are meaningless against pooled warm floors.
+	longIdleWarnPercent = 10.0
+	longIdleFailPercent = 25.0
 
 	// Pool pressure thresholds - detect when queries may be waiting for connections.
 	poolPressureActivePercent = 90.0 // Warn when >90% of connections are active
@@ -97,7 +98,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	checkPoolPressure(stats, report)
 	checkIdleRatio(stats, report)
 	checkIdleInTransaction(idleTxns, report)
-	checkLongIdleConnections(longIdle, report)
+	checkLongIdleConnections(longIdle, stats.MaxConnections.Int32, report)
 
 	return report, nil
 }
@@ -313,30 +314,28 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 	})
 }
 
-// checkLongIdleConnections detects connections idle for >30 minutes (potential connection leak).
-func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, report *check.Report) {
+// checkLongIdleConnections sizes the idle-over-1h population against max_connections capacity.
+func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, maxConns int32, report *check.Report) {
 	count := len(longIdle)
 
-	if count < longIdleWarnCount {
-		report.AddFinding(check.Finding{
-			ID:       "long-idle",
-			Name:     "Long Idle Connections",
-			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("%d connections idle >30 minutes (threshold: %d)", count, longIdleWarnCount),
-		})
-		return
+	var percent float64
+	if maxConns > 0 {
+		percent = float64(count) / float64(maxConns) * 100
 	}
 
-	severity := check.SeverityWarn
-	if count >= longIdleFailCount {
+	severity := check.SeverityPass
+	switch {
+	case percent > longIdleFailPercent:
 		severity = check.SeverityFail
+	case percent > longIdleWarnPercent:
+		severity = check.SeverityWarn
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "long-idle",
 		Name:     "Long Idle Connections",
 		Severity: severity,
-		Details:  fmt.Sprintf("%d connections idle >30 minutes (potential connection leak)", count),
+		Details:  fmt.Sprintf("%d connections idle >1h (%.1f%% of max_connections)", count, percent),
 	})
 }
 
