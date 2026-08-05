@@ -515,11 +515,10 @@ func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
 	require.NotNil(t, foundRow, "Should find 'Role not found' row for nonexistent role")
 }
 
-func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
+func Test_SessionSettings_CustomThreshold(t *testing.T) {
 	t.Parallel()
 
-	// With tighter thresholds: warn=2000, fail=5000
-	// statement_timeout=3000 is between 2000 and 5000 → WARN
+	// With a tighter threshold of 2000, statement_timeout=3000 → "Too high" WARN
 	settings := map[string]map[string]string{
 		"app_ro": {
 			"statement_timeout":                   "3000",
@@ -531,9 +530,8 @@ func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
 
 	cfg := check.Config{
 		"session-settings": {
-			"roles":        "app_ro",
-			"timeout_warn": "2000",
-			"timeout_fail": "5000",
+			"roles":   "app_ro",
+			"timeout": "2000",
 		},
 	}
 
@@ -547,64 +545,21 @@ func Test_SessionSettings_CustomThresholds_Warn(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, result.Severity, "3000ms should WARN when threshold is 2000")
 	require.NotNil(t, result.Table)
 
-	// Both statement_timeout and transaction_timeout should be WARN
 	warnCount := 0
 	for _, row := range result.Table.Rows {
 		if row.Severity == check.SeverityWarn {
 			warnCount++
-			require.Equal(t, "≤ 2000ms", row.Cells[3], "Expected should reflect custom warn threshold")
+			require.Equal(t, "≤ 2000ms", row.Cells[3], "Expected should reflect custom threshold")
+			require.Equal(t, "Too high", row.Cells[4], "Status should be 'Too high'")
 		}
 	}
 	require.Equal(t, 2, warnCount, "Both statement_timeout and transaction_timeout should WARN")
 }
 
-func Test_SessionSettings_CustomThresholds_TooHigh(t *testing.T) {
+func Test_SessionSettings_DefaultThreshold(t *testing.T) {
 	t.Parallel()
 
-	// With tighter thresholds: warn=2000, fail=5000
-	// statement_timeout=7000 is above 5000 → "Too high" (WARN, the check caps there)
-	settings := map[string]map[string]string{
-		"app_ro": {
-			"statement_timeout":                   "7000",
-			"idle_in_transaction_session_timeout": "60000",
-			"transaction_timeout":                 "7000",
-			"log_min_duration_statement":          "2000",
-		},
-	}
-
-	cfg := check.Config{
-		"session-settings": {
-			"roles":        "app_ro",
-			"timeout_warn": "2000",
-			"timeout_fail": "5000",
-		},
-	}
-
-	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
-	checker := sessionsettings.New(queryer, cfg)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-	checktest.AssertSeverityInvariant(t, report)
-
-	result := report.Results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms above the fail threshold caps at WARN")
-	require.NotNil(t, result.Table)
-
-	warnCount := 0
-	for _, row := range result.Table.Rows {
-		if row.Severity == check.SeverityWarn {
-			warnCount++
-			require.Equal(t, "Too high", row.Cells[4], "Status should be 'Too high'")
-		}
-	}
-	require.Equal(t, 2, warnCount, "Both statement_timeout and transaction_timeout should be 'Too high' WARN")
-}
-
-func Test_SessionSettings_DefaultThresholds(t *testing.T) {
-	t.Parallel()
-
-	// No config → defaults: warn=5000, fail=10000
-	// statement_timeout=7000 is between 5000 and 10000 → WARN
+	// No config → default threshold 5000; statement_timeout=7000 → WARN
 	settings := map[string]map[string]string{
 		"app_ro": {
 			"statement_timeout":                   "7000",
@@ -621,7 +576,7 @@ func Test_SessionSettings_DefaultThresholds(t *testing.T) {
 	checktest.AssertSeverityInvariant(t, report)
 
 	result := report.Results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms should WARN with default thresholds (5000/10000)")
+	require.Equal(t, check.SeverityWarn, result.Severity, "7000ms should WARN with the default 5000 threshold")
 	require.NotNil(t, result.Table)
 
 	for _, row := range result.Table.Rows {
