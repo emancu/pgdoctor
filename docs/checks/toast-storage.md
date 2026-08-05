@@ -85,24 +85,12 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ### toast-ratio
 
-Identifies tables where TOAST storage dominates total table size:
-- **INFO**: TOAST >50% of total size — a storage characteristic, not a defect; context for I/O reasoning.
+Lists TOAST-heavy tables: TOAST >=50% of total size, or TOAST >=10GB absolute. Sorted by TOAST size desc.
 
-**Why critical**: When TOAST exceeds 50% of storage, it indicates:
-- Schema design issues (large values that shouldn't be in the database)
-- Query performance degradation (extra I/O for most rows)
-- Backup inefficiency (backing up data that could be archived or externalized)
+- **INFO**: a storage characteristic, not a defect; no action expected — context for I/O and backup reasoning.
 
-### large-toast
-
-Identifies tables with absolute TOAST storage exceeding reasonable limits:
-- **FAIL**: TOAST >100GB (major storage and backup impact)
-- **WARN**: TOAST >10GB (significant storage cost)
-
-**Why critical**: Large TOAST tables:
-- Increase cloud storage costs ($10-30 per 100GB/month)
-- Slow down backups exponentially (100GB TOAST ≈ 30-60 min backup time)
-- Make schema migrations risky (VACUUM FULL on 100GB table = hours of downtime)
+A high ratio or large absolute TOAST usually reflects large values (JSON, text, binary) that may be worth
+extracting, externalizing, or archiving — see How to Fix.
 
 ### toast-bloat
 
@@ -178,7 +166,7 @@ Informational (PostgreSQL 14+ only): the cluster `default_toast_compression` GUC
 
 ### For `toast-ratio`
 
-Tables with high TOAST ratio (>50%) indicate large values dominating storage. Solutions depend on data type:
+TOAST-heavy tables (>=50% ratio or >=10GB) indicate large values dominating storage. Solutions depend on data type:
 
 **For JSONB columns:**
 ```sql
@@ -208,11 +196,7 @@ ALTER TABLE documents DROP COLUMN content;
 ALTER TABLE documents ADD COLUMN content_s3_key text;
 ```
 
-### For `large-toast`
-
-Tables with absolute TOAST >10GB need data lifecycle management:
-
-**Implement data retention:**
+**For very large TOAST (>=10GB), add data retention:**
 ```sql
 -- Step 1: Archive old data to S3
 COPY (
@@ -283,7 +267,7 @@ CREATE TRIGGER strip_nulls_before_insert
 
 **For large text columns:**
 ```sql
--- Split hot metadata from cold content (see large-toast fix above)
+-- Split hot metadata from cold content (see toast-ratio fix above)
 -- Or implement data retention (archive old data)
 ```
 
@@ -315,19 +299,16 @@ ALTER TABLE media ALTER COLUMN file_data SET STORAGE EXTERNAL;
 
 ```
 CRITICAL (Fix immediately - hours of backup time or $$$ storage):
-├─► large-toast >100GB (especially if backup time >6 hours)
 ├─► toast-bloat >50% (wasting storage, degrading performance)
 └─► toast-ratio >80% with >50GB total size
 
 HIGH PRIORITY (Plan fix within 2-4 weeks):
-├─► large-toast >10GB with >100K inserts/day
 ├─► toast-bloat >30% (autovacuum issues)
-├─► toast-ratio >50% with >10GB total size
+├─► toast-ratio >=10GB TOAST with >100K inserts/day
 └─► wide-columns with JSONB >10KB average
 
 MEDIUM PRIORITY (Plan within quarter):
-├─► large-toast 1-10GB (monitor growth rate)
-├─► toast-ratio 30-50% (suboptimal but not critical)
+├─► toast-ratio 1-10GB TOAST (monitor growth rate)
 ├─► wide-columns with text >20KB average
 └─► compression-algorithm using pglz (easy fix, performance improvement)
 

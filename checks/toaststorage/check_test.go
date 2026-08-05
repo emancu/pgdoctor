@@ -16,7 +16,6 @@ import (
 
 const (
 	findingIDToastRatio           = "toast-ratio"
-	findingIDLargeToast           = "large-toast"
 	findingIDToastBloat           = "toast-bloat"
 	findingIDWideColumns          = "wide-columns"
 	findingIDCompressionAlgorithm = "compression-algorithm"
@@ -91,92 +90,82 @@ func Test_ToastStorage_CompressionDefault_FiresWithoutToast(t *testing.T) {
 	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
-func Test_ToastStorage_ExcessiveRatio_Info(t *testing.T) {
+func Test_ToastStorage_Heavy_MergedGate_Info(t *testing.T) {
 	t.Parallel()
 
 	rows := []db.ToastStorageRow{
-		makeToastRow("public", "events", "pg_toast.pg_toast_12345", 10*check.GiB, 85*check.GiB, 95*check.GiB, 89.47),
-		makeToastRow("public", "logs", "pg_toast.pg_toast_23456", 30*check.GiB, 55*check.GiB, 85*check.GiB, 64.71),
+		// ratio arm only: 75% ratio, 3GiB TOAST (under the 10GB size gate)
+		makeToastRow("public", "hot_small", "pg_toast.pg_toast_10001", 1*check.GiB, 3*check.GiB, 4*check.GiB, 75.0),
+		// size arm only: 40% ratio, 77GiB TOAST (over the 10GB size gate)
+		makeToastRow("public", "audit_big", "pg_toast.pg_toast_10002", 115*check.GiB, 77*check.GiB, 192*check.GiB, 40.0),
+		// both arms: 60% ratio, 20GiB TOAST
+		makeToastRow("public", "mixed", "pg_toast.pg_toast_10003", 13*check.GiB, 20*check.GiB, 33*check.GiB, 60.0),
+		// under both gates: 45% ratio, 9GiB TOAST — not listed
+		makeToastRow("public", "small", "pg_toast.pg_toast_10004", 11*check.GiB, 9*check.GiB, 20*check.GiB, 45.0),
 	}
 
-	queryer := &mockQueryer{rows: rows, defaultComp: "lz4"}
-	report, err := toaststorage.New(queryer).Check(context.Background())
+	report, err := toaststorage.New(&mockQueryer{rows: rows, defaultComp: "lz4"}).Check(context.Background())
 
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
 
-	var ratioFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDToastRatio {
-			ratioFinding = &report.Results[i]
-			break
-		}
-	}
+	f := findingByID(report, findingIDToastRatio)
+	require.NotNil(t, f)
+	require.Equal(t, check.SeverityInfo, f.Severity)
+	require.Contains(t, f.Details, "Found 3 TOAST-heavy table(s) (>50% ratio or >10GB)")
+	require.NotNil(t, f.Table)
+	require.Equal(t, []string{"TOAST Size", "TOAST %", "Main Size", "Total", "Table"}, f.Table.Headers)
+	require.Len(t, f.Table.Rows, 3)
 
-	require.NotNil(t, ratioFinding)
-	require.Equal(t, check.SeverityInfo, ratioFinding.Severity)
-	require.Contains(t, ratioFinding.Details, "high TOAST storage ratio")
-	require.Equal(t, 2, len(ratioFinding.Table.Rows))
-	for _, r := range ratioFinding.Table.Rows {
+	// Sorted by TOAST size desc; table name is the last cell.
+	require.Equal(t, "public.audit_big", f.Table.Rows[0].Cells[4])
+	require.Equal(t, "public.mixed", f.Table.Rows[1].Cells[4])
+	require.Equal(t, "public.hot_small", f.Table.Rows[2].Cells[4])
+
+	for _, r := range f.Table.Rows {
 		require.Equal(t, check.SeverityInfo, r.Severity)
 	}
+
+	require.Equal(t, check.SeverityPass, report.Severity, "Info finding must not escalate the report")
 }
 
-func Test_ToastStorage_LargeToast_FAIL(t *testing.T) {
+func Test_ToastStorage_Heavy_GateBoundaries(t *testing.T) {
 	t.Parallel()
 
-	rows := []db.ToastStorageRow{
-		makeToastRow("public", "documents", "pg_toast.pg_toast_34567", 50*check.GiB, 150*check.GiB, 200*check.GiB, 75.0),
-	}
-	rows[0].WideColumns = []string{"content:50000:text", "metadata:10000:jsonb"}
-
-	queryer := &mockQueryer{rows: rows}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var largeFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDLargeToast {
-			largeFinding = &report.Results[i]
-			break
-		}
+	tests := []struct {
+		name       string
+		toastSize  int64
+		percent    float64
+		wantListed bool
+	}{
+		{name: "under both gates", toastSize: 9 * check.GiB, percent: 49.9, wantListed: false},
+		{name: "ratio exactly at gate", toastSize: 1 * check.GiB, percent: 50.0, wantListed: true},
+		{name: "size exactly at gate", toastSize: 10 * check.GiB, percent: 5.0, wantListed: true},
 	}
 
-	require.NotNil(t, largeFinding)
-	require.Equal(t, check.SeverityWarn, largeFinding.Severity)
-	require.Contains(t, largeFinding.Details, "very large TOAST storage")
-	require.NotNil(t, largeFinding.Table)
-	require.Equal(t, check.SeverityFail, largeFinding.Table.Rows[0].Severity)
-	require.Contains(t, largeFinding.Table.Rows[0].Cells[3], "content")
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-func Test_ToastStorage_LargeToast_WARN(t *testing.T) {
-	t.Parallel()
+			row := makeToastRow("public", "t", "pg_toast.pg_toast_20001", 10*check.GiB, tt.toastSize, 20*check.GiB, tt.percent)
+			report, err := toaststorage.New(&mockQueryer{rows: []db.ToastStorageRow{row}, defaultComp: "lz4"}).Check(context.Background())
 
-	rows := []db.ToastStorageRow{
-		makeToastRow("public", "audit_logs", "pg_toast.pg_toast_45678", 5*check.GiB, 15*check.GiB, 20*check.GiB, 75.0),
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			f := findingByID(report, findingIDToastRatio)
+			require.NotNil(t, f)
+			if tt.wantListed {
+				require.Equal(t, check.SeverityInfo, f.Severity)
+				require.NotNil(t, f.Table)
+				require.Len(t, f.Table.Rows, 1)
+			} else {
+				require.Equal(t, check.SeverityPass, f.Severity)
+				require.Nil(t, f.Table)
+				require.Contains(t, f.Details, "No TOAST-heavy tables")
+			}
+		})
 	}
-
-	queryer := &mockQueryer{rows: rows}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var largeFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDLargeToast {
-			largeFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, largeFinding)
-	require.Equal(t, check.SeverityWarn, largeFinding.Severity)
 }
 
 func Test_ToastStorage_Bloat_FAIL(t *testing.T) {
@@ -545,40 +534,6 @@ func Test_ToastStorage_CompressionDefault_Lz4Pass(t *testing.T) {
 	require.NotNil(t, f)
 	require.Equal(t, check.SeverityPass, f.Severity)
 	require.Contains(t, f.Details, "default_toast_compression is lz4")
-}
-
-func Test_ToastStorage_MultipleTables_MultipleSeverities(t *testing.T) {
-	t.Parallel()
-
-	rows := []db.ToastStorageRow{
-		makeToastRow("public", "events", "pg_toast.pg_toast_11111", 10*check.GiB, 85*check.GiB, 95*check.GiB, 89.47),
-		makeToastRow("public", "logs", "pg_toast.pg_toast_22222", 30*check.GiB, 55*check.GiB, 85*check.GiB, 64.71),
-		makeToastRow("public", "documents", "pg_toast.pg_toast_33333", 40*check.GiB, 30*check.GiB, 70*check.GiB, 42.86),
-	}
-
-	queryer := &mockQueryer{rows: rows}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	require.Equal(t, check.SeverityWarn, report.Severity)
-
-	// Should have multiple findings
-	require.GreaterOrEqual(t, len(report.Results), 4, "Should have multiple subcheck findings")
-
-	// Check toast-ratio has mixed severities
-	var ratioFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDToastRatio {
-			ratioFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, ratioFinding)
-	require.NotNil(t, ratioFinding.Table)
-	require.Equal(t, 2, len(ratioFinding.Table.Rows), "Should have 2 tables over 50% threshold")
 }
 
 func Test_ToastStorage_QueryError(t *testing.T) {

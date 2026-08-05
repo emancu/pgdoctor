@@ -29,10 +29,8 @@ type checker struct {
 }
 
 const (
-	toastRatioWarnPercent = 50
-
-	toastSizeFailBytes = int64(100 * check.GiB) // 100GB
-	toastSizeWarnBytes = int64(10 * check.GiB)  // 10GB
+	toastHeavyPercent = 50
+	toastHeavyBytes   = int64(10 * check.GiB)
 
 	wideColumnJSONBThreshold = 5000  // 5KB
 	wideColumnTextThreshold  = 10000 // 10KB
@@ -86,8 +84,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	// Run all subchecks
-	checkExcessiveToastRatio(rows, report)
-	checkLargeToastTables(rows, report)
+	checkToastHeavy(rows, report)
 	checkToastBloat(rows, report)
 	checkWideColumns(rows, report)
 	checkCompressionAlgorithm(ctx, rows, defaultCompression, report)
@@ -123,37 +120,39 @@ func getToastPercent(row db.ToastStorageRow) float64 {
 	return f.Float64
 }
 
-// checkExcessiveToastRatio identifies tables where TOAST dominates storage.
-func checkExcessiveToastRatio(rows []db.ToastStorageRow, report *check.Report) {
-	var toastHeavy []db.ToastStorageRow
+// checkToastHeavy lists tables where TOAST dominates by ratio or absolute size; informational only.
+func checkToastHeavy(rows []db.ToastStorageRow, report *check.Report) {
+	var heavy []db.ToastStorageRow
 
 	for _, row := range rows {
-		if getToastPercent(row) >= toastRatioWarnPercent {
-			toastHeavy = append(toastHeavy, row)
+		if getToastPercent(row) >= toastHeavyPercent || row.ToastSize.Int64 >= toastHeavyBytes {
+			heavy = append(heavy, row)
 		}
 	}
 
-	if len(toastHeavy) == 0 {
+	if len(heavy) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "toast-ratio",
-			Name:     "TOAST Storage Ratio",
+			Name:     "TOAST-Heavy Tables",
 			Severity: check.SeverityPass,
-			Details:  "All tables have acceptable TOAST ratios (<50%)",
+			Details:  "No TOAST-heavy tables (>50% ratio or >10GB)",
 		})
 		return
 	}
 
-	headers := []string{"Table", "TOAST %", "TOAST Size", "Main Size", "Total"}
+	sort.SliceStable(heavy, func(i, j int) bool { return heavy[i].ToastSize.Int64 > heavy[j].ToastSize.Int64 })
+
+	headers := []string{"TOAST Size", "TOAST %", "Main Size", "Total", "Table"}
 	var tableRows []check.TableRow
 
-	for _, row := range toastHeavy {
+	for _, row := range heavy {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
 				check.FormatBytes(row.ToastSize.Int64),
+				fmt.Sprintf("%.1f%%", getToastPercent(row)),
 				check.FormatBytes(row.MainTableSize.Int64),
 				check.FormatBytes(row.TotalSize.Int64),
+				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
 			},
 			Severity: check.SeverityInfo,
 		})
@@ -161,72 +160,9 @@ func checkExcessiveToastRatio(rows []db.ToastStorageRow, report *check.Report) {
 
 	report.AddFinding(check.Finding{
 		ID:       "toast-ratio",
-		Name:     "TOAST Storage Ratio",
+		Name:     "TOAST-Heavy Tables",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("Found %d table(s) with high TOAST storage ratio (>50%%)", len(toastHeavy)),
-		Table: &check.Table{
-			Headers: headers,
-			Rows:    tableRows,
-		},
-	})
-}
-
-// checkLargeToastTables identifies tables with very large TOAST storage.
-func checkLargeToastTables(rows []db.ToastStorageRow, report *check.Report) {
-	var critical []db.ToastStorageRow
-	var warning []db.ToastStorageRow
-
-	for _, row := range rows {
-		toastSize := row.ToastSize.Int64
-		if toastSize >= toastSizeFailBytes {
-			critical = append(critical, row)
-		} else if toastSize >= toastSizeWarnBytes {
-			warning = append(warning, row)
-		}
-	}
-
-	if len(critical) == 0 && len(warning) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "large-toast",
-			Name:     "Large TOAST Tables",
-			Severity: check.SeverityPass,
-			Details:  "No tables with very large TOAST storage (>10GB)",
-		})
-		return
-	}
-
-	headers := []string{"Table", "TOAST Size", "TOAST %", "Wide Columns"}
-	var tableRows []check.TableRow
-
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				check.FormatBytes(row.ToastSize.Int64),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
-				formatWideColumns(row.WideColumns),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				check.FormatBytes(row.ToastSize.Int64),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
-				formatWideColumns(row.WideColumns),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "large-toast",
-		Name:     "Large TOAST Tables",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with very large TOAST storage", len(critical)+len(warning)),
+		Details:  fmt.Sprintf("Found %d TOAST-heavy table(s) (>50%% ratio or >10GB)", len(heavy)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
@@ -544,30 +480,4 @@ func checkCompressionDefaultFinding(ctx context.Context, current string, report 
 		Severity: check.SeverityInfo,
 		Details:  fmt.Sprintf("default_toast_compression is %s; unset columns compress new writes with %s — lz4 is strictly better here", current, current),
 	})
-}
-
-// Helper functions
-
-func formatWideColumns(cols []string) string {
-	if len(cols) == 0 {
-		return "-"
-	}
-
-	// Extract just column names
-	var names []string
-	for _, col := range cols {
-		parts := strings.Split(col, ":")
-		if len(parts) >= 1 {
-			names = append(names, parts[0])
-		}
-		if len(names) >= 3 {
-			break
-		}
-	}
-
-	result := strings.Join(names, ", ")
-	if len(cols) > 3 {
-		result += fmt.Sprintf(" (+%d more)", len(cols)-3)
-	}
-	return result
 }

@@ -31,10 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`table-bloat`**: retired the `stale-vacuum` finding — vacuum freshness is covered by `table-vacuum-health/vacuum-stale` ([#26](https://github.com/emancu/pgdoctor/pull/26)).
 - **`table-vacuum-health`**: retired the `analyze-needed` finding — absorbed by `vacuum-stale` ([#27](https://github.com/emancu/pgdoctor/pull/27)).
+- **`toast-storage`**: retired the `large-toast` finding — absorbed by the merged `toast-ratio`; its ID and 10GB/100GB WARN/FAIL tiers are gone ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 ### Changed
 
-- **`toast-storage`**: `toast-ratio` is now informational — a TOAST-heavy table is a characteristic, not a defect ([#41](https://github.com/emancu/pgdoctor/pull/41)).
+- **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 - **`toast-storage`**: `compression-algorithm` now counts effective pglz (explicit, or unset while `default_toast_compression` is pglz) and moves its big-TOAST itemization to `--detail debug` ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
