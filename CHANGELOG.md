@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`uuid-defaults`**: `random-uuid-indexed` states that random v4 defaults "cause" index bloat, dropping the "may cause" hedge ([#54](https://github.com/emancu/pgdoctor/pull/54)).
 - **`session-settings`**: caps at WARN — timeout and logging misconfigurations are urgent WARNs, not FAILs; the two-tier thresholds collapse into a single `timeout` (5000ms) ([#53](https://github.com/emancu/pgdoctor/pull/53)).
 - **`index-bloat`**: the bloat-percent arm now also requires an index of at least 200MB, so sub-200MB indexes are listed only when wasting >=2GiB — too little reclaimable space to justify a REINDEX otherwise ([#49](https://github.com/emancu/pgdoctor/pull/49)).
+- **`table-activity`**: `high-churn-tables` and `low-hot-ratio` are now informational and no longer escalate the report — both describe workload characteristics rather than defects ([#51](https://github.com/emancu/pgdoctor/pull/51)).
 - **`connection-efficiency`**: `sessions-abandoned` warns above 7% and no longer reports FAIL ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 

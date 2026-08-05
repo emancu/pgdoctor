@@ -8,13 +8,13 @@ Analyzes table write activity to identify high-churn tables and HOT update effic
 
 ### High Churn Tables (`high-churn-tables`)
 Identifies tables with excessive write activity since statistics were last reset:
-- **WARN**: > 1 million total writes (inserts + updates + deletes)
+- **INFO**: > 1 million total writes (inserts + updates + deletes)
 
 High-churn tables may need more aggressive autovacuum settings or architectural review.
 
 ### Low HOT Ratio (`low-hot-ratio`)
 Identifies tables with poor Heap-Only Tuple (HOT) update efficiency:
-- **WARN**: < 50% HOT ratio on tables with > 1 million rows
+- **INFO**: < 50% HOT ratio on tables with > 1 million rows
 
 HOT updates are an optimization where PostgreSQL can update a row in place without updating indexes. Low HOT ratios indicate potential performance issues.
 
