@@ -18,8 +18,8 @@ Details disclose the statistics window (since `pg_stat_database.stats_reset`) so
 - Unique indexes (enforce data integrity)
 
 ### 2. Low Usage Indexes
-Indexes larger than 500 MB with more than 10,000 table writes and a sustained scan rate below 1 per week,
-over a statistics window of at least 30 days.
+Indexes larger than 500 MB with more than 10,000 table writes and at least one scan but a sustained rate
+below 1 per week, over a statistics window of at least 30 days. Zero-scan indexes surface as unused-indexes.
 These indexes have high maintenance costs relative to their query benefits.
 
 **Severity**: INFO

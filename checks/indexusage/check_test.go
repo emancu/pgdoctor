@@ -196,7 +196,8 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 		listed bool
 	}{
 		{"window 29d - not listed", 0, 50000, mb(600), daysAgo(29), false},
-		{"window 30d - listed", 0, 50000, mb(600), daysAgo(30), true},
+		{"window 30d - listed", 1, 50000, mb(600), daysAgo(30), true},
+		{"zero scans - not listed (belongs to unused)", 0, 50000, mb(600), daysAgo(90), false},
 		{"rate under 1/week (9 scans, 70d) - listed", 9, 50000, mb(600), daysAgo(70), true},
 		{"rate at 1/week (10 scans, 70d) - not listed", 10, 50000, mb(600), daysAgo(70), false},
 		{"writes below floor (9999) - not listed", 5, 9999, mb(600), daysAgo(90), false},
@@ -223,6 +224,23 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_ZeroScan_UnusedNotLowUsage(t *testing.T) {
+	t.Parallel()
+
+	// Clears both size floors and the low-usage window, but has zero scans.
+	r := row("public.posts", "idx_posts_dead", 0, 50000, mb(600), daysAgo(90))
+
+	report := runCheck(t, []db.IndexUsageStatsRow{r})
+
+	unused := finding(t, report, "unused-indexes")
+	require.Equal(t, check.SeverityWarn, unused.Severity)
+	require.Len(t, unused.Table.Rows, 1)
+
+	low := finding(t, report, "low-usage-indexes")
+	require.Equal(t, check.SeverityPass, low.Severity)
+	require.Nil(t, low.Table)
 }
 
 func Test_LowUsageIndexes_SkipPrimaryAndUnique(t *testing.T) {
