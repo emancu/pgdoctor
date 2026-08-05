@@ -491,33 +491,33 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "at 10% of capacity stays OK",
+			name:             "at warn threshold (100) stays OK",
 			maxConns:         100,
-			longIdle:         makeLongIdleRows(10), // exactly 10%, not above WARN
+			longIdle:         makeLongIdleRows(100),
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "above 10% of capacity warns",
+			name:             "above 100 warns",
 			maxConns:         100,
-			longIdle:         makeLongIdleRows(11), // 11% > 10% WARN
+			longIdle:         makeLongIdleRows(101),
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "at 25% of capacity still warns",
+			name:             "at fail threshold (500) still warns",
 			maxConns:         100,
-			longIdle:         makeLongIdleRows(25), // exactly 25%, not above FAIL
+			longIdle:         makeLongIdleRows(500),
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "above 25% of capacity fails",
+			name:             "above 500 fails",
 			maxConns:         100,
-			longIdle:         makeLongIdleRows(26), // 26% > 25% FAIL
+			longIdle:         makeLongIdleRows(501),
 			expectedSeverity: check.SeverityFail,
 		},
 		{
-			name:             "warm floor on a large cluster stays OK",
+			name:             "pooled warm floor stays OK",
 			maxConns:         400,
-			longIdle:         makeLongIdleRows(15), // 3.75% — old absolute rule warned at 10
+			longIdle:         makeLongIdleRows(62), // shedul's pgbouncer min_pool_size floor
 			expectedSeverity: check.SeverityPass,
 		},
 	}

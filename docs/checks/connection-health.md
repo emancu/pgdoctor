@@ -125,20 +125,19 @@ Idle-in-transaction connections:
 
 ### long-idle
 
-Counts connections idle for more than 1 hour, sized against `max_connections`. One hour is the point past
-the usual `idle_session_timeout` backstop, so anything still idle beyond it is genuinely unreaped.
+Counts connections idle for more than 1 hour. One hour is the point past the usual `idle_session_timeout`
+backstop, so anything still idle beyond it is genuinely unreaped.
 
 **Thresholds:**
-- Warning: idle-over-1h count exceeds 10% of `max_connections`
-- Critical: idle-over-1h count exceeds 25% of `max_connections`
+- Warning: more than 100 connections idle over 1 hour
+- Critical: more than 500 connections idle over 1 hour
 
 **Why it matters:**
-Every idle connection still holds a `max_connections` slot, so a growing pool of them starves new sessions
-while doing no work. Pooled fleets keep a warm floor of idle connections *by design* — PgBouncer's
-`min_pool_size` holds spare backends open so bursts don't pay reconnect latency — which is why an absolute
-count means nothing on its own: a healthy floor and a leak look identical until you weigh them against
-capacity. The leak signal is the idle-over-1h population large relative to `max_connections`; a true leak
-is confirmed when that count keeps climbing across runs instead of resting at a steady floor.
+Every idle connection still holds a `max_connections` slot, so a growing population of them starves new
+sessions while doing no work. Pooled fleets keep a warm floor of idle connections *by design* — PgBouncer's
+`min_pool_size` holds spare backends open so bursts don't pay reconnect latency — so a modest steady count
+is healthy. The leak signal is a count far above any configured floor, and a true leak is confirmed when it
+keeps climbing across runs instead of resting steady.
 
 ## How to Fix
 

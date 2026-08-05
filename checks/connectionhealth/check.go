@@ -28,8 +28,8 @@ const (
 	minConnectionsForIdleCheck = int64(20)
 
 	// Capacity-relative: absolute counts are meaningless against pooled warm floors.
-	longIdleWarnPercent = 10.0
-	longIdleFailPercent = 25.0
+	longIdleWarnCount = 100
+	longIdleFailCount = 500
 
 	// Pool pressure thresholds - detect when queries may be waiting for connections.
 	poolPressureActivePercent = 90.0 // Warn when >90% of connections are active
@@ -98,7 +98,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	checkPoolPressure(stats, report)
 	checkIdleRatio(stats, report)
 	checkIdleInTransaction(idleTxns, report)
-	checkLongIdleConnections(longIdle, stats.MaxConnections.Int32, report)
+	checkLongIdleConnections(longIdle, report)
 
 	return report, nil
 }
@@ -315,19 +315,14 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 }
 
 // checkLongIdleConnections sizes the idle-over-1h population against max_connections capacity.
-func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, maxConns int32, report *check.Report) {
+func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, report *check.Report) {
 	count := len(longIdle)
-
-	var percent float64
-	if maxConns > 0 {
-		percent = float64(count) / float64(maxConns) * 100
-	}
 
 	severity := check.SeverityPass
 	switch {
-	case percent > longIdleFailPercent:
+	case count > longIdleFailCount:
 		severity = check.SeverityFail
-	case percent > longIdleWarnPercent:
+	case count > longIdleWarnCount:
 		severity = check.SeverityWarn
 	}
 
@@ -335,7 +330,7 @@ func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, maxConns int
 		ID:       "long-idle",
 		Name:     "Long Idle Connections",
 		Severity: severity,
-		Details:  fmt.Sprintf("%d connections idle >1h (%.1f%% of max_connections)", count, percent),
+		Details:  fmt.Sprintf("%d connections idle >1h", count),
 	})
 }
 
