@@ -9,6 +9,7 @@ import (
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionhealth"
 	"github.com/emancu/pgdoctor/checks/duplicateindexes"
+	"github.com/emancu/pgdoctor/checks/extensionversions"
 	"github.com/emancu/pgdoctor/checks/freezeage"
 	"github.com/emancu/pgdoctor/checks/indexbloat"
 	"github.com/emancu/pgdoctor/checks/indexusage"
@@ -60,6 +61,12 @@ func AllChecks() []check.Package {
 			Metadata: duplicateindexes.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return duplicateindexes.New(db.New(conn), cfg)
+			},
+		},
+		{
+			Metadata: extensionversions.Metadata,
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return extensionversions.New(db.New(conn), cfg)
 			},
 		},
 		{
