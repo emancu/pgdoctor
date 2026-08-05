@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -157,13 +158,7 @@ func checkPartitionKeyUsage(
 	hasCritical := false
 
 	for _, table := range tables {
-		// Skip tables with expression-based partition keys (too complex to analyze).
-		if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
-			continue
-		}
-
-		// Skip tables without partition key info.
-		if !table.PartitionKeyColumns.Valid || table.PartitionKeyColumns.String == "" {
+		if !isAnalyzable(table) {
 			continue
 		}
 
@@ -271,7 +266,7 @@ func checkPartitionKeyUsage(
 		ID:       "partition-key-unused",
 		Name:     "Queries Missing Partition Key",
 		Severity: overallSeverity,
-		Details:  problemDetails(affected, len(problems)),
+		Details:  problemDetails(affected, len(problems), statsReset(queries)),
 		Table: &check.Table{
 			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
 			Rows:         rows,
@@ -302,11 +297,11 @@ type problemQuery struct {
 
 // problemDetails describes the affected tables, so the per-table totals stay
 // visible even when the statement list is capped at the default detail level.
-func problemDetails(affected []affectedTable, statements int) string {
+func problemDetails(affected []affectedTable, statements int, statsReset pgtype.Timestamptz) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)",
-		statements, len(affected))
+	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)%s",
+		statements, len(affected), statsWindow(statsReset))
 
 	for _, table := range affected {
 		fmt.Fprintf(&b, "\n  %s (key: %s, %d partitions) — %d statement(s), %s calls, %s",
@@ -314,9 +309,21 @@ func problemDetails(affected []affectedTable, statements int) string {
 			check.FormatNumber(table.calls), check.FormatDurationMs(table.execTime))
 	}
 
-	b.WriteString("\nRead a statement in full: SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;")
-
 	return b.String()
+}
+
+// statsWindow describes the period the counters cover. pg_stat_statements totals
+// are cumulative since the last reset, so "52K calls" is meaningless without it —
+// it could be an hour of traffic or two years of it.
+func statsWindow(statsReset pgtype.Timestamptz) string {
+	// That the counters are cumulative goes without saying; only the period is
+	// worth the words. An unknown reset time leaves nothing useful to add.
+	if !statsReset.Valid {
+		return ""
+	}
+
+	return fmt.Sprintf(" over the last %s",
+		check.FormatDurationSec(int64(time.Since(statsReset.Time).Seconds())))
 }
 
 // clipQueryText shortens a normalized statement to one terminal line, counting
@@ -736,12 +743,7 @@ func checkJoinsMissingPartitionKey(
 	hasCritical := false
 
 	for _, table := range tables {
-		// Skip tables with expression-based partition keys.
-		if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
-			continue
-		}
-
-		if !table.PartitionKeyColumns.Valid || table.PartitionKeyColumns.String == "" {
+		if !isAnalyzable(table) {
 			continue
 		}
 
@@ -796,7 +798,12 @@ func checkJoinsMissingPartitionKey(
 	}
 
 	if len(tableRows) == 0 {
-		return // No finding needed when there are no issues
+		report.AddFinding(check.Finding{
+			ID:       "join-missing-partition-key",
+			Name:     "JOINs Missing Partition Key",
+			Severity: check.SeverityPass,
+		})
+		return
 	}
 
 	overallSeverity := check.SeverityWarn
@@ -866,7 +873,12 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 	}
 
 	if len(tableRows) == 0 {
-		return // No finding needed when there are no issues
+		report.AddFinding(check.Finding{
+			ID:       "high-seq-scan-ratio",
+			Name:     "High Sequential Scan Ratio",
+			Severity: check.SeverityPass,
+		})
+		return
 	}
 
 	overallSeverity := check.SeverityWarn
@@ -886,9 +898,30 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 	})
 }
 
+// isAnalyzable reports whether a partitioned table's key can be matched against
+// query text. Expression keys are stored with attnum = 0, leaving no column to
+// look for, and a table with no key columns at all offers nothing to match.
+func isAnalyzable(table db.PartitionedTablesWithKeysRow) bool {
+	if table.HasExpressionKey.Valid && table.HasExpressionKey.Bool {
+		return false
+	}
+
+	return table.PartitionKeyColumns.Valid && table.PartitionKeyColumns.String != ""
+}
+
 // Query analysis helpers.
 
 // queryHasJoin checks if a query contains a JOIN clause.
 func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
+}
+
+// statsReset returns the pg_stat_statements reset timestamp. Every row carries
+// the same value, so the first one answers for the set.
+func statsReset(queries []db.QueryStatsFromStatStatementsRow) pgtype.Timestamptz {
+	if len(queries) == 0 {
+		return pgtype.Timestamptz{}
+	}
+
+	return queries[0].StatsReset
 }

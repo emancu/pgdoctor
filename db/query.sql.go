@@ -1062,7 +1062,7 @@ func (q *Queries) PGVersion(ctx context.Context) (PGVersionRow, error) {
 }
 
 const partitionedTablesWithKeys = `-- name: PartitionedTablesWithKeys :many
-WITH relevant_parents AS (
+WITH RECURSIVE relevant_parents AS (
   -- Restrict the size/stat aggregation below to the partitioned tables this
   -- check actually reports on. Without this, pg_total_relation_size() runs for
   -- every inherited relation in the database, including the excluded schemas.
@@ -1075,19 +1075,42 @@ WITH relevant_parents AS (
     AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
 )
 
-, partition_stats AS (
-  -- Single aggregation of all partition metrics from child tables
+, descendants AS (
+  -- Walk the whole partition tree, not just the direct children. An
+  -- intermediate node of a sub-partitioned table is itself relkind = 'p', so it
+  -- has no storage (pg_total_relation_size() returns 0) and no
+  -- pg_stat_user_tables counters: stopping at depth one reports such a parent as
+  -- 0 bytes with 0 scans.
   SELECT
-    i.inhparent
+    rp.oid AS root_oid
+    , i.inhrelid AS relid
+  FROM relevant_parents AS rp
+  INNER JOIN pg_catalog.pg_inherits AS i ON i.inhparent = rp.oid
+
+  UNION ALL
+
+  SELECT
+    d.root_oid
+    , i.inhrelid
+  FROM descendants AS d
+  INNER JOIN pg_catalog.pg_inherits AS i ON i.inhparent = d.relid
+)
+
+, partition_stats AS (
+  -- Single aggregation of all partition metrics from the leaf tables. Only
+  -- leaves store rows, so intermediate partitioned nodes are excluded here and
+  -- partition_count counts leaves.
+  SELECT
+    d.root_oid
     , COUNT(*)::bigint AS partition_count
-    , COALESCE(SUM(pg_catalog.pg_total_relation_size(i.inhrelid)), 0)::bigint AS total_size_bytes
+    , COALESCE(SUM(pg_catalog.pg_total_relation_size(d.relid)), 0)::bigint AS total_size_bytes
     , COALESCE(SUM(s.n_live_tup), 0)::bigint AS estimated_rows
     , COALESCE(SUM(s.seq_scan), 0)::bigint AS total_seq_scans
     , COALESCE(SUM(s.idx_scan), 0)::bigint AS total_idx_scans
-  FROM pg_inherits AS i
-  INNER JOIN relevant_parents AS rp ON i.inhparent = rp.oid
-  LEFT JOIN pg_stat_user_tables AS s ON i.inhrelid = s.relid
-  GROUP BY i.inhparent
+  FROM descendants AS d
+  INNER JOIN pg_catalog.pg_class AS leaf ON d.relid = leaf.oid AND leaf.relkind <> 'p'
+  LEFT JOIN pg_stat_user_tables AS s ON d.relid = s.relid
+  GROUP BY d.root_oid
 )
 
 SELECT
@@ -1112,7 +1135,7 @@ SELECT
 FROM pg_catalog.pg_class AS c
 INNER JOIN pg_catalog.pg_namespace AS n ON c.relnamespace = n.oid
 INNER JOIN pg_partitioned_table AS pt ON c.oid = pt.partrelid
-LEFT JOIN partition_stats AS ps ON c.oid = ps.inhparent
+LEFT JOIN partition_stats AS ps ON c.oid = ps.root_oid
 WHERE
   c.relkind = 'p'
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
@@ -1167,30 +1190,82 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 }
 
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
+WITH candidates AS (
+  SELECT
+    queryid::bigint AS query_id
+    , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
+    , calls::bigint AS calls
+    , total_exec_time::double precision AS total_exec_time
+    , mean_exec_time::double precision AS mean_exec_time
+    , rows::bigint AS rows_returned
+    -- Counters are cumulative since this reset, so the report has to say over
+    -- what period. Available from pg_stat_statements 1.9, which the toplevel
+    -- filter above already requires.
+    , (SELECT i.stats_reset FROM pg_stat_statements_info AS i)::timestamptz AS stats_reset
+  FROM pg_stat_statements
+  WHERE
+    dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
+    AND toplevel
+    AND calls > 10
+    -- Only statements that scan the table can prune partitions, so match on the
+    -- leading keyword. An INSERT routes each row to a partition by its key value
+    -- and never prunes; matching '%UPDATE%' anywhere in the text used to accept
+    -- every INSERT that carried an "updated_at" column. Anchoring here also
+    -- excludes utility statements (COPY, SET, VACUUM, transaction control, DDL).
+    AND query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'
+    -- A CTE can still wrap an INSERT (WITH v AS (...) INSERT INTO ...), which the
+    -- leading keyword alone does not catch. Excluding INSERT INTO anywhere also
+    -- drops INSERT ... SELECT, whose target table is routed rather than pruned.
+    AND query !~* '\minsert\s+into\M'
+)
+
 SELECT
-  queryid::bigint AS query_id
-  , LOWER(REGEXP_REPLACE(query, '\s+', ' ', 'g'))::text AS query
-  , calls::bigint AS calls
-  , total_exec_time::double precision AS total_exec_time
-  , mean_exec_time::double precision AS mean_exec_time
-  , rows::bigint AS rows_returned
-FROM pg_stat_statements
-WHERE
-  dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
-  AND toplevel
-  AND calls > 10
-  -- Only statements that scan the table can prune partitions, so match on the
-  -- leading keyword. An INSERT routes each row to a partition by its key value
-  -- and never prunes; matching '%UPDATE%' anywhere in the text used to accept
-  -- every INSERT that carried an "updated_at" column. Anchoring here also
-  -- excludes utility statements (COPY, SET, VACUUM, transaction control, DDL).
-  AND query ~* '^\s*(WITH|SELECT|UPDATE|DELETE)\M'
-  -- A CTE can still wrap an INSERT (WITH v AS (...) INSERT INTO ...), which the
-  -- leading keyword alone does not catch. Excluding INSERT INTO anywhere also
-  -- drops INSERT ... SELECT, whose target table is routed rather than pruned.
-  AND query !~* '\minsert\s+into\M'
+  query_id
+  , query
+  , calls
+  , total_exec_time
+  , mean_exec_time
+  , rows_returned
+  , stats_reset
+FROM (
+  SELECT
+    query_id
+    , query
+    , calls
+    , total_exec_time
+    , mean_exec_time
+    , rows_returned
+    , stats_reset
+  FROM candidates
+  ORDER BY total_exec_time DESC
+  LIMIT 500
+) AS by_exec_time
+
+UNION
+
+SELECT
+  query_id
+  , query
+  , calls
+  , total_exec_time
+  , mean_exec_time
+  , rows_returned
+  , stats_reset
+FROM (
+  SELECT
+    query_id
+    , query
+    , calls
+    , total_exec_time
+    , mean_exec_time
+    , rows_returned
+    , stats_reset
+  FROM candidates
+  ORDER BY calls DESC
+  LIMIT 500
+) AS by_calls
+
 ORDER BY total_exec_time DESC
-LIMIT 500
 `
 
 type QueryStatsFromStatStatementsRow struct {
@@ -1200,10 +1275,15 @@ type QueryStatsFromStatStatementsRow struct {
 	TotalExecTime pgtype.Float8
 	MeanExecTime  pgtype.Float8
 	RowsReturned  pgtype.Int8
+	StatsReset    pgtype.Timestamptz
 }
 
 // Gets query statistics from pg_stat_statements for partition key analysis.
 // Returns queries with significant usage to check against partitioned tables.
+// Samples both axes: a single "top 500 by total_exec_time" cut is biased towards
+// slow statements and systematically drops cheap high-frequency ones, which are
+// exactly where a missing partition filter compounds at scale. UNION deduplicates
+// the statements ranking on both axes, so the result is at most 1000 rows.
 func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStatsFromStatStatementsRow, error) {
 	rows, err := q.db.Query(ctx, queryStatsFromStatStatements)
 	if err != nil {
@@ -1220,6 +1300,7 @@ func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStat
 			&i.TotalExecTime,
 			&i.MeanExecTime,
 			&i.RowsReturned,
+			&i.StatsReset,
 		); err != nil {
 			return nil, err
 		}

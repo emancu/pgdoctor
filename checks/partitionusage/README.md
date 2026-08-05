@@ -56,7 +56,7 @@ Identifies partitioned tables with excessive sequential scans compared to index 
 - Warning: seq_scan:idx_scan ratio > 10:1 AND seq_scans > 1000
 - Critical: seq_scan:idx_scan ratio > 100:1 AND seq_scans > 1000
 
-**Note:** This subcheck runs even without `pg_stat_statements` as it uses `pg_stat_user_tables` statistics aggregated from child partitions.
+**Note:** This subcheck runs even without `pg_stat_statements` as it uses `pg_stat_user_tables` statistics aggregated from the table's leaf partitions.
 
 ### join-missing-partition-key
 
@@ -85,9 +85,21 @@ WHERE o.created_at > '2024-01-01';
 
 ## Limitations
 
+### Not every statement is analyzed
+
+`pg_stat_statements` can hold tens of thousands of entries, so the check analyzes a sample: the top 500 statements by `total_exec_time` plus the top 500 by `calls` (at most 1000 after deduplication). The second axis matters — a single "costliest 500" cut systematically drops cheap high-frequency statements, which are exactly the ones where a missing partition filter compounds at scale.
+
+A statement outside both cuts is invisible to the check.
+
 ### Query text analysis is approximate
 
 Uses pattern matching on query text, not full SQL parsing. May produce false positives/negatives in complex queries.
+
+### Multi-level partitioning
+
+Partition count, size and scan counters are aggregated from the whole partition tree down to the leaf tables, since an intermediate `PARTITION BY` node stores no rows itself.
+
+Every level is reported as its own table, because each level has its own partition key: for `events` sub-partitioned into `events_2025`, both appear, and the leaves under `events_2025` count towards both rows.
 
 ### Expression-based partition keys are skipped
 
