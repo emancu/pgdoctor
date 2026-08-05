@@ -32,9 +32,6 @@ const (
 	toastHeavyPercent = 50
 	toastHeavyBytes   = int64(10 * check.GiB)
 
-	wideColumnJSONBThreshold = 5000  // 5KB
-	wideColumnTextThreshold  = 10000 // 10KB
-
 	compressionToastFloorBytes = int64(check.GiB) // itemize only tables with TOAST > 1GiB
 
 	compressionPglz = "pglz"
@@ -86,7 +83,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// Run all subchecks
 	checkToastHeavy(rows, report)
 	checkToastBloat(rows, report)
-	checkWideColumns(rows, report)
 	checkCompressionAlgorithm(ctx, rows, defaultCompression, report)
 
 	return report, nil
@@ -247,100 +243,6 @@ func checkToastBloat(rows []db.ToastStorageRow, report *check.Report) {
 		Name:     "TOAST Table Bloat",
 		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("Found %d TOAST table(s) with excessive dead tuples", len(critical)+len(warning)),
-		Table: &check.Table{
-			Headers: headers,
-			Rows:    tableRows,
-		},
-	})
-}
-
-// checkWideColumns identifies tables with columns likely causing TOAST usage.
-func checkWideColumns(rows []db.ToastStorageRow, report *check.Report) {
-	type wideColumnInfo struct {
-		tableName  string
-		columnName string
-		avgWidth   int
-		columnType string
-		toastSize  int64
-	}
-
-	var jsonbColumns []wideColumnInfo
-	var largeTextColumns []wideColumnInfo
-
-	for _, row := range rows {
-		tableName := fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String)
-		for _, colInfo := range row.WideColumns {
-			parts := strings.Split(colInfo, ":")
-			if len(parts) != 3 {
-				continue
-			}
-
-			colName := parts[0]
-			avgWidth := 0
-			_, _ = fmt.Sscanf(parts[1], "%d", &avgWidth)
-			colType := parts[2]
-
-			info := wideColumnInfo{
-				tableName:  tableName,
-				columnName: colName,
-				avgWidth:   avgWidth,
-				columnType: colType,
-				toastSize:  row.ToastSize.Int64,
-			}
-
-			if colType == "jsonb" && avgWidth > wideColumnJSONBThreshold {
-				jsonbColumns = append(jsonbColumns, info)
-			} else if avgWidth > wideColumnTextThreshold {
-				largeTextColumns = append(largeTextColumns, info)
-			}
-		}
-	}
-
-	if len(jsonbColumns) == 0 && len(largeTextColumns) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "wide-columns",
-			Name:     "Wide Column Analysis",
-			Severity: check.SeverityPass,
-			Details:  "No columns with excessive average width detected",
-		})
-		return
-	}
-
-	headers := []string{"Table", "Column", "Avg Width", "Type", "TOAST Size"}
-	var tableRows []check.TableRow
-
-	// JSONB columns first (often the biggest offenders)
-	for _, col := range jsonbColumns {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				col.tableName,
-				col.columnName,
-				check.FormatBytes(int64(col.avgWidth)),
-				col.columnType,
-				check.FormatBytes(col.toastSize),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	for _, col := range largeTextColumns {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				col.tableName,
-				col.columnName,
-				check.FormatBytes(int64(col.avgWidth)),
-				col.columnType,
-				check.FormatBytes(col.toastSize),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "wide-columns",
-		Name:     "Wide Column Analysis",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d JSONB and %d text columns with large average widths", len(jsonbColumns), len(largeTextColumns)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,

@@ -28,29 +28,6 @@ WITH toast_info AS (
     AND pg_relation_size(t.oid) > 1048576  -- TOAST > 1MB
 )
 
-, wide_columns AS (
-  SELECT
-    ps.schemaname::text AS schema_name
-    , ps.tablename::text AS table_name
-    , ps.attname::text AS column_name
-    , ps.avg_width
-    , CASE
-      WHEN pt.typname IN ('json', 'jsonb') THEN 'jsonb'
-      WHEN pt.typname IN ('text', 'varchar', 'char', 'bpchar') THEN 'text'
-      WHEN pt.typname = 'bytea' THEN 'bytea'
-      ELSE 'other'
-    END AS column_category
-  FROM pg_stats AS ps
-  INNER JOIN pg_class AS c ON ps.tablename = c.relname
-  INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid AND ps.schemaname = n.nspname
-  INNER JOIN pg_attribute AS pa ON c.oid = pa.attrelid AND ps.attname = pa.attname
-  INNER JOIN pg_type AS pt ON pa.atttypid = pt.oid
-  WHERE
-    ps.schemaname NOT IN ('pg_catalog', 'information_schema')
-    AND ps.avg_width > 2000  -- Likely using TOAST (threshold ~2KB)
-    AND ps.avg_width IS NOT NULL
-)
-
 , column_compression AS (
   SELECT
     n.nspname::text AS schema_name
@@ -92,14 +69,6 @@ SELECT
   , ti.toast_percent
   , ti.toast_live_tuples
   , ti.toast_dead_tuples
-  , coalesce(
-    (
-      SELECT array_agg(wc.column_name || ':' || wc.avg_width::text || ':' || wc.column_category ORDER BY wc.avg_width DESC)
-      FROM wide_columns AS wc
-      WHERE wc.schema_name = ti.schema_name AND wc.table_name = ti.table_name
-    )
-    , ARRAY[]::text []
-  ) AS wide_columns
   , coalesce(
     (
       SELECT

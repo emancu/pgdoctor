@@ -17,7 +17,6 @@ import (
 const (
 	findingIDToastRatio           = "toast-ratio"
 	findingIDToastBloat           = "toast-bloat"
-	findingIDWideColumns          = "wide-columns"
 	findingIDCompressionAlgorithm = "compression-algorithm"
 	findingIDCompressionDefault   = "compression-default"
 )
@@ -54,7 +53,6 @@ func makeToastRow(schema, table, toastTable string, mainSize, toastSize, totalSi
 		ToastPercent:          *percentNumeric,
 		ToastLiveTuples:       pgtype.Int8{Int64: 1000, Valid: true},
 		ToastDeadTuples:       pgtype.Int8{Int64: 0, Valid: true},
-		WideColumns:           []string{},
 		ColumnCompressionInfo: []string{},
 	}
 }
@@ -221,69 +219,6 @@ func Test_ToastStorage_Bloat_WARN(t *testing.T) {
 
 	require.NotNil(t, bloatFinding)
 	require.Equal(t, check.SeverityWarn, bloatFinding.Severity)
-}
-
-func Test_ToastStorage_WideColumns_JSONB(t *testing.T) {
-	t.Parallel()
-
-	row := makeToastRow("public", "events", "pg_toast.pg_toast_78901", 10*check.GiB, 15*check.GiB, 25*check.GiB, 60.0)
-	row.WideColumns = []string{
-		"payload:8000:jsonb",
-		"metadata:6000:jsonb",
-	}
-
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var wideFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDWideColumns {
-			wideFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, wideFinding)
-	require.Equal(t, check.SeverityWarn, wideFinding.Severity)
-	require.Contains(t, wideFinding.Details, "JSONB")
-	require.NotNil(t, wideFinding.Table)
-	require.Equal(t, 2, len(wideFinding.Table.Rows))
-	require.Contains(t, wideFinding.Table.Rows[0].Cells[1], "payload")
-	require.Contains(t, wideFinding.Table.Rows[0].Cells[3], "jsonb")
-}
-
-func Test_ToastStorage_WideColumns_Text(t *testing.T) {
-	t.Parallel()
-
-	row := makeToastRow("public", "documents", "pg_toast.pg_toast_89012", 5*check.GiB, 10*check.GiB, 15*check.GiB, 66.67)
-	row.WideColumns = []string{
-		"content:15000:text",
-	}
-
-	queryer := &mockQueryer{rows: []db.ToastStorageRow{row}}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-
-	var wideFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDWideColumns {
-			wideFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, wideFinding)
-	require.Equal(t, check.SeverityWarn, wideFinding.Severity)
-	require.NotNil(t, wideFinding.Table)
-	require.Contains(t, wideFinding.Table.Rows[0].Cells[1], "content")
-	require.Contains(t, wideFinding.Table.Rows[0].Cells[3], "text")
 }
 
 func findingByID(report *check.Report, id string) *check.Finding {
