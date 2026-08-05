@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/connectionhealth"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -479,28 +480,45 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 
 	tests := []struct {
 		name             string
+		maxConns         int32
 		longIdle         []db.LongIdleConnectionsRow
 		expectedSeverity check.Severity
 	}{
 		{
 			name:             "no long idle connections",
+			maxConns:         100,
 			longIdle:         nil,
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "few long idle connections",
-			longIdle:         makeLongIdleRows(5),
+			name:             "at warn threshold (100) stays OK",
+			maxConns:         100,
+			longIdle:         makeLongIdleRows(100),
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "many long idle connections",
-			longIdle:         makeLongIdleRows(15),
+			name:             "above 100 warns",
+			maxConns:         100,
+			longIdle:         makeLongIdleRows(101),
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "excessive long idle connections",
-			longIdle:         makeLongIdleRows(55),
+			name:             "at fail threshold (500) still warns",
+			maxConns:         100,
+			longIdle:         makeLongIdleRows(500),
+			expectedSeverity: check.SeverityWarn,
+		},
+		{
+			name:             "above 500 fails",
+			maxConns:         100,
+			longIdle:         makeLongIdleRows(501),
 			expectedSeverity: check.SeverityFail,
+		},
+		{
+			name:             "pooled warm floor stays OK",
+			maxConns:         400,
+			longIdle:         makeLongIdleRows(62), // shedul's pgbouncer min_pool_size floor
+			expectedSeverity: check.SeverityPass,
 		},
 	}
 
@@ -508,8 +526,11 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			stats := healthyStats()
+			stats.MaxConnections = int32Val(tt.maxConns)
+
 			mock := &mockQueries{
-				stats:    healthyStats(),
+				stats:    stats,
 				longIdle: tt.longIdle,
 			}
 
@@ -518,6 +539,7 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 
 			require.NoError(t, err)
 			require.True(t, hasResult(report.Results, "long-idle", tt.expectedSeverity))
+			checktest.AssertSeverityInvariant(t, report)
 		})
 	}
 }

@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`toast-storage`**: new `compression-default` finding — warns when the cluster `default_toast_compression` is not lz4 ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
+### Changed
+
+- **`connection-health`**: `long-idle` now counts connections idle over 1 hour (was 30 minutes) and tiers relative to `max_connections` — WARN above 10%, FAIL above 25% — so pooled warm floors no longer misfire as leaks ([#48](https://github.com/emancu/pgdoctor/pull/48)).
+
 ### Fixed
 
 - **`index-usage`**: `low-usage-indexes` now requires at least one scan, so zero-scan indexes are reported only by `unused-indexes` instead of by both findings ([#50](https://github.com/emancu/pgdoctor/pull/50)).

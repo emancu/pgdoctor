@@ -27,8 +27,9 @@ const (
 	// in low-traffic databases.
 	minConnectionsForIdleCheck = int64(20)
 
-	longIdleWarnCount = 10
-	longIdleFailCount = 50
+	// Capacity-relative: absolute counts are meaningless against pooled warm floors.
+	longIdleWarnCount = 100
+	longIdleFailCount = 500
 
 	// Pool pressure thresholds - detect when queries may be waiting for connections.
 	poolPressureActivePercent = 90.0 // Warn when >90% of connections are active
@@ -313,30 +314,23 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 	})
 }
 
-// checkLongIdleConnections detects connections idle for >30 minutes (potential connection leak).
+// checkLongIdleConnections sizes the idle-over-1h population against max_connections capacity.
 func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, report *check.Report) {
 	count := len(longIdle)
 
-	if count < longIdleWarnCount {
-		report.AddFinding(check.Finding{
-			ID:       "long-idle",
-			Name:     "Long Idle Connections",
-			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("%d connections idle >30 minutes (threshold: %d)", count, longIdleWarnCount),
-		})
-		return
-	}
-
-	severity := check.SeverityWarn
-	if count >= longIdleFailCount {
+	severity := check.SeverityPass
+	switch {
+	case count > longIdleFailCount:
 		severity = check.SeverityFail
+	case count > longIdleWarnCount:
+		severity = check.SeverityWarn
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "long-idle",
 		Name:     "Long Idle Connections",
 		Severity: severity,
-		Details:  fmt.Sprintf("%d connections idle >30 minutes (potential connection leak)", count),
+		Details:  fmt.Sprintf("%d connections idle >1h", count),
 	})
 }
 

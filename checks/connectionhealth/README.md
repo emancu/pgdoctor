@@ -125,17 +125,19 @@ Idle-in-transaction connections:
 
 ### long-idle
 
-Detects connections that have been idle for >30 minutes.
+Counts connections idle for more than 1 hour. One hour is the point past the usual `idle_session_timeout`
+backstop, so anything still idle beyond it is genuinely unreaped.
 
 **Thresholds:**
-- Warning: ≥10 connections idle >30 minutes
-- Critical: ≥50 connections idle >30 minutes
+- Warning: more than 100 connections idle over 1 hour
+- Critical: more than 500 connections idle over 1 hour
 
-**What it means:**
-Long-idle connections may indicate:
-- Connection leak (app not returning connections)
-- Oversized minimum pool size
-- Abandoned connections from crashed clients
+**Why it matters:**
+Every idle connection still holds a `max_connections` slot, so a growing population of them starves new
+sessions while doing no work. Pooled fleets keep a warm floor of idle connections *by design* — PgBouncer's
+`min_pool_size` holds spare backends open so bursts don't pay reconnect latency — so a modest steady count
+is healthy. The leak signal is a count far above any configured floor, and a true leak is confirmed when it
+keeps climbing across runs instead of resting steady.
 
 ## How to Fix
 
@@ -235,11 +237,11 @@ WHERE state = 'idle in transaction'
 Fix connection leaks in application:
 
 ```bash
-# Step 1: Identify leaked connections
+# Step 1: Identify the source apps holding idle connections
 SELECT pid, usename, application_name, state_change, query
 FROM pg_stat_activity
 WHERE state = 'idle'
-  AND state_change < NOW() - INTERVAL '30 minutes'
+  AND state_change < NOW() - INTERVAL '1 hour'
 ORDER BY state_change;
 
 # Step 2: Kill old idle connections
@@ -260,6 +262,7 @@ SELECT pg_reload_conf();
 # Ensure connections are returned to pool properly
 # Check for:
 # - Missing connection.close() in error handlers
+# - Connections not released on error paths or process exit / shutdown
 # - Connection pool exhaustion causing app to hold connections
 # - Long-running background jobs not releasing connections
 ```
