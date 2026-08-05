@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`extension-versions`**: new check inventorying installed extensions — `version-support` flags versions unsupported upstream (WARN deprecated, FAIL unsupported) against embedded floors for `pg_partman` and `postgis`, and `pending-update` warns when an installed version trails the version bundled on disk ([#46](https://github.com/emancu/pgdoctor/pull/46)).
 - **`cache-efficiency`**: new informational `table-cache-ratio` finding listing hot tables (top-20 by reads or ≥1% of read traffic, and ≥10,000 reads) over 500MB with a heap cache-hit ratio below 75% ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).

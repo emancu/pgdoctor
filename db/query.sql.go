@@ -783,6 +783,50 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 	return items, nil
 }
 
+const installedExtensions = `-- name: InstalledExtensions :many
+SELECT
+  e.extname::text AS extension_name
+  , e.extversion::text AS installed_version
+  , ae.default_version
+  , current_setting('server_version_num')::int AS server_version_num
+FROM pg_catalog.pg_extension AS e
+LEFT JOIN pg_catalog.pg_available_extensions AS ae ON e.extname = ae.name
+ORDER BY e.extname
+`
+
+type InstalledExtensionsRow struct {
+	ExtensionName    string
+	InstalledVersion string
+	DefaultVersion   pgtype.Text
+	ServerVersionNum int32
+}
+
+// Inventories every installed extension with its installed version, the version bundled on disk (default_version; NULL when the control file is absent), and the server version. Read-only, AccessShareLock on catalogs only, sub-ms, PG14-17.
+func (q *Queries) InstalledExtensions(ctx context.Context) ([]InstalledExtensionsRow, error) {
+	rows, err := q.db.Query(ctx, installedExtensions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InstalledExtensionsRow
+	for rows.Next() {
+		var i InstalledExtensionsRow
+		if err := rows.Scan(
+			&i.ExtensionName,
+			&i.InstalledVersion,
+			&i.DefaultVersion,
+			&i.ServerVersionNum,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const invalidPrimaryKeyTypes = `-- name: InvalidPrimaryKeyTypes :many
 WITH pk_tables AS (
   SELECT

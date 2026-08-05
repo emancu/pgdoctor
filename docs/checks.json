@@ -25,6 +25,12 @@
       "description": "Identifies exact and prefix duplicate indexes wasting disk space"
     },
     {
+      "id": "extension-versions",
+      "name": "PostgreSQL Extension Versions",
+      "category": "configs",
+      "description": "Inventories installed extensions and flags versions no longer supported upstream"
+    },
+    {
       "id": "freeze-age",
       "name": "Transaction ID Freeze Age",
       "category": "vacuum",
