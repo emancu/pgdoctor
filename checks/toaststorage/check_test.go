@@ -91,52 +91,19 @@ func Test_ToastStorage_CompressionDefault_FiresWithoutToast(t *testing.T) {
 	require.Equal(t, check.SeverityPass, report.Severity)
 }
 
-func Test_ToastStorage_ExcessiveRatio_FAIL(t *testing.T) {
+func Test_ToastStorage_ExcessiveRatio_Info(t *testing.T) {
 	t.Parallel()
 
 	rows := []db.ToastStorageRow{
 		makeToastRow("public", "events", "pg_toast.pg_toast_12345", 10*check.GiB, 85*check.GiB, 95*check.GiB, 89.47),
-	}
-
-	queryer := &mockQueryer{rows: rows}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
-
-	require.NoError(t, err)
-	require.Equal(t, check.SeverityWarn, report.Severity)
-
-	// Find toast-ratio subcheck
-	var ratioFinding *check.Finding
-	for i := range report.Results {
-		if report.Results[i].ID == findingIDToastRatio {
-			ratioFinding = &report.Results[i]
-			break
-		}
-	}
-
-	require.NotNil(t, ratioFinding, "toast-ratio subcheck should be present")
-	require.Equal(t, check.SeverityWarn, ratioFinding.Severity)
-	require.Contains(t, ratioFinding.Details, "high TOAST storage ratio")
-	require.NotNil(t, ratioFinding.Table)
-
-	require.Equal(t, 1, len(ratioFinding.Table.Rows))
-	require.Equal(t, check.SeverityFail, ratioFinding.Table.Rows[0].Severity)
-}
-
-func Test_ToastStorage_ExcessiveRatio_WARN(t *testing.T) {
-	t.Parallel()
-
-	rows := []db.ToastStorageRow{
 		makeToastRow("public", "logs", "pg_toast.pg_toast_23456", 30*check.GiB, 55*check.GiB, 85*check.GiB, 64.71),
 	}
 
-	queryer := &mockQueryer{rows: rows}
-	checker := toaststorage.New(queryer)
-
-	report, err := checker.Check(context.Background())
+	queryer := &mockQueryer{rows: rows, defaultComp: "lz4"}
+	report, err := toaststorage.New(queryer).Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 
 	var ratioFinding *check.Finding
 	for i := range report.Results {
@@ -147,8 +114,12 @@ func Test_ToastStorage_ExcessiveRatio_WARN(t *testing.T) {
 	}
 
 	require.NotNil(t, ratioFinding)
-	require.Equal(t, check.SeverityWarn, ratioFinding.Severity)
-	require.Equal(t, check.SeverityWarn, ratioFinding.Table.Rows[0].Severity)
+	require.Equal(t, check.SeverityInfo, ratioFinding.Severity)
+	require.Contains(t, ratioFinding.Details, "high TOAST storage ratio")
+	require.Equal(t, 2, len(ratioFinding.Table.Rows))
+	for _, r := range ratioFinding.Table.Rows {
+		require.Equal(t, check.SeverityInfo, r.Severity)
+	}
 }
 
 func Test_ToastStorage_LargeToast_FAIL(t *testing.T) {

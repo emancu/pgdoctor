@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`toast-storage`**: `toast-ratio` is now informational — a TOAST-heavy table is a characteristic, not a defect ([#41](https://github.com/emancu/pgdoctor/pull/41)).
+
 - **`toast-storage`**: `compression-algorithm` now counts effective pglz (explicit, or unset while `default_toast_compression` is pglz) and moves its big-TOAST itemization to `--detail debug` ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`cache-efficiency`**: `cache-hit-ratio` is now informational, no longer escalates the report, and reports only below a 60% cache-hit ratio ([#37](https://github.com/emancu/pgdoctor/pull/37)).

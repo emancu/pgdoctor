@@ -86,8 +86,7 @@ PostgreSQL offers four storage strategies that control how large values are hand
 ### toast-ratio
 
 Identifies tables where TOAST storage dominates total table size:
-- **FAIL**: TOAST >80% of total size (storage severely inefficient)
-- **WARN**: TOAST >50% of total size (storage inefficient)
+- **INFO**: TOAST >50% of total size — a storage characteristic, not a defect; context for I/O reasoning.
 
 **Why critical**: When TOAST exceeds 50% of storage, it indicates:
 - Schema design issues (large values that shouldn't be in the database)
