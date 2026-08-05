@@ -1179,7 +1179,7 @@ func Test_PartitionUsage_HighSeqScanRatio_Fail(t *testing.T) {
 	require.Equal(t, check.SeverityFail, seqScanFinding.Severity)
 }
 
-func Test_PartitionUsage_LowSeqScans_NoFinding(t *testing.T) {
+func Test_PartitionUsage_LowSeqScans_ReportsPass(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -1193,13 +1193,11 @@ func Test_PartitionUsage_LowSeqScans_NoFinding(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	// Should not have seq scan finding
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDHighSeqScanRatio, result.ID)
-	}
+	// Reports PASS rather than staying silent, so the subcheck is visibly clean.
+	require.Equal(t, check.SeverityPass, findingByID(t, report, findingIDHighSeqScanRatio).Severity)
 }
 
-func Test_PartitionUsage_HealthySeqIdxRatio_NoFinding(t *testing.T) {
+func Test_PartitionUsage_HealthySeqIdxRatio_ReportsPass(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -1213,10 +1211,8 @@ func Test_PartitionUsage_HealthySeqIdxRatio_NoFinding(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	// Should not have seq scan finding
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDHighSeqScanRatio, result.ID)
-	}
+	// Reports PASS rather than staying silent, so the subcheck is visibly clean.
+	require.Equal(t, check.SeverityPass, findingByID(t, report, findingIDHighSeqScanRatio).Severity)
 }
 
 func Test_PartitionUsage_ZeroIdxScans_Fail(t *testing.T) {
@@ -1277,7 +1273,7 @@ func Test_PartitionUsage_JoinMissingPartitionKey_Warning(t *testing.T) {
 	require.Contains(t, joinFinding.Details, "1 partitioned table")
 }
 
-func Test_PartitionUsage_JoinWithPartitionKey_NoFinding(t *testing.T) {
+func Test_PartitionUsage_JoinWithPartitionKey_ReportsPass(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -1293,13 +1289,10 @@ func Test_PartitionUsage_JoinWithPartitionKey_NoFinding(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	// Should not have join finding
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDJoinMissingPartKey, result.ID)
-	}
+	require.Equal(t, check.SeverityPass, findingByID(t, report, findingIDJoinMissingPartKey).Severity)
 }
 
-func Test_PartitionUsage_NonJoinQuery_NoJoinFinding(t *testing.T) {
+func Test_PartitionUsage_NonJoinQuery_JoinSubcheckPasses(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
@@ -1316,10 +1309,8 @@ func Test_PartitionUsage_NonJoinQuery_NoJoinFinding(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	// Should not have join finding (no JOIN in query)
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDJoinMissingPartKey, result.ID)
-	}
+	// No JOIN in the query, so the join subcheck is clean but still reported.
+	require.Equal(t, check.SeverityPass, findingByID(t, report, findingIDJoinMissingPartKey).Severity)
 }
 
 // ORDER BY on the partition key prunes nothing — the JOIN must still be flagged.

@@ -798,7 +798,12 @@ func checkJoinsMissingPartitionKey(
 	}
 
 	if len(tableRows) == 0 {
-		return // No finding needed when there are no issues
+		report.AddFinding(check.Finding{
+			ID:       "join-missing-partition-key",
+			Name:     "JOINs Missing Partition Key",
+			Severity: check.SeverityPass,
+		})
+		return
 	}
 
 	overallSeverity := check.SeverityWarn
@@ -868,7 +873,12 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 	}
 
 	if len(tableRows) == 0 {
-		return // No finding needed when there are no issues
+		report.AddFinding(check.Finding{
+			ID:       "high-seq-scan-ratio",
+			Name:     "High Sequential Scan Ratio",
+			Severity: check.SeverityPass,
+		})
+		return
 	}
 
 	overallSeverity := check.SeverityWarn
