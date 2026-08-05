@@ -239,7 +239,7 @@ func TestPendingUpdateFinding(t *testing.T) {
 			},
 			severity:    check.SeverityInfo,
 			wantRows:    1,
-			wantCells:   []string{"pg_stat_statements", "1.11", "1.12", "behind bundled default"},
+			wantCells:   []string{"pg_stat_statements", "1.11", "1.12"},
 			wantDetails: "1 extension(s) behind the version bundled with PostgreSQL 17",
 		},
 		{
@@ -293,7 +293,7 @@ func TestPendingUpdateFinding(t *testing.T) {
 			},
 			severity:    check.SeverityInfo,
 			wantRows:    1,
-			wantCells:   []string{"pg_stat_statements", "unpackaged", "1.12", "version unparseable — manual review"},
+			wantCells:   []string{"pg_stat_statements", "unpackaged", "1.12"},
 			wantDetails: "1 extension(s) behind the version bundled with PostgreSQL 17",
 		},
 	}
@@ -318,7 +318,7 @@ func TestPendingUpdateFinding(t *testing.T) {
 
 			require.NotNil(t, finding.Table)
 			require.Len(t, finding.Table.Rows, tt.wantRows)
-			require.Equal(t, []string{"Extension", "Installed", "Available", "Status"}, finding.Table.Headers)
+			require.Equal(t, []string{"Extension", "Installed", "Available"}, finding.Table.Headers)
 			require.Equal(t, tt.wantDetails, finding.Details)
 			if tt.wantCells != nil {
 				require.Equal(t, tt.wantCells, finding.Table.Rows[0].Cells)

@@ -97,7 +97,7 @@ func (c *checker) supportFinding(rows []db.InstalledExtensionsRow) check.Finding
 		// Only extensions needing attention go in the table; a clean run is just the PASS line.
 		if sev != check.SeverityPass {
 			flagged = append(flagged, check.TableRow{
-				Cells:    []string{row.ExtensionName, row.InstalledVersion, required, status},
+				Cells:    []string{row.ExtensionName, row.InstalledVersion, required},
 				Severity: sev,
 			})
 		}
@@ -118,7 +118,7 @@ func (c *checker) supportFinding(rows []db.InstalledExtensionsRow) check.Finding
 			return flagged[i].Cells[0] < flagged[j].Cells[0]
 		})
 		finding.Table = &check.Table{
-			Headers: []string{"Extension", "Installed", "Required", "Status"},
+			Headers: []string{"Extension", "Installed", "Required"},
 			Rows:    flagged,
 		}
 	}
@@ -134,12 +134,11 @@ func (c *checker) pendingUpdateFinding(rows []db.InstalledExtensionsRow) check.F
 		if !row.DefaultVersion.Valid {
 			continue
 		}
-		status, ok := classifyPendingUpdate(row.InstalledVersion, row.DefaultVersion.String)
-		if !ok {
+		if _, ok := classifyPendingUpdate(row.InstalledVersion, row.DefaultVersion.String); !ok {
 			continue
 		}
 		tableRows = append(tableRows, check.TableRow{
-			Cells:    []string{row.ExtensionName, row.InstalledVersion, row.DefaultVersion.String, status},
+			Cells:    []string{row.ExtensionName, row.InstalledVersion, row.DefaultVersion.String},
 			Severity: check.SeverityInfo,
 		})
 	}
@@ -168,7 +167,7 @@ func (c *checker) pendingUpdateFinding(rows []db.InstalledExtensionsRow) check.F
 		Severity: check.SeverityInfo,
 		Details:  fmt.Sprintf("%d extension(s) behind the version bundled with PostgreSQL %d", len(tableRows), pgMajor),
 		Table: &check.Table{
-			Headers: []string{"Extension", "Installed", "Available", "Status"},
+			Headers: []string{"Extension", "Installed", "Available"},
 			Rows:    tableRows,
 		},
 	}
