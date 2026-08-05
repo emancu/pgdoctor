@@ -77,6 +77,43 @@ func TestIndexBloat_BelowThresholdsNotListed(t *testing.T) {
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 }
 
+func TestIndexBloat_SizeFloorBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		row    db.IndexBloatRow
+		listed bool
+	}{
+		{
+			name:   "50 pct at 199MiB is below the size floor",
+			row:    makeIndexRow("public", "t", "idx", 50.0, 10*check.MiB, 199*check.MiB),
+			listed: false,
+		},
+		{
+			name:   "50 pct at 200MiB clears the size floor",
+			row:    makeIndexRow("public", "t", "idx", 50.0, 10*check.MiB, 200*check.MiB),
+			listed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := runCheck(t, []db.IndexBloatRow{tt.row})
+
+			if !tt.listed {
+				assert.Equal(t, check.SeverityPass, report.Severity)
+				return
+			}
+			assert.Equal(t, check.SeverityWarn, report.Severity)
+			require.NotNil(t, report.Results[0].Table)
+			require.Len(t, report.Results[0].Table.Rows, 1)
+		})
+	}
+}
+
 func TestIndexBloat_RowTiers(t *testing.T) {
 	t.Parallel()
 
@@ -87,17 +124,17 @@ func TestIndexBloat_RowTiers(t *testing.T) {
 	}{
 		{
 			name:        "exactly 50 pct with small waste is INFO",
-			row:         makeIndexRow("public", "t1", "idx1", 50.0, 50*check.MiB, 100*check.MiB),
+			row:         makeIndexRow("public", "t1", "idx1", 50.0, 50*check.MiB, 300*check.MiB),
 			rowSeverity: check.SeverityInfo,
 		},
 		{
 			name:        "69.9 pct with small waste is INFO",
-			row:         makeIndexRow("public", "t2", "idx2", 69.9, 70*check.MiB, 100*check.MiB),
+			row:         makeIndexRow("public", "t2", "idx2", 69.9, 70*check.MiB, 300*check.MiB),
 			rowSeverity: check.SeverityInfo,
 		},
 		{
 			name:        "exactly 70 pct with small waste is WARN",
-			row:         makeIndexRow("public", "t3", "idx3", 70.0, 70*check.MiB, 100*check.MiB),
+			row:         makeIndexRow("public", "t3", "idx3", 70.0, 70*check.MiB, 300*check.MiB),
 			rowSeverity: check.SeverityWarn,
 		},
 		{
@@ -136,7 +173,7 @@ func TestIndexBloat_FindingDetailsAndTable(t *testing.T) {
 
 	report := runCheck(t, []db.IndexBloatRow{
 		makeIndexRow("public", "users", "users_email_idx", 80.0, 800*check.MiB, check.GiB),
-		makeIndexRow("public", "orders", "orders_status_idx", 55.0, 50*check.MiB, 90*check.MiB),
+		makeIndexRow("public", "orders", "orders_status_idx", 55.0, 50*check.MiB, 300*check.MiB),
 	})
 
 	require.Len(t, report.Results, 1)
@@ -150,7 +187,7 @@ func TestIndexBloat_FindingDetailsAndTable(t *testing.T) {
 	assert.Equal(t, []string{"Table", "Index", "Size", "Wasted", "Bloat %"}, finding.Table.Headers)
 	require.Len(t, finding.Table.Rows, 2)
 	assert.Equal(t, []string{"public.users", "users_email_idx", "1.0GiB", "800.0MiB", "80.0%"}, finding.Table.Rows[0].Cells)
-	assert.Equal(t, []string{"public.orders", "orders_status_idx", "90.0MiB", "50.0MiB", "55.0%"}, finding.Table.Rows[1].Cells)
+	assert.Equal(t, []string{"public.orders", "orders_status_idx", "300.0MiB", "50.0MiB", "55.0%"}, finding.Table.Rows[1].Cells)
 }
 
 func TestIndexBloat_SortsWorstFirst(t *testing.T) {
@@ -159,9 +196,9 @@ func TestIndexBloat_SortsWorstFirst(t *testing.T) {
 	report := runCheck(t, []db.IndexBloatRow{
 		// INFO row with more waste than the WARN pct row: severity still wins.
 		makeIndexRow("public", "small_info", "small_info_idx", 55.0, 300*check.MiB, 600*check.MiB),
-		makeIndexRow("public", "warn_pct", "warn_pct_idx", 75.0, 100*check.MiB, 130*check.MiB),
+		makeIndexRow("public", "warn_pct", "warn_pct_idx", 75.0, 100*check.MiB, 300*check.MiB),
 		makeIndexRow("public", "warn_big", "warn_big_idx", 40.0, 3*check.GiB, 8*check.GiB),
-		makeIndexRow("public", "tiny_info", "tiny_info_idx", 52.0, 40*check.MiB, 80*check.MiB),
+		makeIndexRow("public", "tiny_info", "tiny_info_idx", 52.0, 40*check.MiB, 250*check.MiB),
 	})
 
 	require.Len(t, report.Results, 1)

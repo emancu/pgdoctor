@@ -18,9 +18,10 @@ var querySQL string
 var readme string
 
 const (
-	listPctThreshold = 50.0
-	warnPctThreshold = 70.0
-	warnWastedBytes  = 2 * check.GiB
+	listPctThreshold   = 50.0
+	listSizeFloorBytes = 200 * check.MiB
+	warnPctThreshold   = 70.0
+	warnWastedBytes    = 2 * check.GiB
 )
 
 type IndexBloatQueries interface {
@@ -62,7 +63,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	var bloated []db.IndexBloatRow
 	for _, row := range rows {
-		if check.NumericToFloat64(row.BloatPercent) >= listPctThreshold || row.BloatBytes.Int64 >= warnWastedBytes {
+		bigEnoughAndBloated := check.NumericToFloat64(row.BloatPercent) >= listPctThreshold &&
+			row.ActualBytes.Int64 >= listSizeFloorBytes
+		if bigEnoughAndBloated || row.BloatBytes.Int64 >= warnWastedBytes {
 			bloated = append(bloated, row)
 		}
 	}
