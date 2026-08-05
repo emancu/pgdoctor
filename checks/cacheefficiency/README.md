@@ -6,7 +6,7 @@ Analyzes database-wide buffer cache hit ratio to identify memory pressure and I/
 
 ## What It Checks
 
-### Database Cache Hit Ratio
+### Database Cache Hit Ratio (`cache-hit-ratio`)
 
 Calculates the percentage of data blocks read from memory (buffer cache) vs. disk.
 
@@ -16,7 +16,7 @@ Calculates the percentage of data blocks read from memory (buffer cache) vs. dis
 - **INFO**: < 60% cache hit ratio
 - **OK**: ≥ 60% cache hit ratio
 
-### Per-Index Cache Hit Ratio
+### Per-Index Cache Hit Ratio (`index-cache-ratio`)
 
 Lists an index only when it is a hot, disk-bound index — all of the following hold:
 - **hot**: top 20 by `idx_scan` OR ≥ 1% of index-scan traffic, AND ≥ 10,000 scans
@@ -27,7 +27,7 @@ A rarely-read index is uncached by design, so only hot-path indexes are reported
 
 **Severity**: INFO
 
-### Per-Table Cache Hit Ratio
+### Per-Table Cache Hit Ratio (`table-cache-ratio`)
 
 Lists a table only when it is a hot, disk-bound heap — all of the following hold:
 - **hot**: top 20 by reads (`seq_scan` + `idx_scan`) OR ≥ 1% of table-read traffic, AND ≥ 10,000 reads

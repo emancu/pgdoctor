@@ -16,6 +16,24 @@ TOAST storage issues compound over time and impact multiple aspects of your data
 **Prevention cost**: 2-4 hours to implement data retention + external storage
 **Reactive fix cost**: 24-48 hours of emergency optimization + application changes + data migration
 
+**toast-ratio**: when most of a table lives in TOAST, every fetch of a wide value pays extra page reads
+through the TOAST index, the main table's size understates the real I/O and backup weight, and cache is spent
+on blob chunks. These are the tables where retention policies, S3 offload, or column splits pay off most, and
+where compression choices (see compression-algorithm) move real gigabytes.
+
+**compression-algorithm**: pglz spends roughly 5x more CPU compressing and 2-3x more decompressing than lz4, for a
+compression ratio only a few percent better. On TOAST-heavy tables that is measurable write overhead and a
+slower read of every large JSON/text value.
+
+**compression-default**: every column without an explicit compression setting follows this GUC at write time — on
+pglz, each of them pays the pglz CPU tax on every TOAST write and read. One parameter-group change
+(`default_toast_compression = lz4`) migrates all new writes with no DDL, no locks, no downtime, and reverts
+the same way.
+
+- lz4 compresses ~5x faster and decompresses ~2-3x faster than pglz; ratio is slightly worse (a few % larger).
+- Net effect: less CPU on TOAST-heavy writes and faster reads of large JSON/text values.
+- pglz remains the PostgreSQL default only because lz4 is a build-time option; every RDS build has it.
+
 ## What is TOAST?
 
 PostgreSQL uses TOAST to handle values that exceed the page size (~8KB):
@@ -89,11 +107,6 @@ Lists TOAST-heavy tables: TOAST >=50% of total size, or >=10GB absolute. Sorted 
 
 **Severity**: INFO
 
-**Why it matters**: when most of a table lives in TOAST, every fetch of a wide value pays extra page reads
-through the TOAST index, the main table's size understates the real I/O and backup weight, and cache is spent
-on blob chunks. These are the tables where retention policies, S3 offload, or column splits pay off most, and
-where compression choices (see compression-algorithm) move real gigabytes.
-
 ### toast-bloat
 
 Identifies TOAST tables with excessive dead tuples:
@@ -116,48 +129,11 @@ compresses and is never counted.
 
 **Severity**: INFO
 
-**Why it matters**: pglz spends roughly 5x more CPU compressing and 2-3x more decompressing than lz4, for a
-compression ratio only a few percent better. On TOAST-heavy tables that is measurable write overhead and a
-slower read of every large JSON/text value.
-
-**What to do**: prefer flipping `default_toast_compression` (see compression-default) over per-column DDL;
-for columns explicitly set to pglz, `ALTER TABLE t ALTER COLUMN c SET COMPRESSION lz4`. The columns worth
-acting on first — those with over 1GiB of TOAST — are listed under `--detail debug`, each labeled with the
-compression its new writes use.
-
 ### compression-default
 
 Checks the cluster-wide `default_toast_compression` setting (PostgreSQL 14+).
 
 **Severity**: WARN when not lz4
-
-**Why it matters**: every column without an explicit compression setting follows this GUC at write time — on
-pglz, each of them pays the pglz CPU tax on every TOAST write and read. One parameter-group change
-(`default_toast_compression = lz4`) migrates all new writes with no DDL, no locks, no downtime, and reverts
-the same way.
-
-**pglz vs lz4**:
-- lz4 compresses ~5x faster and decompresses ~2-3x faster than pglz; ratio is slightly worse (a few % larger).
-- Net effect: less CPU on TOAST-heavy writes and faster reads of large JSON/text values.
-- pglz remains the PostgreSQL default only because lz4 is a build-time option; every RDS build has it.
-
-**Adopting lz4**:
-- `ALTER TABLE ... SET COMPRESSION lz4` is a catalog-only change: instant, safe, brief lock, no data rewrite.
-- It applies to newly written values only. An UPDATE that modifies the column stores the new value as lz4;
-  an UPDATE that leaves the column untouched keeps its existing pglz datum indefinitely.
-- Mixed compression within a column is fully supported: each datum records its own method and reads work forever.
-- Reverting is the same operation in reverse (`SET COMPRESSION pglz`), again affecting new writes only.
-- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums; reclaiming existing
-  TOAST needs `pg_repack` or a dump/restore.
-- Only incompatibility: a dump restored onto a server built without lz4 (never RDS) cannot read lz4 datums.
-- Fleet alternative: `default_toast_compression = lz4` in the parameter group switches every unset column's
-  new writes without any DDL.
-
-**After switching**:
-- Existing TOAST datums keep their old method; only new writes change. To recompress existing data use
-  `pg_repack` or dump/restore — `VACUUM FULL`/`CLUSTER` do not reliably recompress out-of-line datums.
-- The catalog records settings, not data. To see a table's real pglz/lz4 mix, run the (scan-priced)
-  `SELECT pg_column_compression(col), count(*) FROM tab GROUP BY 1;`
 
 ## How to Fix
 
@@ -261,6 +237,11 @@ pg_repack --table schema.table_name --no-order
 
 ### For `compression-algorithm`
 
+Prefer flipping `default_toast_compression` (see compression-default) over per-column DDL;
+for columns explicitly set to pglz, `ALTER TABLE t ALTER COLUMN c SET COMPRESSION lz4`. The columns worth
+acting on first — those with over 1GiB of TOAST — are listed under `--detail debug`, each labeled with the
+compression its new writes use.
+
 Columns using default/pglz compression should use lz4 (PostgreSQL 14+):
 
 ```sql
@@ -282,6 +263,26 @@ pg_repack --table events --no-order
 ALTER TABLE media ALTER COLUMN file_data SET STORAGE EXTERNAL;
 -- Stores out-of-line without compression, saving CPU
 ```
+
+### For `compression-default`
+
+**Adopting lz4**:
+- `ALTER TABLE ... SET COMPRESSION lz4` is a catalog-only change: instant, safe, brief lock, no data rewrite.
+- It applies to newly written values only. An UPDATE that modifies the column stores the new value as lz4;
+  an UPDATE that leaves the column untouched keeps its existing pglz datum indefinitely.
+- Mixed compression within a column is fully supported: each datum records its own method and reads work forever.
+- Reverting is the same operation in reverse (`SET COMPRESSION pglz`), again affecting new writes only.
+- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums; reclaiming existing
+  TOAST needs `pg_repack` or a dump/restore.
+- Only incompatibility: a dump restored onto a server built without lz4 (never RDS) cannot read lz4 datums.
+- Fleet alternative: `default_toast_compression = lz4` in the parameter group switches every unset column's
+  new writes without any DDL.
+
+**After switching**:
+- Existing TOAST datums keep their old method; only new writes change. To recompress existing data use
+  `pg_repack` or dump/restore — `VACUUM FULL`/`CLUSTER` do not reliably recompress out-of-line datums.
+- The catalog records settings, not data. To see a table's real pglz/lz4 mix, run the (scan-priced)
+  `SELECT pg_column_compression(col), count(*) FROM tab GROUP BY 1;`
 
 ## Decision Tree: Which Issue to Fix First?
 
