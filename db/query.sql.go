@@ -1198,6 +1198,10 @@ WITH candidates AS (
     , total_exec_time::double precision AS total_exec_time
     , mean_exec_time::double precision AS mean_exec_time
     , rows::bigint AS rows_returned
+    -- Counters are cumulative since this reset, so the report has to say over
+    -- what period. Available from pg_stat_statements 1.9, which the toplevel
+    -- filter above already requires.
+    , (SELECT i.stats_reset FROM pg_stat_statements_info AS i)::timestamptz AS stats_reset
   FROM pg_stat_statements
   WHERE
     dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
@@ -1222,6 +1226,7 @@ SELECT
   , total_exec_time
   , mean_exec_time
   , rows_returned
+  , stats_reset
 FROM (
   SELECT
     query_id
@@ -1230,6 +1235,7 @@ FROM (
     , total_exec_time
     , mean_exec_time
     , rows_returned
+    , stats_reset
   FROM candidates
   ORDER BY total_exec_time DESC
   LIMIT 500
@@ -1244,6 +1250,7 @@ SELECT
   , total_exec_time
   , mean_exec_time
   , rows_returned
+  , stats_reset
 FROM (
   SELECT
     query_id
@@ -1252,6 +1259,7 @@ FROM (
     , total_exec_time
     , mean_exec_time
     , rows_returned
+    , stats_reset
   FROM candidates
   ORDER BY calls DESC
   LIMIT 500
@@ -1267,6 +1275,7 @@ type QueryStatsFromStatStatementsRow struct {
 	TotalExecTime pgtype.Float8
 	MeanExecTime  pgtype.Float8
 	RowsReturned  pgtype.Int8
+	StatsReset    pgtype.Timestamptz
 }
 
 // Gets query statistics from pg_stat_statements for partition key analysis.
@@ -1291,6 +1300,7 @@ func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStat
 			&i.TotalExecTime,
 			&i.MeanExecTime,
 			&i.RowsReturned,
+			&i.StatsReset,
 		); err != nil {
 			return nil, err
 		}

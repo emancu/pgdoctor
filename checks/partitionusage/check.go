@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -141,7 +142,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	} else {
 		checkPartitionKeyUsage(partitionedTables, queryStats, report)
 		checkJoinsMissingPartitionKey(partitionedTables, queryStats, report)
-		checkStatementCoverage(partitionedTables, queryStats, report)
 	}
 
 	return report, nil
@@ -266,7 +266,7 @@ func checkPartitionKeyUsage(
 		ID:       "partition-key-unused",
 		Name:     "Queries Missing Partition Key",
 		Severity: overallSeverity,
-		Details:  problemDetails(affected, len(problems)),
+		Details:  problemDetails(affected, len(problems), statsReset(queries)),
 		Table: &check.Table{
 			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
 			Rows:         rows,
@@ -297,11 +297,11 @@ type problemQuery struct {
 
 // problemDetails describes the affected tables, so the per-table totals stay
 // visible even when the statement list is capped at the default detail level.
-func problemDetails(affected []affectedTable, statements int) string {
+func problemDetails(affected []affectedTable, statements int, statsReset pgtype.Timestamptz) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)",
-		statements, len(affected))
+	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s), %s",
+		statements, len(affected), statsWindow(statsReset))
 
 	for _, table := range affected {
 		fmt.Fprintf(&b, "\n  %s (key: %s, %d partitions) — %d statement(s), %s calls, %s",
@@ -312,6 +312,18 @@ func problemDetails(affected []affectedTable, statements int) string {
 	b.WriteString("\nRead a statement in full: SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;")
 
 	return b.String()
+}
+
+// statsWindow describes the period the counters cover. pg_stat_statements totals
+// are cumulative since the last reset, so "52K calls" is meaningless without it —
+// it could be an hour of traffic or two years of it.
+func statsWindow(statsReset pgtype.Timestamptz) string {
+	if !statsReset.Valid {
+		return "counted since the statistics were last reset (reset time unknown)"
+	}
+
+	return fmt.Sprintf("counted over the %s since pg_stat_statements was reset",
+		check.FormatDurationSec(int64(time.Since(statsReset.Time).Seconds())))
 }
 
 // clipQueryText shortens a normalized statement to one terminal line, counting
@@ -876,99 +888,6 @@ func checkSequentialScans(tables []db.PartitionedTablesWithKeysRow, report *chec
 	})
 }
 
-// checkStatementCoverage reports how many analyzed statements matched each
-// partitioned table. A table whose application only ever queries partition leaves
-// matches none, and then a "partition keys are used" PASS rests on no evidence at
-// all — indistinguishable from genuine coverage without this signal. Inventory
-// only, so it never escalates the report.
-func checkStatementCoverage(
-	tables []db.PartitionedTablesWithKeysRow,
-	queries []db.QueryStatsFromStatStatementsRow,
-	report *check.Report,
-) {
-	type coverage struct {
-		qualifiedName string
-		partitionKeys string
-		partitions    int64
-		statements    int
-		calls         int64
-	}
-
-	var covered []coverage
-	uncovered := 0
-
-	for _, table := range tables {
-		if !isAnalyzable(table) {
-			continue
-		}
-
-		row := coverage{
-			qualifiedName: fmt.Sprintf("%s.%s", table.SchemaName.String, table.TableName.String),
-			partitionKeys: table.PartitionKeyColumns.String,
-			partitions:    table.PartitionCount.Int64,
-		}
-
-		for _, q := range queries {
-			if queryReferencesTable(q.Query.String, table.SchemaName.String, table.TableName.String) {
-				row.statements++
-				row.calls += q.Calls.Int64
-			}
-		}
-
-		if row.statements == 0 {
-			uncovered++
-		}
-
-		covered = append(covered, row)
-	}
-
-	if len(covered) == 0 {
-		return
-	}
-
-	// Least covered first, so the tables whose verdict rests on nothing stay
-	// visible under the renderer's row cap.
-	slices.SortStableFunc(covered, func(a, b coverage) int {
-		if a.statements != b.statements {
-			return a.statements - b.statements
-		}
-
-		return strings.Compare(a.qualifiedName, b.qualifiedName)
-	})
-
-	rows := make([]check.TableRow, 0, len(covered))
-	for _, row := range covered {
-		rows = append(rows, check.TableRow{
-			Cells: []string{
-				row.qualifiedName,
-				row.partitionKeys,
-				check.FormatNumber(row.partitions),
-				fmt.Sprintf("%d", row.statements),
-				check.FormatNumber(row.calls),
-			},
-			Severity: check.SeverityInfo,
-		})
-	}
-
-	details := fmt.Sprintf("Every one of the %d analyzed partitioned table(s) matched at least one statement", len(covered))
-	if uncovered > 0 {
-		details = fmt.Sprintf(
-			"%d of %d analyzed partitioned table(s) matched no statement, so their partition key verdict is based on no evidence. Queries naming a partition leaf directly are attributed to the leaf, not to the parent.",
-			uncovered, len(covered))
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "statement-coverage",
-		Name:     "Analyzed Statement Coverage",
-		Severity: check.SeverityInfo,
-		Details:  details,
-		Table: &check.Table{
-			Headers: []string{"Table", "Partition Key", "Partitions", "Statements", "Calls"},
-			Rows:    rows,
-		},
-	})
-}
-
 // isAnalyzable reports whether a partitioned table's key can be matched against
 // query text. Expression keys are stored with attnum = 0, leaving no column to
 // look for, and a table with no key columns at all offers nothing to match.
@@ -985,4 +904,14 @@ func isAnalyzable(table db.PartitionedTablesWithKeysRow) bool {
 // queryHasJoin checks if a query contains a JOIN clause.
 func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
+}
+
+// statsReset returns the pg_stat_statements reset timestamp. Every row carries
+// the same value, so the first one answers for the set.
+func statsReset(queries []db.QueryStatsFromStatStatementsRow) pgtype.Timestamptz {
+	if len(queries) == 0 {
+		return pgtype.Timestamptz{}
+	}
+
+	return queries[0].StatsReset
 }

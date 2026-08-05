@@ -13,10 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`cache-efficiency`**: new informational `table-cache-ratio` finding listing hot tables (top-20 by reads or ≥1% of read traffic, and ≥10,000 reads) over 500MB with a heap cache-hit ratio below 75% ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
-- **`partition-usage`**: new informational `statement-coverage` finding — reports how many analyzed statements matched each partitioned table, so a table matched by none is no longer indistinguishable from one with a genuinely well-filtered workload ([#43](https://github.com/emancu/pgdoctor/pull/43)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 
 ### Fixed
+
+- **`partition-usage`**: `partition-key-unused` now states the period its call and time totals cover — `pg_stat_statements` counters are cumulative since the last reset, so the numbers were uninterpretable on their own ([#43](https://github.com/emancu/pgdoctor/pull/43)).
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
 - **`partition-usage`**: analyzes complete `pg_stat_statements` query text (current database, top-level statements only), matches tables and partition keys on SQL identifier boundaries, and requires a pruning-capable comparison — partition-leaf queries, lookalike column names, and `ORDER BY`-only key mentions no longer skew results ([#25](https://github.com/emancu/pgdoctor/pull/25)).

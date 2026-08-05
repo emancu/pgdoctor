@@ -21,7 +21,6 @@ const (
 	findingIDJoinMissingPartKey   = "join-missing-partition-key"
 	findingIDExtensionUnavailable = "extension-unavailable"
 	findingIDQueryTextRestricted  = "query-text-restricted"
-	findingIDStatementCoverage    = "statement-coverage"
 )
 
 // Mock queryer for testing.
@@ -89,15 +88,6 @@ func makePartitionedTable(schema, name, partitionKey string, partitionCount int6
 func makePartitionedTableWithStrategy(schema, name, partitionKey, strategy string) db.PartitionedTablesWithKeysRow {
 	table := makePartitionedTable(schema, name, partitionKey, 12)
 	table.PartitionStrategy = pgtype.Text{String: strategy, Valid: true}
-
-	return table
-}
-
-// Helper to create a PartitionedTablesWithKeysRow partitioned by an expression,
-// which the check cannot analyze from query text.
-func expressionKeyTable(schema, name string) db.PartitionedTablesWithKeysRow {
-	table := makePartitionedTable(schema, name, "created_at", 12)
-	table.HasExpressionKey = pgtype.Bool{Bool: true, Valid: true}
 
 	return table
 }
@@ -1418,132 +1408,4 @@ func Test_PartitionUsage_JoinMissingPartitionKey_Fail(t *testing.T) {
 	require.Equal(t, check.SeverityFail, joinFinding.Severity)
 }
 
-// Coverage reporting: a table matched by no analyzed statement gets the same
-// partition-key PASS as one with a properly filtered workload, so the matched
-// statement count is reported separately.
-func Test_PartitionUsage_StatementCoverage(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		tables       []db.PartitionedTablesWithKeysRow
-		queryStats   []db.QueryStatsFromStatStatementsRow
-		wantFinding  bool
-		wantDetails  string
-		wantFirstRow []string
-		wantRows     int
-	}{
-		{
-			name: "table matched by no statement is reported first",
-			tables: []db.PartitionedTablesWithKeysRow{
-				makePartitionedTable("public", "orders", "created_at", 12),
-				makePartitionedTable("public", "events", "created_at", 24),
-			},
-			queryStats: []db.QueryStatsFromStatStatementsRow{
-				makeQueryStats("SELECT * FROM orders WHERE created_at > $1", 500, 400000),
-			},
-			wantFinding:  true,
-			wantDetails:  "1 of 2 analyzed partitioned table(s) matched no statement",
-			wantFirstRow: []string{"public.events", "created_at", "24", "0", "0"},
-			wantRows:     2,
-		},
-		{
-			name: "every table matched",
-			tables: []db.PartitionedTablesWithKeysRow{
-				makePartitionedTable("public", "orders", "created_at", 12),
-			},
-			queryStats: []db.QueryStatsFromStatStatementsRow{
-				makeQueryStats("SELECT * FROM orders WHERE created_at > $1", 500, 400000),
-				makeQueryStats("DELETE FROM orders WHERE created_at < $1", 200, 100000),
-			},
-			wantFinding:  true,
-			wantDetails:  "Every one of the 1 analyzed partitioned table(s) matched at least one statement",
-			wantFirstRow: []string{"public.orders", "created_at", "12", "2", "700"},
-			wantRows:     1,
-		},
-		{
-			name: "partition-leaf queries are not credited to the parent",
-			tables: []db.PartitionedTablesWithKeysRow{
-				makePartitionedTable("public", "orders", "created_at", 12),
-			},
-			queryStats: []db.QueryStatsFromStatStatementsRow{
-				makeQueryStats("SELECT * FROM orders_2025_01 WHERE customer_id = $1", 5000, 4000000),
-			},
-			wantFinding:  true,
-			wantDetails:  "1 of 1 analyzed partitioned table(s) matched no statement",
-			wantFirstRow: []string{"public.orders", "created_at", "12", "0", "0"},
-			wantRows:     1,
-		},
-		{
-			name:       "expression-key tables are not analyzed, so not reported",
-			tables:     []db.PartitionedTablesWithKeysRow{expressionKeyTable("public", "orders")},
-			queryStats: []db.QueryStatsFromStatStatementsRow{makeQueryStats("SELECT * FROM orders WHERE id = $1", 500, 400000)},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			queryer := &mockQueryer{tables: tt.tables, queryStats: tt.queryStats}
-
-			report, err := partitionusage.New(queryer).Check(context.Background())
-			require.NoError(t, err)
-
-			if !tt.wantFinding {
-				for _, result := range report.Results {
-					require.NotEqual(t, findingIDStatementCoverage, result.ID)
-				}
-
-				return
-			}
-
-			finding := findingByID(t, report, findingIDStatementCoverage)
-			require.Equal(t, check.SeverityInfo, finding.Severity)
-			require.Contains(t, finding.Details, tt.wantDetails)
-			require.NotNil(t, finding.Table)
-			require.Len(t, finding.Table.Rows, tt.wantRows)
-			require.Equal(t, tt.wantFirstRow, finding.Table.Rows[0].Cells)
-			require.Equal(t, check.SeverityInfo, finding.Table.Rows[0].Severity)
-		})
-	}
-}
-
-// Coverage is inventory only: it must not lift a clean report above PASS.
-func Test_PartitionUsage_StatementCoverage_DoesNotEscalateReport(t *testing.T) {
-	t.Parallel()
-
-	queryer := &mockQueryer{
-		tables: []db.PartitionedTablesWithKeysRow{
-			makePartitionedTable("public", "orders", "created_at", 12),
-		},
-		queryStats: []db.QueryStatsFromStatStatementsRow{
-			makeQueryStats("SELECT * FROM invoices WHERE id = $1", 500, 400000),
-		},
-	}
-
-	report, err := partitionusage.New(queryer).Check(context.Background())
-	require.NoError(t, err)
-
-	require.Equal(t, check.SeverityPass, findingByID(t, report, findingIDPartitionKeyUnused).Severity)
-	require.Equal(t, check.SeverityInfo, findingByID(t, report, findingIDStatementCoverage).Severity)
-	require.Equal(t, check.SeverityPass, report.Severity)
-}
-
 // Without query statistics there is nothing to measure coverage against.
-func Test_PartitionUsage_StatementCoverage_NoQueryStats_NoFinding(t *testing.T) {
-	t.Parallel()
-
-	queryer := &mockQueryer{
-		tables: []db.PartitionedTablesWithKeysRow{
-			makePartitionedTable("public", "orders", "created_at", 12),
-		},
-	}
-
-	report, err := partitionusage.New(queryer).Check(context.Background())
-	require.NoError(t, err)
-
-	for _, result := range report.Results {
-		require.NotEqual(t, findingIDStatementCoverage, result.ID)
-	}
-}

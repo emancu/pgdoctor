@@ -58,14 +58,6 @@ Identifies partitioned tables with excessive sequential scans compared to index 
 
 **Note:** This subcheck runs even without `pg_stat_statements` as it uses `pg_stat_user_tables` statistics aggregated from the table's leaf partitions.
 
-### statement-coverage
-
-Informational: how many analyzed statements matched each partitioned table, with their call count.
-
-A table matched by zero statements gets the same "partition keys are used" PASS as a table with a genuinely well-filtered workload — the two are indistinguishable without this. Zero usually means the application queries partition leaves directly (which prune by construction and are not attributed to the parent), or that the table's statements fall outside the analyzed sample. Least-covered tables are listed first.
-
-This finding never changes a report's severity.
-
 ### join-missing-partition-key
 
 Identifies JOINs on partitioned tables that don't include the partition key in the query. When a partitioned table is joined without filtering on its partition key, PostgreSQL must scan all partitions.
@@ -97,7 +89,7 @@ WHERE o.created_at > '2024-01-01';
 
 `pg_stat_statements` can hold tens of thousands of entries, so the check analyzes a sample: the top 500 statements by `total_exec_time` plus the top 500 by `calls` (at most 1000 after deduplication). The second axis matters — a single "costliest 500" cut systematically drops cheap high-frequency statements, which are exactly the ones where a missing partition filter compounds at scale.
 
-A statement outside both cuts is invisible to the check, which is one reason a table can appear in `statement-coverage` with zero matched statements.
+A statement outside both cuts is invisible to the check.
 
 ### Query text analysis is approximate
 
