@@ -18,11 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`partition-usage`**: `partition-key-unused` now states the period its call and time totals cover — `pg_stat_statements` counters are cumulative since the last reset, so the numbers were uninterpretable on their own ([#43](https://github.com/emancu/pgdoctor/pull/43)).
+- **`partition-usage`**: `partition-key-unused` now states the period its call and time totals cover — `pg_stat_statements` counters are cumulative since the last reset, so the numbers were uninterpretable on their own ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 
 - **`table-bloat`**: `stale-vacuum` FAIL is now a strict subset of WARN, reports escalate correctly, and `high-dead-tuples` no longer reports FAIL ([#20](https://github.com/emancu/pgdoctor/pull/20)).
 - **`partition-usage`**: analyzes complete `pg_stat_statements` query text (current database, top-level statements only), matches tables and partition keys on SQL identifier boundaries, and requires a pruning-capable comparison — partition-leaf queries, lookalike column names, and `ORDER BY`-only key mentions no longer skew results ([#25](https://github.com/emancu/pgdoctor/pull/25)).
-- **`partition-usage`**: sub-partitioned tables are measured from their leaf partitions. `pg_total_relation_size()` returns 0 for an intermediate `PARTITION BY` node and such nodes carry no `pg_stat_user_tables` counters, so a multi-level parent reported 0 bytes and 0 scans — `high-seq-scan-ratio` could never fire for it and results were ordered by a size that was mostly missing. `Partitions` now counts leaves, not direct children ([#43](https://github.com/emancu/pgdoctor/pull/43)).
+- **`partition-usage`**: sub-partitioned tables are measured from their leaf partitions. `pg_total_relation_size()` returns 0 for an intermediate `PARTITION BY` node and such nodes carry no `pg_stat_user_tables` counters, so a multi-level parent reported 0 bytes and 0 scans — `high-seq-scan-ratio` could never fire for it and results were ordered by a size that was mostly missing. `Partitions` now counts leaves, not direct children ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`partition-usage`**: a plain `UPDATE` is analyzed again — it has no `FROM` clause, so scanning only after `FROM` reported every update regardless of its `WHERE` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: `LIST` partitions now count inequalities as pruning, matching PostgreSQL, which excludes partitions whose listed values cannot satisfy the predicate. Only `HASH` requires equality on every key column ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: a subquery that scans the target table keeps its predicate, so `FROM (SELECT … FROM orders WHERE created_at = $1) o` is no longer reported; subqueries on other tables are still ignored ([#32](https://github.com/emancu/pgdoctor/pull/32)).
@@ -32,12 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`connection-efficiency`**: retired the `busy-ratio` finding — a point-in-time active/total ratio is meaningless under transaction pooling; `connection-health/idle-ratio` covers the signal ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`table-bloat`**: retired the `stale-vacuum` finding — vacuum freshness is covered by `table-vacuum-health/vacuum-stale` ([#26](https://github.com/emancu/pgdoctor/pull/26)).
 - **`table-vacuum-health`**: retired the `analyze-needed` finding — absorbed by `vacuum-stale` ([#27](https://github.com/emancu/pgdoctor/pull/27)).
 - **`toast-storage`**: retired the `large-toast` finding — absorbed by the merged `toast-ratio`; its ID and 10GB/100GB WARN/FAIL tiers are gone ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 ### Changed
 
+- **`connection-efficiency`**: `sessions-abandoned` now caps at WARN — its cumulative ratio of already-closed sessions cannot exhaust `max_connections`, so it flags an application bug, not an imminent incident ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 - **`toast-storage`**: `compression-algorithm` now counts effective pglz (explicit, or unset while `default_toast_compression` is pglz) and moves its big-TOAST itemization to `--detail debug` ([#41](https://github.com/emancu/pgdoctor/pull/41)).
@@ -50,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`index-usage`**: `unused-indexes` reports only indexes over 500MB and discloses the statistics window ([#34](https://github.com/emancu/pgdoctor/pull/34)).
 - **`index-usage`**: `low-usage-indexes` now flags sustained low read rates instead of lifetime scan counts ([#34](https://github.com/emancu/pgdoctor/pull/34)).
 - **`index-usage`**: `low-usage-indexes` is now informational — acting on it safely requires cluster-wide verification ([#38](https://github.com/emancu/pgdoctor/pull/38)).
-- **`partition-usage`**: statements are now sampled on two axes — the top 500 by `total_exec_time` plus the top 500 by `calls` — instead of the costliest 500 only. The old cut systematically dropped cheap high-frequency statements, precisely where a missing partition filter compounds at scale, so tables whose unprunable workload is high-volume rather than slow can now be reported ([#43](https://github.com/emancu/pgdoctor/pull/43)).
+- **`partition-usage`**: statements are now sampled on two axes — the top 500 by `total_exec_time` plus the top 500 by `calls` — instead of the costliest 500 only. The old cut systematically dropped cheap high-frequency statements, precisely where a missing partition filter compounds at scale, so tables whose unprunable workload is high-volume rather than slow can now be reported ([#47](https://github.com/emancu/pgdoctor/pull/47)).
 - **`partition-usage`**: `partition-key-unused` now reports one row per offending statement — table, calls, total time, `queryid` and clipped text — instead of one aggregate row per table, so a finding can be investigated without querying `pg_stat_statements` by hand. Per-table totals moved above the table and are always shown; the statement list is capped at three by default and complete under `--detail verbose` ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: `partition-key-unused` now counts a partition key constrained anywhere after `FROM`, including `JOIN ... ON` conditions, instead of only in `WHERE`. Such queries prune whenever the planner parameterizes the partitioned side, and reporting them buried the genuinely unprunable ones. The finding is also renamed to "Queries Missing Partition Key", matching its `join-missing-partition-key` sibling ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: partition pruning is now judged per strategy — HASH and LIST need equality on the key (HASH on every key column), RANGE needs its leading column — and queries qualified by another schema are no longer attributed to a same-named table ([#32](https://github.com/emancu/pgdoctor/pull/32)).

@@ -279,7 +279,7 @@ Connection problems?
 │       └─► Without PgBouncer: Add PgBouncer or optimize queries
 │
 ├─► "Connections mostly idle"
-│   └─► Check: idle-ratio + connection-efficiency busy-ratio
+│   └─► Check: idle-ratio
 │       └─► Reduce pool size (save memory)
 │
 ├─► "Locks / blocked queries"
@@ -327,7 +327,7 @@ Configuration lives in each service's source code (ORM settings). Consult your O
 
 ## Related Checks
 
-- **connection-efficiency** - Analyzes historical session statistics (PostgreSQL 14+): busy ratio trends and abnormal termination patterns
+- **connection-efficiency** - Analyzes historical session statistics (PostgreSQL 14+): abnormal session termination patterns
 - **session-settings** - Validates timeout configurations that affect connection behavior
 
 ## References
