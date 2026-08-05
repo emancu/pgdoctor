@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -42,14 +43,11 @@ func int64Val(v int64) pgtype.Int8 {
 // healthyStats returns session statistics indicating healthy operation.
 func healthyStats() db.SessionStatisticsRow {
 	return db.SessionStatisticsRow{
-		TotalSessionTimeMs:      float64Val(3600000), // 1 hour total
-		TotalActiveTimeMs:       float64Val(1080000), // 30% busy (healthy)
-		TotalIdleInTxnTimeMs:    float64Val(36000),   // 1% idle in txn
-		TotalSessions:           int64Val(1000),
-		SessionsAbandoned:       int64Val(5), // 0.5% (healthy)
-		SessionsFatal:           int64Val(2), // 0.2% (healthy)
-		SessionsKilled:          int64Val(3), // 0.3% (healthy)
-		SessionBusyRatioPercent: float64Val(30.0),
+		TotalIdleInTxnTimeMs: float64Val(36000), // 1% idle in txn
+		TotalSessions:        int64Val(1000),
+		SessionsAbandoned:    int64Val(5), // 0.5% (healthy)
+		SessionsFatal:        int64Val(2), // 0.2% (healthy)
+		SessionsKilled:       int64Val(3), // 0.3% (healthy)
 	}
 }
 
@@ -86,12 +84,12 @@ func Test_ConnectionEfficiency_AllOK(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, report)
 
-	// All 4 subchecks should report OK.
-	require.Len(t, report.Results, 4)
-	require.True(t, hasResult(report.Results, "busy-ratio", check.SeverityPass))
+	// All 3 subchecks should report OK.
+	require.Len(t, report.Results, 3)
 	require.True(t, hasResult(report.Results, "sessions-abandoned", check.SeverityPass))
 	require.True(t, hasResult(report.Results, "sessions-fatal", check.SeverityPass))
 	require.True(t, hasResult(report.Results, "sessions-killed", check.SeverityPass))
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func Test_ConnectionEfficiency_PostgreSQL13_Skipped(t *testing.T) {
@@ -160,58 +158,6 @@ func Test_ConnectionEfficiency_QueryError(t *testing.T) {
 	require.Contains(t, err.Error(), "connection-efficiency")
 }
 
-func Test_ConnectionEfficiency_BusyRatio(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name             string
-		busyRatio        float64
-		expectedSeverity check.Severity
-	}{
-		{
-			name:             "good utilization (30%)",
-			busyRatio:        30.0,
-			expectedSeverity: check.SeverityPass,
-		},
-		{
-			name:             "low utilization warning (3%)",
-			busyRatio:        3.0,
-			expectedSeverity: check.SeverityWarn,
-		},
-		{
-			name:             "at warn threshold (20%)",
-			busyRatio:        20.0,
-			expectedSeverity: check.SeverityPass, // 5% is acceptable, <5% is warn
-		},
-		{
-			name:             "just below warn threshold (19.9%)",
-			busyRatio:        19.9,
-			expectedSeverity: check.SeverityWarn,
-		},
-		{
-			name:             "high utilization is OK (93%)",
-			busyRatio:        93.0,
-			expectedSeverity: check.SeverityPass, // High utilization is not a problem - pool pressure is checked by connection-health
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			stats := healthyStats()
-			stats.SessionBusyRatioPercent = float64Val(tt.busyRatio)
-
-			mock := &mockQueries{stats: stats}
-			checker := connectionefficiency.New(mock)
-			report, err := checker.Check(ctxWithPgVersion(17))
-
-			require.NoError(t, err)
-			require.True(t, hasResult(report.Results, "busy-ratio", tt.expectedSeverity))
-		})
-	}
-}
-
 func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 	t.Parallel()
 
@@ -228,22 +174,22 @@ func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name:             "at warn threshold (1%)",
+			name:             "below warn threshold (5%)",
 			totalSessions:    1000,
-			abandoned:        10,
-			expectedSeverity: check.SeverityPass, // <= 1% is OK
+			abandoned:        50,
+			expectedSeverity: check.SeverityPass, // <= 7% is OK
 		},
 		{
-			name:             "warning (2%)",
+			name:             "warning (8%)",
 			totalSessions:    1000,
-			abandoned:        20,
+			abandoned:        80,
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "critical (6%)",
+			name:             "high (20%) caps at warn",
 			totalSessions:    1000,
-			abandoned:        60,
-			expectedSeverity: check.SeverityFail,
+			abandoned:        200,
+			expectedSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -261,6 +207,7 @@ func Test_ConnectionEfficiency_SessionsAbandoned(t *testing.T) {
 
 			require.NoError(t, err)
 			require.True(t, hasResult(report.Results, "sessions-abandoned", tt.expectedSeverity))
+			checktest.AssertSeverityInvariant(t, report)
 		})
 	}
 }
@@ -364,20 +311,18 @@ func Test_ConnectionEfficiency_Prescriptions(t *testing.T) {
 
 	// Trigger all warnings.
 	stats := db.SessionStatisticsRow{
-		TotalSessionTimeMs:      float64Val(3600000),
-		TotalActiveTimeMs:       float64Val(36000), // 1% busy (warn)
-		TotalSessions:           int64Val(1000),
-		SessionsAbandoned:       int64Val(20), // 2% (warn)
-		SessionsFatal:           int64Val(20), // 2% (warn)
-		SessionsKilled:          int64Val(20), // 2% (warn)
-		SessionBusyRatioPercent: float64Val(1.0),
+		TotalSessions:     int64Val(1000),
+		SessionsAbandoned: int64Val(80), // 8% (warn)
+		SessionsFatal:     int64Val(20), // 2% (warn)
+		SessionsKilled:    int64Val(20), // 2% (warn)
 	}
 
 	mock := &mockQueries{stats: stats}
 	checker := connectionefficiency.New(mock)
-	_, err := checker.Check(ctxWithPgVersion(17))
+	report, err := checker.Check(ctxWithPgVersion(17))
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
@@ -397,7 +342,7 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 			name: "one warning",
 			stats: func() db.SessionStatisticsRow {
 				s := healthyStats()
-				s.SessionBusyRatioPercent = float64Val(3.0) // warn
+				s.SessionsAbandoned = int64Val(100) // 10% = warn
 				return s
 			}(),
 			expectedSeverity: check.SeverityWarn,
@@ -406,7 +351,7 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 			name: "one fail",
 			stats: func() db.SessionStatisticsRow {
 				s := healthyStats()
-				s.SessionsAbandoned = int64Val(60) // 6% = fail
+				s.SessionsFatal = int64Val(60) // 6% = fail
 				return s
 			}(),
 			expectedSeverity: check.SeverityFail,
@@ -423,6 +368,7 @@ func Test_ConnectionEfficiency_ReportSeverity(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedSeverity, report.Severity)
+			checktest.AssertSeverityInvariant(t, report)
 		})
 	}
 }

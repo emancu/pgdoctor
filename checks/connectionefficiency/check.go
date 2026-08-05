@@ -18,13 +18,9 @@ var querySQL string
 var readme string
 
 const (
-	// Busy ratio threshold - only check for underutilization.
-	// High utilization (even 100%) is fine as long as queries aren't queuing.
-	// Pool pressure is detected by connection-health check via real-time metrics.
-	busyRatioLowerPercent = 20.0 // Below 20% indicates oversized pool
-
 	// Termination rate thresholds (as percentage of total sessions).
 	terminationWarnPercent = 1.0 // >1% abnormal terminations = warning
+	abandonedWarnPercent   = 7.0 // >7% abandoned sessions = warning
 	terminationFailPercent = 5.0 // >5% abnormal terminations = critical
 )
 
@@ -92,7 +88,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	// Run individual subchecks
-	checkBusyRatio(stats, totalSessions, report)
 	checkSessionsAbandoned(stats, totalSessions, report)
 	checkSessionsFatal(stats, totalSessions, report)
 	checkSessionsKilled(stats, totalSessions, report)
@@ -100,35 +95,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-func checkBusyRatio(stats db.SessionStatisticsRow, totalSessions int64, report *check.Report) {
-	busyRatio := getFloat64(stats.SessionBusyRatioPercent)
-
-	if busyRatio < busyRatioLowerPercent {
-		report.AddFinding(check.Finding{
-			ID:       "busy-ratio",
-			Name:     "Session Busy Ratio",
-			Severity: check.SeverityWarn,
-			Details:  fmt.Sprintf("Low busy ratio (%.1f%%) indicates oversized connection pool", busyRatio),
-		})
-		return
-	}
-
-	// High utilization is not a problem by itself - it means connections are well-used.
-	// Real-time pool pressure (queries waiting for connections) is detected by
-	// the connection-health check's pool-pressure subcheck.
-	report.AddFinding(check.Finding{
-		ID:       "busy-ratio",
-		Name:     "Session Busy Ratio",
-		Severity: check.SeverityPass,
-		Details:  fmt.Sprintf("Session busy ratio at %.1f%% (healthy: above %.0f%%)", busyRatio, busyRatioLowerPercent),
-	})
-}
-
 func checkSessionsAbandoned(stats db.SessionStatisticsRow, totalSessions int64, report *check.Report) {
 	sessionsAbandoned := getInt64(stats.SessionsAbandoned)
 	abandonedPercent := float64(sessionsAbandoned) / float64(totalSessions) * 100
 
-	if abandonedPercent <= terminationWarnPercent {
+	if abandonedPercent <= abandonedWarnPercent {
 		report.AddFinding(check.Finding{
 			ID:       "sessions-abandoned",
 			Name:     "Abandoned Sessions",
@@ -138,15 +109,11 @@ func checkSessionsAbandoned(stats db.SessionStatisticsRow, totalSessions int64, 
 		return
 	}
 
-	severity := check.SeverityWarn
-	if abandonedPercent > terminationFailPercent {
-		severity = check.SeverityFail
-	}
-
+	// Cumulative ratio of closed sessions: a connection-handling bug, but it cannot exhaust max_connections, so caps at WARN.
 	report.AddFinding(check.Finding{
 		ID:       "sessions-abandoned",
 		Name:     "Abandoned Sessions",
-		Severity: severity,
+		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("High abandonment rate: %.1f%% (%d/%d sessions)", abandonedPercent, sessionsAbandoned, totalSessions),
 	})
 }
@@ -206,14 +173,6 @@ func checkSessionsKilled(stats db.SessionStatisticsRow, totalSessions int64, rep
 		Severity: severity,
 		Details:  fmt.Sprintf("High kill rate: %.1f%% (%d/%d sessions) were manually terminated", killedPercent, sessionsKilled, totalSessions),
 	})
-}
-
-// getFloat64 safely extracts a float64 from pgtype.Float8, returning 0 if invalid.
-func getFloat64(f pgtype.Float8) float64 {
-	if !f.Valid {
-		return 0
-	}
-	return f.Float64
 }
 
 // getInt64 safely extracts an int64 from pgtype.Int8, returning 0 if invalid.

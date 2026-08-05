@@ -1900,19 +1900,11 @@ func (q *Queries) SessionSettings(ctx context.Context) ([]SessionSettingsRow, er
 
 const sessionStatistics = `-- name: SessionStatistics :one
 SELECT
-  COALESCE(SUM(session_time), 0)::double precision AS total_session_time_ms
-  , COALESCE(SUM(active_time), 0)::double precision AS total_active_time_ms
-  , COALESCE(SUM(idle_in_transaction_time), 0)::double precision AS total_idle_in_txn_time_ms
+  COALESCE(SUM(idle_in_transaction_time), 0)::double precision AS total_idle_in_txn_time_ms
   , COALESCE(SUM(sessions), 0)::bigint AS total_sessions
   , COALESCE(SUM(sessions_abandoned), 0)::bigint AS sessions_abandoned
   , COALESCE(SUM(sessions_fatal), 0)::bigint AS sessions_fatal
   , COALESCE(SUM(sessions_killed), 0)::bigint AS sessions_killed
-  -- Calculate session busy ratio (active_time / session_time)
-  , CASE
-    WHEN COALESCE(SUM(session_time), 0) > 0
-      THEN ROUND((COALESCE(SUM(active_time), 0) / COALESCE(SUM(session_time), 0) * 100)::numeric, 2)
-    ELSE 0
-  END::double precision AS session_busy_ratio_percent
 FROM pg_stat_database
 WHERE
   datname IS NOT NULL
@@ -1920,14 +1912,11 @@ WHERE
 `
 
 type SessionStatisticsRow struct {
-	TotalSessionTimeMs      pgtype.Float8
-	TotalActiveTimeMs       pgtype.Float8
-	TotalIdleInTxnTimeMs    pgtype.Float8
-	TotalSessions           pgtype.Int8
-	SessionsAbandoned       pgtype.Int8
-	SessionsFatal           pgtype.Int8
-	SessionsKilled          pgtype.Int8
-	SessionBusyRatioPercent pgtype.Float8
+	TotalIdleInTxnTimeMs pgtype.Float8
+	TotalSessions        pgtype.Int8
+	SessionsAbandoned    pgtype.Int8
+	SessionsFatal        pgtype.Int8
+	SessionsKilled       pgtype.Int8
 }
 
 // Gets session time statistics from pg_stat_database (PostgreSQL 14+).
@@ -1937,14 +1926,11 @@ func (q *Queries) SessionStatistics(ctx context.Context) (SessionStatisticsRow, 
 	row := q.db.QueryRow(ctx, sessionStatistics)
 	var i SessionStatisticsRow
 	err := row.Scan(
-		&i.TotalSessionTimeMs,
-		&i.TotalActiveTimeMs,
 		&i.TotalIdleInTxnTimeMs,
 		&i.TotalSessions,
 		&i.SessionsAbandoned,
 		&i.SessionsFatal,
 		&i.SessionsKilled,
-		&i.SessionBusyRatioPercent,
 	)
 	return i, err
 }

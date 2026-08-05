@@ -6,10 +6,9 @@ Analyzes PostgreSQL 14+ session statistics to identify connection pool efficienc
 
 PostgreSQL 14 introduced session-level statistics in `pg_stat_database` that track how connections are used over time. This check uses these metrics to identify:
 
-1. **Oversized connection pools** - Connections spending most time idle
-2. **Abandoned sessions** - Network issues or client crashes
-3. **Fatal terminations** - Server errors or stability issues
-4. **Killed sessions** - Manual terminations indicating stuck queries
+1. **Abandoned sessions** - Network issues or client crashes
+2. **Fatal terminations** - Server errors or stability issues
+3. **Killed sessions** - Manual terminations indicating stuck queries
 
 ## Requirements
 
@@ -18,35 +17,6 @@ PostgreSQL 14 introduced session-level statistics in `pg_stat_database` that tra
 
 ## Subchecks
 
-### busy-ratio
-
-**Purpose**: Detect oversized connection pools by analyzing the session busy ratio.
-
-**Metric**: `active_time / session_time * 100`
-
-**Thresholds**:
-- `>=20%` - Healthy utilization (OK)
-- `<20%` - Oversized pool, wasting resources (WARN)
-
-**What it means**:
-- A low busy ratio means connections spend most of their time idle
-- This indicates the pool is larger than necessary
-- Oversized pools waste memory and connection slots
-
-**Why we don't warn on high utilization**:
-High busy ratio (even 90-100%) is **not inherently bad** - it means your connections are well-utilized. The real problems occur when:
-1. Queries start **queuing** waiting for a connection
-2. Connection **timeouts** occur
-3. **Latency increases** due to pool exhaustion
-
-These real-time symptoms are detected by the `connection-health` check's `pool-pressure` subcheck, which monitors current connection state rather than historical averages.
-
-**Example scenarios**:
-- Busy ratio 2% with 100 connections: Reduce to ~10-20 connections
-- Busy ratio 15% with 50 connections: Acceptable, could optimize to 30-40
-- Busy ratio 35% with 20 connections: Excellent utilization
-- Busy ratio 95% with 20 connections: Excellent utilization (check `connection-health` for real-time pressure)
-
 ### sessions-abandoned
 
 **Purpose**: Detect network issues or client crashes causing improper connection cleanup.
@@ -54,9 +24,12 @@ These real-time symptoms are detected by the `connection-health` check's `pool-p
 **Metric**: Count of sessions where client disconnected without proper cleanup.
 
 **Thresholds**:
-- `<=1%` - Normal (OK)
-- `>1%` - Elevated abandonment (WARN)
-- `>5%` - Critical abandonment rate (FAIL)
+- `<=7%` - Normal (OK)
+- `>7%` - Elevated abandonment (WARN)
+
+**Why it matters**: abandoned sessions are clients that vanished without disconnecting — crashed processes,
+dropped networks, or missing connection cleanup in application shutdown paths. The counter is cumulative over
+closed sessions, so it points at a client-side hygiene bug to fix in the application, not at database health.
 
 **What it means**:
 - Client closed connection without sending termination message
@@ -66,7 +39,7 @@ These real-time symptoms are detected by the `connection-health` check's `pool-p
 **Example scenarios**:
 - 50 abandoned out of 10,000 sessions (0.5%) - Normal
 - 200 abandoned out of 10,000 sessions (2%) - Check network stability
-- 600 abandoned out of 10,000 sessions (6%) - Critical network issues
+- 600 abandoned out of 10,000 sessions (6%) - Elevated; investigate network stability and client cleanup
 
 ### sessions-fatal
 
@@ -118,8 +91,6 @@ PostgreSQL tracks cumulative statistics since last reset:
 SELECT
   datname,
   sessions,              -- Total sessions established
-  session_time,          -- Total time sessions were connected (ms)
-  active_time,           -- Total time sessions were executing queries (ms)
   sessions_abandoned,    -- Sessions ended by client disconnect
   sessions_fatal,        -- Sessions ended by server error
   sessions_killed        -- Sessions terminated by admin
@@ -129,27 +100,9 @@ WHERE datname NOT IN ('template0', 'template1');
 
 **Important notes**:
 - Statistics are cumulative since database start or last `pg_stat_reset()`
-- The busy ratio is calculated across ALL sessions, not just current ones
 - Rates are based on total historical sessions, not point-in-time snapshots
 
 ## How to Fix
-
-### For `busy-ratio`
-
-Low busy ratio indicates oversized pool:
-
-1. **Reduce PgBouncer server pool size** (if using PgBouncer):
-   - Databases with PgBouncer always use transaction pooling
-   - Adjust `default_pool_size` based on vCPUs (2-4x CPU cores)
-   - Configuration lives in your connection pooler deployment
-
-2. **Reduce application pool size**:
-   - Configuration lives in each service's source code (ORM settings)
-   - Consult your ORM documentation (Ecto, ActiveRecord, etc.)
-
-3. **Review connection needs**:
-   - Are background workers holding idle connections?
-   - Are there services with oversized pool configurations?
 
 ### For `sessions-abandoned`
 
@@ -210,18 +163,6 @@ Low busy ratio indicates oversized pool:
    - Review query plans for sequential scans on large tables
 
 ## Monitoring Queries
-
-### Track busy ratio trends:
-```sql
-SELECT
-  datname,
-  sessions,
-  ROUND(100.0 * active_time / NULLIF(session_time, 0), 1) as busy_pct,
-  pg_size_pretty(pg_database_size(datname)) as db_size
-FROM pg_stat_database
-WHERE datname NOT IN ('template0', 'template1')
-ORDER BY busy_pct;
-```
 
 ### Track termination trends:
 ```sql
