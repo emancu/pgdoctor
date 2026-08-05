@@ -140,12 +140,6 @@ count means nothing on its own: a healthy floor and a leak look identical until 
 capacity. The leak signal is the idle-over-1h population large relative to `max_connections`; a true leak
 is confirmed when that count keeps climbing across runs instead of resting at a steady floor.
 
-**What to do:**
-Identify the source from `pg_stat_activity` (`usename`, `application_name`), then inspect that service's
-pool configuration and shutdown handling — leaks trace to connections not released on error paths or on
-process exit. `idle_session_timeout` is the database-side backstop that reaps sessions idle past a bound
-regardless of client behaviour.
-
 ## How to Fix
 
 ### For `connection-saturation`
@@ -269,6 +263,7 @@ SELECT pg_reload_conf();
 # Ensure connections are returned to pool properly
 # Check for:
 # - Missing connection.close() in error handlers
+# - Connections not released on error paths or process exit / shutdown
 # - Connection pool exhaustion causing app to hold connections
 # - Long-running background jobs not releasing connections
 ```
