@@ -85,25 +85,14 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ### toast-ratio
 
-Identifies tables where TOAST storage dominates total table size:
-- **FAIL**: TOAST >80% of total size (storage severely inefficient)
-- **WARN**: TOAST >50% of total size (storage inefficient)
+Lists TOAST-heavy tables: TOAST >=50% of total size, or >=10GB absolute. Sorted by TOAST size.
 
-**Why critical**: When TOAST exceeds 50% of storage, it indicates:
-- Schema design issues (large values that shouldn't be in the database)
-- Query performance degradation (extra I/O for most rows)
-- Backup inefficiency (backing up data that could be archived or externalized)
+**Severity**: INFO
 
-### large-toast
-
-Identifies tables with absolute TOAST storage exceeding reasonable limits:
-- **FAIL**: TOAST >100GB (major storage and backup impact)
-- **WARN**: TOAST >10GB (significant storage cost)
-
-**Why critical**: Large TOAST tables:
-- Increase cloud storage costs ($10-30 per 100GB/month)
-- Slow down backups exponentially (100GB TOAST ≈ 30-60 min backup time)
-- Make schema migrations risky (VACUUM FULL on 100GB table = hours of downtime)
+**Why it matters**: when most of a table lives in TOAST, every fetch of a wide value pays extra page reads
+through the TOAST index, the main table's size understates the real I/O and backup weight, and cache is spent
+on blob chunks. These are the tables where retention policies, S3 offload, or column splits pay off most, and
+where compression choices (see compression-algorithm) move real gigabytes.
 
 ### toast-bloat
 
@@ -131,40 +120,61 @@ Identifies specific columns causing TOAST usage:
 
 ### compression-algorithm
 
-Identifies columns using suboptimal compression algorithms (PostgreSQL 14+ only):
-- **WARN**: Columns using `default` (which means pglz) instead of explicit lz4 compression
+Counts columns whose new writes still compress with pglz where lz4 is available (PostgreSQL 14+).
+A column with no explicit `SET COMPRESSION` follows `default_toast_compression` at write time, so unset
+columns on an lz4-default instance already write lz4 and are not counted. `EXTERNAL`/`PLAIN` storage never
+compresses and is never counted.
 
-**Why important**: When columns have no explicit compression setting, PostgreSQL uses `default`, which means the legacy pglz algorithm. LZ4 (available in PostgreSQL 14+) is significantly faster and often more effective.
+**Severity**: INFO
 
-**What "default" means**:
-- If you haven't explicitly set compression with `ALTER COLUMN SET COMPRESSION`, the column uses `default`
-- `default` = pglz algorithm for backward compatibility
-- Applies to columns with `EXTENDED` or `MAIN` storage strategies
+**Why it matters**: pglz spends roughly 5x more CPU compressing and 2-3x more decompressing than lz4, for a
+compression ratio only a few percent better. On TOAST-heavy tables that is measurable write overhead and a
+slower read of every large JSON/text value.
 
-**Comparison** (see "Compression algorithms" section above for details):
-- **default (pglz)**: Slower, 2-3x compression, legacy algorithm
-- **lz4**: 3-5x faster, 2-4x compression, recommended for JSON/text/logs
+**What to do**: prefer flipping `default_toast_compression` (see compression-default) over per-column DDL;
+for columns explicitly set to pglz, `ALTER TABLE t ALTER COLUMN c SET COMPRESSION lz4`. The columns worth
+acting on first — those with over 1GiB of TOAST — are listed under `--detail debug`, each labeled with the
+compression its new writes use.
 
-**Impact of using default/pglz instead of lz4**:
-- Wastes CPU cycles during TOAST operations (compression/decompression)
-- May result in larger TOAST storage (pglz often compresses worse than lz4)
-- Slower read/write performance for TOASTed values
-- Especially noticeable on high-traffic tables with large JSON/text columns
+### compression-default
 
-**Storage strategy context**:
-This check looks at columns with `EXTENDED` or `MAIN` storage (where compression applies).
-- `EXTERNAL` storage doesn't use compression (by design, for pre-compressed data)
-- `PLAIN` storage doesn't support compression (fixed-size types)
+Checks the cluster-wide `default_toast_compression` setting (PostgreSQL 14+).
 
-See "Storage strategies" section above for detailed explanations of each strategy.
+**Severity**: WARN when not lz4
 
-**This subcheck only runs on PostgreSQL 14+** (where lz4 is available)
+**Why it matters**: every column without an explicit compression setting follows this GUC at write time — on
+pglz, each of them pays the pglz CPU tax on every TOAST write and read. One parameter-group change
+(`default_toast_compression = lz4`) migrates all new writes with no DDL, no locks, no downtime, and reverts
+the same way.
+
+**pglz vs lz4**:
+- lz4 compresses ~5x faster and decompresses ~2-3x faster than pglz; ratio is slightly worse (a few % larger).
+- Net effect: less CPU on TOAST-heavy writes and faster reads of large JSON/text values.
+- pglz remains the PostgreSQL default only because lz4 is a build-time option; every RDS build has it.
+
+**Adopting lz4**:
+- `ALTER TABLE ... SET COMPRESSION lz4` is a catalog-only change: instant, safe, brief lock, no data rewrite.
+- It applies to newly written values only. An UPDATE that modifies the column stores the new value as lz4;
+  an UPDATE that leaves the column untouched keeps its existing pglz datum indefinitely.
+- Mixed compression within a column is fully supported: each datum records its own method and reads work forever.
+- Reverting is the same operation in reverse (`SET COMPRESSION pglz`), again affecting new writes only.
+- `VACUUM FULL`/`CLUSTER` do not reliably recompress existing out-of-line TOAST datums; reclaiming existing
+  TOAST needs `pg_repack` or a dump/restore.
+- Only incompatibility: a dump restored onto a server built without lz4 (never RDS) cannot read lz4 datums.
+- Fleet alternative: `default_toast_compression = lz4` in the parameter group switches every unset column's
+  new writes without any DDL.
+
+**After switching**:
+- Existing TOAST datums keep their old method; only new writes change. To recompress existing data use
+  `pg_repack` or dump/restore — `VACUUM FULL`/`CLUSTER` do not reliably recompress out-of-line datums.
+- The catalog records settings, not data. To see a table's real pglz/lz4 mix, run the (scan-priced)
+  `SELECT pg_column_compression(col), count(*) FROM tab GROUP BY 1;`
 
 ## How to Fix
 
 ### For `toast-ratio`
 
-Tables with high TOAST ratio (>50%) indicate large values dominating storage. Solutions depend on data type:
+TOAST-heavy tables (>=50% ratio or >=10GB) indicate large values dominating storage. Solutions depend on data type:
 
 **For JSONB columns:**
 ```sql
@@ -194,11 +204,7 @@ ALTER TABLE documents DROP COLUMN content;
 ALTER TABLE documents ADD COLUMN content_s3_key text;
 ```
 
-### For `large-toast`
-
-Tables with absolute TOAST >10GB need data lifecycle management:
-
-**Implement data retention:**
+**For very large TOAST (>=10GB), add data retention:**
 ```sql
 -- Step 1: Archive old data to S3
 COPY (
@@ -269,7 +275,7 @@ CREATE TRIGGER strip_nulls_before_insert
 
 **For large text columns:**
 ```sql
--- Split hot metadata from cold content (see large-toast fix above)
+-- Split hot metadata from cold content (see toast-ratio fix above)
 -- Or implement data retention (archive old data)
 ```
 
@@ -301,19 +307,16 @@ ALTER TABLE media ALTER COLUMN file_data SET STORAGE EXTERNAL;
 
 ```
 CRITICAL (Fix immediately - hours of backup time or $$$ storage):
-├─► large-toast >100GB (especially if backup time >6 hours)
 ├─► toast-bloat >50% (wasting storage, degrading performance)
 └─► toast-ratio >80% with >50GB total size
 
 HIGH PRIORITY (Plan fix within 2-4 weeks):
-├─► large-toast >10GB with >100K inserts/day
 ├─► toast-bloat >30% (autovacuum issues)
-├─► toast-ratio >50% with >10GB total size
+├─► toast-ratio >=10GB TOAST with >100K inserts/day
 └─► wide-columns with JSONB >10KB average
 
 MEDIUM PRIORITY (Plan within quarter):
-├─► large-toast 1-10GB (monitor growth rate)
-├─► toast-ratio 30-50% (suboptimal but not critical)
+├─► toast-ratio 1-10GB TOAST (monitor growth rate)
 ├─► wide-columns with text >20KB average
 └─► compression-algorithm using pglz (easy fix, performance improvement)
 

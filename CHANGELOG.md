@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **check**: new `SeverityInfo` level for informational findings that never escalate a report's severity ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`check.Table`**: new optional `MaxRowsBrief` field overriding the renderer's 10-row cap at the default detail level; column widths are now sized from the rows actually shown, so a long value in a hidden row no longer stretches the table ([#32](https://github.com/emancu/pgdoctor/pull/32)).
 - **`partition-usage`**: new `query-text-restricted` finding — warns when `pg_stat_statements` hides query text from the current role, instead of reporting PASS on a partial workload ([#32](https://github.com/emancu/pgdoctor/pull/32)).
+- **`toast-storage`**: new `compression-default` finding — warns when the cluster `default_toast_compression` is not lz4 ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 ### Fixed
 
@@ -33,9 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`table-bloat`**: retired the `stale-vacuum` finding — vacuum freshness is covered by `table-vacuum-health/vacuum-stale` ([#26](https://github.com/emancu/pgdoctor/pull/26)).
 - **`table-vacuum-health`**: retired the `analyze-needed` finding — absorbed by `vacuum-stale` ([#27](https://github.com/emancu/pgdoctor/pull/27)).
+- **`toast-storage`**: retired the `large-toast` finding — absorbed by the merged `toast-ratio`; its ID and 10GB/100GB WARN/FAIL tiers are gone ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 
 ### Changed
 
+- **`toast-storage`**: merged `toast-ratio` and `large-toast` into one informational `toast-ratio` finding listing TOAST-heavy tables (>=50% ratio or >=10GB), sorted by TOAST size desc; it never escalates the report ([#41](https://github.com/emancu/pgdoctor/pull/41)).
+
+- **`toast-storage`**: `compression-algorithm` now counts effective pglz (explicit, or unset while `default_toast_compression` is pglz) and moves its big-TOAST itemization to `--detail debug` ([#41](https://github.com/emancu/pgdoctor/pull/41)).
 - **check**: renamed `SeverityOK` to `SeverityPass` — breaking for library consumers ([#19](https://github.com/emancu/pgdoctor/pull/19)).
 - **`cache-efficiency`**: `cache-hit-ratio` is now informational, no longer escalates the report, and reports only below a 60% cache-hit ratio ([#37](https://github.com/emancu/pgdoctor/pull/37)).
 - **`cache-efficiency`**: `index-cache-ratio` moved from `index-usage`; the old `index-usage/index-cache-ratio` finding ID is retired — consumers must switch to `cache-efficiency/index-cache-ratio` ([#37](https://github.com/emancu/pgdoctor/pull/37)).

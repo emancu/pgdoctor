@@ -2417,6 +2417,18 @@ func (q *Queries) TempUsage(ctx context.Context) (TempUsageRow, error) {
 	return i, err
 }
 
+const toastDefaultCompression = `-- name: ToastDefaultCompression :one
+SELECT current_setting('default_toast_compression', true)::text AS default_toast_compression
+`
+
+// PG14+ GUC; the safe form returns NULL where it does not exist.
+func (q *Queries) ToastDefaultCompression(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, toastDefaultCompression)
+	var default_toast_compression string
+	err := row.Scan(&default_toast_compression)
+	return default_toast_compression, err
+}
+
 const toastStorage = `-- name: ToastStorage :many
 WITH toast_info AS (
   SELECT
@@ -2530,6 +2542,7 @@ SELECT
     )
     , ARRAY[]::text []
   ) AS column_compression_info
+  -- PG14+ GUC; safe form returns NULL on PG13 where it does not exist
 FROM toast_info AS ti
 ORDER BY ti.toast_size DESC
 `

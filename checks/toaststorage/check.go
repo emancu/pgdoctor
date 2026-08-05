@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/emancu/pgdoctor/check"
@@ -20,6 +21,7 @@ var readme string
 // ToastStorageQueries defines the database queries needed by this check.
 type ToastStorageQueries interface {
 	ToastStorage(context.Context) ([]db.ToastStorageRow, error)
+	ToastDefaultCompression(context.Context) (string, error)
 }
 
 type checker struct {
@@ -27,14 +29,16 @@ type checker struct {
 }
 
 const (
-	toastRatioFailPercent = 80
-	toastRatioWarnPercent = 50
-
-	toastSizeFailBytes = int64(100 * check.GiB) // 100GB
-	toastSizeWarnBytes = int64(10 * check.GiB)  // 10GB
+	toastHeavyPercent = 50
+	toastHeavyBytes   = int64(10 * check.GiB)
 
 	wideColumnJSONBThreshold = 5000  // 5KB
 	wideColumnTextThreshold  = 10000 // 10KB
+
+	compressionToastFloorBytes = int64(check.GiB) // itemize only tables with TOAST > 1GiB
+
+	compressionPglz = "pglz"
+	compressionLz4  = "lz4"
 )
 
 func Metadata() check.Metadata {
@@ -66,6 +70,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("failed to analyze TOAST storage: %w", err)
 	}
 
+	defaultCompression := c.fetchDefaultCompression(ctx)
+	checkCompressionDefaultFinding(ctx, defaultCompression, report)
+
 	if len(rows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
@@ -77,13 +84,31 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	}
 
 	// Run all subchecks
-	checkExcessiveToastRatio(rows, report)
-	checkLargeToastTables(rows, report)
+	checkToastHeavy(rows, report)
 	checkToastBloat(rows, report)
 	checkWideColumns(rows, report)
-	checkCompressionAlgorithm(ctx, rows, report)
+	checkCompressionAlgorithm(ctx, rows, defaultCompression, report)
 
 	return report, nil
+}
+
+// fetchDefaultCompression reads the cluster GUC, defaulting to pglz when unavailable.
+func (c *checker) fetchDefaultCompression(ctx context.Context) string {
+	guc, err := c.queries.ToastDefaultCompression(ctx)
+	if err != nil || guc == "" {
+		return compressionPglz
+	}
+	return guc
+}
+
+// pgMajor extracts the PostgreSQL major version from context metadata, defaulting to 14.
+func pgMajor(ctx context.Context) int {
+	meta := check.InstanceMetadataFromContext(ctx)
+	major := 14
+	if meta != nil && meta.EngineVersion != "" {
+		_, _ = fmt.Sscanf(meta.EngineVersion, "%d", &major)
+	}
+	return major
 }
 
 // getToastPercent extracts TOAST percentage from pgtype.Numeric.
@@ -95,127 +120,49 @@ func getToastPercent(row db.ToastStorageRow) float64 {
 	return f.Float64
 }
 
-// checkExcessiveToastRatio identifies tables where TOAST dominates storage.
-func checkExcessiveToastRatio(rows []db.ToastStorageRow, report *check.Report) {
-	var critical []db.ToastStorageRow
-	var warning []db.ToastStorageRow
+// checkToastHeavy lists tables where TOAST dominates by ratio or absolute size; informational only.
+func checkToastHeavy(rows []db.ToastStorageRow, report *check.Report) {
+	var heavy []db.ToastStorageRow
 
 	for _, row := range rows {
-		pct := getToastPercent(row)
-		if pct >= toastRatioFailPercent {
-			critical = append(critical, row)
-		} else if pct >= toastRatioWarnPercent {
-			warning = append(warning, row)
+		if getToastPercent(row) >= toastHeavyPercent || row.ToastSize.Int64 >= toastHeavyBytes {
+			heavy = append(heavy, row)
 		}
 	}
 
-	if len(critical) == 0 && len(warning) == 0 {
+	if len(heavy) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "toast-ratio",
-			Name:     "TOAST Storage Ratio",
+			Name:     "TOAST-Heavy Tables",
 			Severity: check.SeverityPass,
-			Details:  "All tables have acceptable TOAST ratios (<50%)",
+			Details:  "No TOAST-heavy tables (>50% ratio or >10GB)",
 		})
 		return
 	}
 
-	headers := []string{"Table", "TOAST %", "TOAST Size", "Main Size", "Total"}
+	sort.SliceStable(heavy, func(i, j int) bool { return heavy[i].ToastSize.Int64 > heavy[j].ToastSize.Int64 })
+
+	headers := []string{"TOAST Size", "TOAST %", "Main Size", "Total", "Table"}
 	var tableRows []check.TableRow
 
-	for _, row := range critical {
+	for _, row := range heavy {
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
 				check.FormatBytes(row.ToastSize.Int64),
+				fmt.Sprintf("%.1f%%", getToastPercent(row)),
 				check.FormatBytes(row.MainTableSize.Int64),
 				check.FormatBytes(row.TotalSize.Int64),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
 				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
-				check.FormatBytes(row.ToastSize.Int64),
-				check.FormatBytes(row.MainTableSize.Int64),
-				check.FormatBytes(row.TotalSize.Int64),
 			},
-			Severity: check.SeverityWarn,
+			Severity: check.SeverityInfo,
 		})
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "toast-ratio",
-		Name:     "TOAST Storage Ratio",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with high TOAST storage ratio (>50%%)", len(critical)+len(warning)),
-		Table: &check.Table{
-			Headers: headers,
-			Rows:    tableRows,
-		},
-	})
-}
-
-// checkLargeToastTables identifies tables with very large TOAST storage.
-func checkLargeToastTables(rows []db.ToastStorageRow, report *check.Report) {
-	var critical []db.ToastStorageRow
-	var warning []db.ToastStorageRow
-
-	for _, row := range rows {
-		toastSize := row.ToastSize.Int64
-		if toastSize >= toastSizeFailBytes {
-			critical = append(critical, row)
-		} else if toastSize >= toastSizeWarnBytes {
-			warning = append(warning, row)
-		}
-	}
-
-	if len(critical) == 0 && len(warning) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "large-toast",
-			Name:     "Large TOAST Tables",
-			Severity: check.SeverityPass,
-			Details:  "No tables with very large TOAST storage (>10GB)",
-		})
-		return
-	}
-
-	headers := []string{"Table", "TOAST Size", "TOAST %", "Wide Columns"}
-	var tableRows []check.TableRow
-
-	for _, row := range critical {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				check.FormatBytes(row.ToastSize.Int64),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
-				formatWideColumns(row.WideColumns),
-			},
-			Severity: check.SeverityFail,
-		})
-	}
-
-	for _, row := range warning {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String),
-				check.FormatBytes(row.ToastSize.Int64),
-				fmt.Sprintf("%.1f%%", getToastPercent(row)),
-				formatWideColumns(row.WideColumns),
-			},
-			Severity: check.SeverityWarn,
-		})
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "large-toast",
-		Name:     "Large TOAST Tables",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with very large TOAST storage", len(critical)+len(warning)),
+		Name:     "TOAST-Heavy Tables",
+		Severity: check.SeverityInfo,
+		Details:  fmt.Sprintf("Found %d TOAST-heavy table(s) (>50%% ratio or >10GB)", len(heavy)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,
@@ -401,31 +348,31 @@ func checkWideColumns(rows []db.ToastStorageRow, report *check.Report) {
 	})
 }
 
-// checkCompressionAlgorithm identifies columns using suboptimal compression (pglz instead of lz4).
-func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, report *check.Report) {
-	// Check PostgreSQL version - LZ4 compression is only available in PG14+
-	meta := check.InstanceMetadataFromContext(ctx)
-	pgVersion := 14 // Default assumption
-	if meta != nil && meta.EngineVersion != "" {
-		// Parse major version from "15.4" or "17.0"
-		_, _ = fmt.Sscanf(meta.EngineVersion, "%d", &pgVersion)
+// effectiveCompression resolves a column's on-disk method: explicit wins, unset falls back to the GUC.
+func effectiveCompression(algo string, defaultIsLz4 bool) string {
+	switch algo {
+	case compressionLz4:
+		return compressionLz4
+	case compressionPglz:
+		return compressionPglz
+	default:
+		if defaultIsLz4 {
+			return compressionLz4
+		}
+		return compressionPglz
 	}
+}
 
-	// If PG < 14, skip this check
-	if pgVersion < 14 {
+// checkCompressionAlgorithm counts columns effectively on pglz; itemization lives in Debug.
+func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, defaultCompression string, report *check.Report) {
+	if pgMajor(ctx) < 14 {
 		return
 	}
 
-	type compressionIssue struct {
-		tableName          string
-		columnName         string
-		currentCompression string
-		storageStrategy    string
-		columnType         string
-		recommendedAction  string
-	}
+	defaultIsLz4 := defaultCompression == compressionLz4
 
-	var suboptimalColumns []compressionIssue
+	pglzColumns := 0
+	tablesWithPglz := map[string]struct{}{}
 
 	for _, row := range rows {
 		tableName := fmt.Sprintf("%s.%s", row.SchemaName.String, row.TableName.String)
@@ -436,93 +383,101 @@ func checkCompressionAlgorithm(ctx context.Context, rows []db.ToastStorageRow, r
 				continue
 			}
 
-			colName := parts[0]
-			compressionAlgo := parts[1]
-			storageStrategy := parts[2]
-			colType := parts[3]
-
-			// Flag columns using default (pglz) or explicitly set to pglz
-			// LZ4 is better for jsonb, text, and most use cases
-			if compressionAlgo == "default" || compressionAlgo == "pglz" {
-				action := "SET COMPRESSION lz4"
-				if colType == "bytea" && storageStrategy == "EXTENDED" {
-					// For binary data, consider EXTERNAL (no compression)
-					action = "Consider SET STORAGE EXTERNAL (if pre-compressed data)"
-				}
-
-				suboptimalColumns = append(suboptimalColumns, compressionIssue{
-					tableName:          tableName,
-					columnName:         colName,
-					currentCompression: compressionAlgo,
-					storageStrategy:    storageStrategy,
-					columnType:         colType,
-					recommendedAction:  action,
-				})
+			if effectiveCompression(parts[1], defaultIsLz4) != compressionPglz {
+				continue
 			}
+
+			pglzColumns++
+			tablesWithPglz[tableName] = struct{}{}
 		}
 	}
 
-	if len(suboptimalColumns) == 0 {
+	debug := bigToastCompressionDebug(rows, defaultIsLz4)
+
+	if pglzColumns == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "compression-algorithm",
 			Name:     "TOAST Compression Algorithm",
 			Severity: check.SeverityPass,
 			Details:  "All columns are using optimal compression settings (LZ4 or appropriate strategy)",
+			Debug:    debug,
 		})
 		return
-	}
-
-	headers := []string{"Table", "Column", "Type", "Current", "Storage", "Recommendation"}
-	var tableRows []check.TableRow
-
-	for _, issue := range suboptimalColumns {
-		tableRows = append(tableRows, check.TableRow{
-			Cells: []string{
-				issue.tableName,
-				issue.columnName,
-				issue.columnType,
-				issue.currentCompression,
-				issue.storageStrategy,
-				issue.recommendedAction,
-			},
-			Severity: check.SeverityWarn,
-		})
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       "compression-algorithm",
 		Name:     "TOAST Compression Algorithm",
-		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d column(s) using suboptimal compression (pglz instead of lz4)", len(suboptimalColumns)),
-		Table: &check.Table{
-			Headers: headers,
-			Rows:    tableRows,
-		},
+		Severity: check.SeverityInfo,
+		Details:  fmt.Sprintf("%d column(s) on %d table(s) use pglz compression", pglzColumns, len(tablesWithPglz)),
+		Debug:    debug,
 	})
 }
 
-// Helper functions
-
-func formatWideColumns(cols []string) string {
-	if len(cols) == 0 {
-		return "-"
+// bigToastCompressionDebug lists >1GiB columns with their effective method, keeping pglz residue visible after a flip.
+func bigToastCompressionDebug(rows []db.ToastStorageRow, defaultIsLz4 bool) string {
+	type entry struct {
+		toastSize int64
+		effective string
+		name      string
 	}
 
-	// Extract just column names
-	var names []string
-	for _, col := range cols {
-		parts := strings.Split(col, ":")
-		if len(parts) >= 1 {
-			names = append(names, parts[0])
+	var entries []entry
+	for _, row := range rows {
+		if row.ToastSize.Int64 <= compressionToastFloorBytes {
+			continue
 		}
-		if len(names) >= 3 {
-			break
+		for _, compInfo := range row.ColumnCompressionInfo {
+			parts := strings.Split(compInfo, ":")
+			if len(parts) != 4 {
+				continue
+			}
+			effective := effectiveCompression(parts[1], defaultIsLz4)
+			if parts[2] == "EXTERNAL" {
+				effective = "external"
+			}
+			entries = append(entries, entry{
+				toastSize: row.ToastSize.Int64,
+				effective: effective,
+				name:      fmt.Sprintf("%s.%s.%s", row.SchemaName.String, row.TableName.String, parts[0]),
+			})
 		}
 	}
 
-	result := strings.Join(names, ", ")
-	if len(cols) > 3 {
-		result += fmt.Sprintf(" (+%d more)", len(cols)-3)
+	if len(entries) == 0 {
+		return ""
 	}
-	return result
+
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].toastSize > entries[j].toastSize })
+
+	var b strings.Builder
+	b.WriteString("Big-TOAST columns (>1GiB, effective compression for new writes):")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "\n#  %-8s effective %-4s  %s", check.FormatBytes(e.toastSize), e.effective, e.name)
+	}
+	return b.String()
+}
+
+// checkCompressionDefault flags a cluster default_toast_compression that is not lz4.
+func checkCompressionDefaultFinding(ctx context.Context, current string, report *check.Report) {
+	if pgMajor(ctx) < 14 {
+		return
+	}
+
+	if current == compressionLz4 {
+		report.AddFinding(check.Finding{
+			ID:       "compression-default",
+			Name:     "Default TOAST Compression",
+			Severity: check.SeverityPass,
+			Details:  "default_toast_compression is lz4",
+		})
+		return
+	}
+
+	report.AddFinding(check.Finding{
+		ID:       "compression-default",
+		Name:     "Default TOAST Compression",
+		Severity: check.SeverityWarn,
+		Details:  fmt.Sprintf("default_toast_compression is %s; set it to lz4 in the parameter group (new writes only, no DDL)", current),
+	})
 }
