@@ -17,9 +17,6 @@ via the `table-vacuum-health` check.
 Identifies large tables where bloat wastes significant disk space:
 - **WARN**: Tables >10GB with >20% dead tuples, or >1GB with >10% dead tuples
 
-Bloat on a large table is chronic wasted disk and slower scans, but it never
-stops the database, so this finding stays WARN and never pages.
-
 ## Why This Matters
 
 Table bloat causes:
