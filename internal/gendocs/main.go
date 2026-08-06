@@ -51,6 +51,7 @@ func run() error {
 	// Gather check metadata from the Go runtime
 	allChecks := pgdoctor.AllChecks()
 	manifest := checksManifest{Checks: make([]checkEntry, 0, len(allChecks))}
+	generated := make(map[string]bool, len(allChecks))
 
 	for _, pkg := range allChecks {
 		meta := pkg.Metadata()
@@ -63,10 +64,17 @@ func run() error {
 		})
 
 		// Write individual README markdown
-		mdPath := filepath.Join(checksDir, meta.CheckID+".md")
+		mdName := meta.CheckID + ".md"
+		generated[mdName] = true
+
+		mdPath := filepath.Join(checksDir, mdName)
 		if err := os.WriteFile(mdPath, []byte(meta.Readme), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", mdPath, err)
 		}
+	}
+
+	if err := pruneStaleDocs(checksDir, generated); err != nil {
+		return fmt.Errorf("pruning stale check docs: %w", err)
 	}
 
 	// Write checks.json manifest
@@ -93,6 +101,34 @@ func run() error {
 	}
 
 	fmt.Fprintf(os.Stdout, "✓ Generated docs/ with %d checks\n", len(allChecks))
+	return nil
+}
+
+// pruneStaleDocs removes docs/checks/*.md files that no current check produced.
+//
+// Generation used to only ever write, so deleting or renaming a check left its
+// markdown behind indefinitely. docs/index.html fetches checks/<id>.md by name, so
+// an orphan stays reachable and serves documentation for a check that no longer
+// exists — which is how docs/checks/dev-indexes.md outlived its removal.
+func pruneStaleDocs(checksDir string, generated map[string]bool) error {
+	entries, err := os.ReadDir(checksDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".md" || generated[name] {
+			continue
+		}
+
+		if err := os.Remove(filepath.Join(checksDir, name)); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(os.Stdout, "  removed stale docs/checks/%s\n", name)
+	}
+
 	return nil
 }
 
