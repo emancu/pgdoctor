@@ -16,6 +16,11 @@ var querySQL string
 //go:embed README.md
 var readme string
 
+// minWindowSeconds is the shortest counter window that yields a meaningful
+// per-hour rate. Below an hour the denominator is small enough that a single
+// query's temp file skews the rate into the FAIL band.
+const minWindowSeconds = 3600
+
 // TempUsageQueries defines the database queries needed by this check.
 type TempUsageQueries interface {
 	TempUsage(context.Context) (db.TempUsageRow, error)
@@ -54,16 +59,18 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
-	// Check if we have enough data (at least 1 hour since stats reset)
-	secondsSinceReset := getSecondsSinceReset(row)
-	if secondsSinceReset < 3600 {
-		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
-			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Statistics reset too recently (%.0f minutes ago). Need at least 1 hour of data.", secondsSinceReset/60),
-		})
-		return report, nil
+	// Both findings below are rates derived from the counter window, so without a
+	// usable window there is nothing to divide by. Skip rather than pass: a bare
+	// PASS reads as "no temp file problem", which is not what we know.
+	window, windowKnown := statsWindowSeconds(row)
+	switch {
+	case !windowKnown:
+		return skip(report, "Counter window unknown (pg_stat_database.stats_reset is NULL); temp file rates cannot be computed."), nil
+	case window < minWindowSeconds:
+		return skip(report, fmt.Sprintf(
+			"Counters cover only %s; need at least 1h of data to compute temp file rates.",
+			check.FormatDurationSec(int64(window)),
+		)), nil
 	}
 
 	// Run all subchecks
@@ -73,12 +80,38 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-func getSecondsSinceReset(row db.TempUsageRow) float64 {
+// skip marks the whole report unrunnable. The runner injects SeveritySkip when
+// Check returns an error, but an unusable stats window is not an error: the query
+// succeeded and simply carried nothing to measure over. Setting it here keeps our
+// own wording instead of surfacing a raw error string. AddFinding only raises
+// severity, so the assignment has to follow it.
+func skip(report *check.Report, reason string) *check.Report {
+	report.AddFinding(check.Finding{
+		ID:       report.CheckID,
+		Name:     report.Name,
+		Severity: check.SeveritySkip,
+		Details:  reason,
+	})
+	report.Severity = check.SeveritySkip
+
+	return report
+}
+
+// statsWindowSeconds reports how long the counters have been accumulating, and
+// whether that period is known at all. A NULL stats_reset does not mean "since the
+// beginning of time": an unclean shutdown or a fresh replica also zeroes the
+// counters, and neither records a timestamp.
+func statsWindowSeconds(row db.TempUsageRow) (float64, bool) {
 	if !row.SecondsSinceReset.Valid {
-		return 0
+		return 0, false
 	}
-	f, _ := row.SecondsSinceReset.Float64Value()
-	return f.Float64
+
+	f, err := row.SecondsSinceReset.Float64Value()
+	if err != nil || !f.Valid {
+		return 0, false
+	}
+
+	return f.Float64, true
 }
 
 func getTempFilesPerHour(row db.TempUsageRow) float64 {

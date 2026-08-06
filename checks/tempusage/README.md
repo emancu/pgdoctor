@@ -18,6 +18,19 @@ Monitors the volume of temp data written:
 - **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
 
+### When This Check Skips
+
+Both findings are per-hour rates measured over the window since
+`pg_stat_database.stats_reset`, so the check reports SKIP rather than PASS when that
+window cannot carry a rate:
+
+- **Window unknown** — `stats_reset` is NULL. This is not the same as "counters have
+  run forever": an unclean shutdown, a crash, or a freshly built replica also zeroes
+  the counters, and none of them records a reset timestamp. A clean restart, by
+  contrast, preserves counters on PostgreSQL 15+.
+- **Window under 1 hour** — the denominator is small enough that a single query's
+  temp file would skew the rate into the FAIL band.
+
 ## Why This Matters
 
 Temporary files are created when PostgreSQL operations exceed `work_mem`:

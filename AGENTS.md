@@ -288,7 +288,7 @@ Five categories:
 ### Severity
 
 - `check.SeverityInfo` - Relevant information, no action expected
-- `check.SeveritySkip` - Check could not run (timeout, permission error); runner-injected on error, never set by a check
+- `check.SeveritySkip` - Check could not run. Injected by the runner when `Check` returns an error (timeout, permission error), or set by a check that ran cleanly but cannot compute its result (e.g. a rate whose observation window is unknown)
 - `check.SeverityPass` - Check passed, no action needed
 - `check.SeverityWarn` - Issue found, non-urgent action
 - `check.SeverityFail` - Issue found, urgent action required
@@ -486,7 +486,7 @@ Each contrib check creates its own sqlc queries internally, using the `check.DBT
 | INFO | A signal worth surfacing that demands no action — inventory-style findings renderers hide by default | Tables with FULL replica identity (inventory), per-index cache hit ratios (confounded by OS page cache), extension version inventory |
 | PASS | Everything is fine | Always report at least one PASS finding per check |
 
-`SKIP` is never author-assigned: the runner injects it when a check errors (timeout, permission, missing extension), so it is absent from this authoring guide.
+`SKIP` is mostly runner-injected: it appears automatically when a check errors (timeout, permission, missing extension). A check may also assign it deliberately when it ran cleanly but cannot produce a result — for example when a rate's observation window is unknown. Prefer that over a PASS, which claims the check looked and found nothing wrong. Assign it by setting `report.Severity = check.SeveritySkip` *after* adding the finding, since `AddFinding` only raises severity and `SeveritySkip` sorts below `SeverityPass`.
 
 **Rule of thumb:** If a DBA would page someone at 3am, it's a FAIL. If it should go in the sprint backlog, it's a WARN.
 

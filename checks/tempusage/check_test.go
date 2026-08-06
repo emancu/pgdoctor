@@ -82,13 +82,34 @@ func TestTempUsage_StatsResetTooRecent(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
-			assert.Equal(t, check.SeverityPass, report.Severity)
+			assert.Equal(t, check.SeveritySkip, report.Severity)
 			assert.Len(t, report.Results, 1)
 			assert.Equal(t, "temp-usage", report.Results[0].ID)
-			assert.Contains(t, report.Results[0].Details, "Statistics reset too recently")
-			assert.Contains(t, report.Results[0].Details, "Need at least 1 hour of data")
+			assert.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+			assert.Contains(t, report.Results[0].Details, "need at least 1h of data")
 		})
 	}
+}
+
+// A NULL stats_reset carries no window at all, which is a different state from a
+// window that is merely short: the counters may have been zeroed by an unclean
+// shutdown or belong to a fresh replica. It must not read as a passing check.
+func TestTempUsage_UnknownWindow(t *testing.T) {
+	t.Parallel()
+
+	row := makeTempUsageRow(100, 1000000, 0, 10.0, 100000.0, nil)
+	row.SecondsSinceReset = pgtype.Numeric{Valid: false}
+
+	queryer := &mockQueryer{row: row}
+	checker := tempusage.New(queryer)
+
+	report, err := checker.Check(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, check.SeveritySkip, report.Severity)
+	require.Len(t, report.Results, 1)
+	assert.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+	assert.Contains(t, report.Results[0].Details, "Counter window unknown")
 }
 
 func TestTempUsage_AllHealthy(t *testing.T) {
@@ -383,10 +404,10 @@ func TestTempUsage_InvalidNumeric(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
-	// Should treat invalid numerics as 0 and report stats too recent
-	assert.Equal(t, check.SeverityPass, report.Severity)
+	// An unreadable seconds_since_reset leaves the window unknown, same as NULL.
+	assert.Equal(t, check.SeveritySkip, report.Severity)
 	assert.Len(t, report.Results, 1)
-	assert.Contains(t, report.Results[0].Details, "Statistics reset too recently")
+	assert.Contains(t, report.Results[0].Details, "Counter window unknown")
 }
 
 func TestTempUsage_Metadata(t *testing.T) {
