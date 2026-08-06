@@ -77,9 +77,18 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 	// For single-finding checks, fold the details into the header line
 	if singleFinding {
 		result := report.Results[0]
+
+		// A finding may carry a title of its own, which is how a check states a
+		// fact that has to stay visible at PASS severity — Details are dropped
+		// below. Checks that don't set one reuse the check's name.
+		title := report.Name
+		if result.Name != "" {
+			title = result.Name
+		}
+
 		fmt.Fprintf(w, "%s %s %s%s\n",
 			colorFunc(fmt.Sprintf("[%s]", label)),
-			report.Name,
+			title,
 			dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 			timingStr)
 		if result.Severity != check.SeverityPass && result.Details != "" {

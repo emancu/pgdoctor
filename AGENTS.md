@@ -209,7 +209,7 @@ Filtering happens at the runner level (`pgdoctor.go`):
 
 Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):
 
-- Use the dedicated `statistics-freshness` check to validate stats maturity
+- Use the dedicated `db-statistics` check to report the window counters cover
 - Add a note in your README indicating the check depends on statistics
 - Avoid CROSS JOINs with `pg_stat_database` for stats age
 
@@ -217,6 +217,11 @@ Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):
 - `index-usage` - Uses `pg_stat_user_indexes` for scan counts
 - `table-seq-scans` - Uses `pg_stat_user_tables` for scan ratios
 - `cache-efficiency` - Uses `pg_stat_database` for cache hit ratios
+- `temp-usage` - Divides `pg_stat_database` temp totals by the window
+
+Note there are two independent clocks. `pg_stat_reset()` and
+`pg_stat_statements_reset()` are unrelated, so a check reading
+`pg_stat_statements` measures over a different window than the four above.
 
 ### Instance Metadata Context
 

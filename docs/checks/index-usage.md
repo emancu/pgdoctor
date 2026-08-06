@@ -2,7 +2,7 @@
 
 Analyzes index usage patterns to identify unused and inefficient indexes that waste disk space and slow down write operations.
 
-> **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `statistics-freshness` check to validate statistics maturity.
+> **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `db-statistics` check to see the window they cover.
 
 ## What It Checks
 

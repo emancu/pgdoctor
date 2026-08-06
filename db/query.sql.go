@@ -107,6 +107,35 @@ func (q *Queries) ConnectionStats(ctx context.Context) (ConnectionStatsRow, erro
 	return i, err
 }
 
+const dBStatistics = `-- name: DBStatistics :one
+SELECT
+  stats_reset
+  , coalesce(
+    extract(EPOCH FROM (now() - stats_reset)) / 86400
+    , 999
+  )::int AS age_days
+  , (now() - stats_reset) AS age_interval
+FROM pg_stat_database
+WHERE datname = current_database()
+`
+
+type DBStatisticsRow struct {
+	StatsReset  pgtype.Timestamptz
+	AgeDays     pgtype.Int4
+	AgeInterval pgtype.Interval
+}
+
+// Returns the cumulative statistics reset timestamp for the current database.
+// Every usage-based check measures over the window since this point.
+// NULL means no explicit reset was recorded, which does not imply a long window:
+// an unclean shutdown or a rebuilt replica also zeroes counters without a stamp.
+func (q *Queries) DBStatistics(ctx context.Context) (DBStatisticsRow, error) {
+	row := q.db.QueryRow(ctx, dBStatistics)
+	var i DBStatisticsRow
+	err := row.Scan(&i.StatsReset, &i.AgeDays, &i.AgeInterval)
+	return i, err
+}
+
 const databaseCacheEfficiency = `-- name: DatabaseCacheEfficiency :one
 SELECT
   blks_hit
@@ -1979,33 +2008,6 @@ func (q *Queries) SessionStatistics(ctx context.Context) (SessionStatisticsRow, 
 		&i.SessionsFatal,
 		&i.SessionsKilled,
 	)
-	return i, err
-}
-
-const statisticsFreshness = `-- name: StatisticsFreshness :one
-SELECT
-  stats_reset
-  , coalesce(
-    extract(EPOCH FROM (now() - stats_reset)) / 86400
-    , 999
-  )::int AS age_days
-  , (now() - stats_reset) AS age_interval
-FROM pg_stat_database
-WHERE datname = current_database()
-`
-
-type StatisticsFreshnessRow struct {
-	StatsReset  pgtype.Timestamptz
-	AgeDays     pgtype.Int4
-	AgeInterval pgtype.Interval
-}
-
-// Returns statistics age for the current database.
-// Use to validate stats are meaningful before relying on usage-based checks.
-func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessRow, error) {
-	row := q.db.QueryRow(ctx, statisticsFreshness)
-	var i StatisticsFreshnessRow
-	err := row.Scan(&i.StatsReset, &i.AgeDays, &i.AgeInterval)
 	return i, err
 }
 

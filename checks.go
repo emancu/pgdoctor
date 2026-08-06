@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionhealth"
+	"github.com/emancu/pgdoctor/checks/dbstatistics"
 	"github.com/emancu/pgdoctor/checks/duplicateindexes"
 	"github.com/emancu/pgdoctor/checks/extensionversions"
 	"github.com/emancu/pgdoctor/checks/freezeage"
@@ -22,7 +23,6 @@ import (
 	"github.com/emancu/pgdoctor/checks/replicationslots"
 	"github.com/emancu/pgdoctor/checks/sequencehealth"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
-	"github.com/emancu/pgdoctor/checks/statisticsfreshness"
 	"github.com/emancu/pgdoctor/checks/tableactivity"
 	"github.com/emancu/pgdoctor/checks/tablebloat"
 	"github.com/emancu/pgdoctor/checks/tableseqscans"
@@ -55,6 +55,12 @@ func AllChecks() []check.Package {
 			Metadata: connectionhealth.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return connectionhealth.New(db.New(conn), cfg)
+			},
+		},
+		{
+			Metadata: dbstatistics.Metadata,
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return dbstatistics.New(db.New(conn), cfg)
 			},
 		},
 		{
@@ -139,12 +145,6 @@ func AllChecks() []check.Package {
 			Metadata: sessionsettings.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return sessionsettings.New(db.New(conn), cfg)
-			},
-		},
-		{
-			Metadata: statisticsfreshness.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return statisticsfreshness.New(db.New(conn), cfg)
 			},
 		},
 		{

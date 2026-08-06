@@ -19,6 +19,12 @@
       "description": "Monitors connection pool saturation, idle ratios, and stuck transactions"
     },
     {
+      "id": "db-statistics",
+      "name": "DB Statistics",
+      "category": "configs",
+      "description": "Reports how long database counters have been accumulating for usage-based analysis"
+    },
+    {
       "id": "duplicate-indexes",
       "name": "Duplicate Indexes",
       "category": "indexes",
@@ -101,12 +107,6 @@
       "name": "PostgreSQL Session Configs",
       "category": "configs",
       "description": "Validates role-level timeout and logging configurations"
-    },
-    {
-      "id": "statistics-freshness",
-      "name": "Statistics Freshness",
-      "category": "configs",
-      "description": "Validates PostgreSQL statistics are mature enough for usage-based analysis"
     },
     {
       "id": "table-activity",

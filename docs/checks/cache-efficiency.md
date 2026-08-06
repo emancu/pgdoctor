@@ -2,7 +2,7 @@
 
 Analyzes database-wide buffer cache hit ratio to identify memory pressure and I/O bottlenecks.
 
-> **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `statistics-freshness` check to validate statistics maturity.
+> **Note**: This check depends on PostgreSQL runtime statistics. For accurate results, statistics should be at least 7 days old. Run the `db-statistics` check to see the window they cover.
 
 ## What It Checks
 

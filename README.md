@@ -108,7 +108,7 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `connection-efficiency` | Session statistics for connection pool efficiency (PG 14+) |
 | `replication-lag` | Active replication stream lag |
 | `temp-usage` | Temporary file creation indicating `work_mem` exhaustion |
-| `statistics-freshness` | Statistics maturity for usage-based analysis |
+| `db-statistics` | Window database counters cover, for usage-based analysis |
 
 ### indexes
 | Check | Description |
