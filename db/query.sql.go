@@ -1272,11 +1272,13 @@ SELECT
   , EXISTS (
     SELECT 1 FROM pg_catalog.pg_extension AS e WHERE e.extname = 'pg_stat_statements'
   ) AS is_installed
+  , (to_regclass('pg_stat_statements_info') IS NOT NULL) AS is_reachable
 `
 
 type QueryStatisticsAvailabilityRow struct {
 	IsLoaded    bool
 	IsInstalled bool
+	IsReachable pgtype.Bool
 }
 
 // Distinguishes the three ways pg_stat_statements can be half-present.
@@ -1286,10 +1288,14 @@ type QueryStatisticsAvailabilityRow struct {
 // CREATE EXTENSION has run. Both catalogs are world-readable; shared_preload_libraries
 // is GUC_SUPERUSER_ONLY and is silently omitted from pg_settings for unprivileged
 // roles, so it must not be used to answer this.
+// is_reachable covers CREATE EXTENSION ... SCHEMA <s> where <s> is outside the
+// connection's search_path: the view exists but an unqualified read raises 42P01.
+// to_regclass resolves through search_path and returns NULL instead of erroring,
+// so it answers this without a schema-qualified identifier sqlc could not express.
 func (q *Queries) QueryStatisticsAvailability(ctx context.Context) (QueryStatisticsAvailabilityRow, error) {
 	row := q.db.QueryRow(ctx, queryStatisticsAvailability)
 	var i QueryStatisticsAvailabilityRow
-	err := row.Scan(&i.IsLoaded, &i.IsInstalled)
+	err := row.Scan(&i.IsLoaded, &i.IsInstalled, &i.IsReachable)
 	return i, err
 }
 

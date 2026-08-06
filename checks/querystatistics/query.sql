@@ -6,13 +6,18 @@
 -- CREATE EXTENSION has run. Both catalogs are world-readable; shared_preload_libraries
 -- is GUC_SUPERUSER_ONLY and is silently omitted from pg_settings for unprivileged
 -- roles, so it must not be used to answer this.
+-- is_reachable covers CREATE EXTENSION ... SCHEMA <s> where <s> is outside the
+-- connection's search_path: the view exists but an unqualified read raises 42P01.
+-- to_regclass resolves through search_path and returns NULL instead of erroring,
+-- so it answers this without a schema-qualified identifier sqlc could not express.
 SELECT
   EXISTS (
     SELECT 1 FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.max'
   ) AS is_loaded
   , EXISTS (
     SELECT 1 FROM pg_catalog.pg_extension AS e WHERE e.extname = 'pg_stat_statements'
-  ) AS is_installed;
+  ) AS is_installed
+  , (to_regclass('pg_stat_statements_info') IS NOT NULL) AS is_reachable;
 
 -- name: QueryStatisticsWindow :one
 -- Raises "pg_stat_statements must be loaded via shared_preload_libraries" when the

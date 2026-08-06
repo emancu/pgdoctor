@@ -23,18 +23,25 @@ normal.
 
 `pg_stat_statements` has a half-installed state that is easy to miss:
 
-| `pg_stat_statements.max` GUC | `pg_extension` row | Reported as |
-|---|---|---|
-| absent | absent | Not installed (PASS) |
-| absent | present | **Not loaded (WARN)** |
-| present | absent | Not created in this database (PASS) |
-| present | present | The window, in the title (PASS) |
+| `pg_stat_statements.max` GUC | `pg_extension` row | Views reachable | Reported as |
+|---|---|---|---|
+| absent | absent | — | Not installed (PASS) |
+| absent | present | — | **Not loaded (WARN)** |
+| present | absent | — | Not created in this database (PASS) |
+| present | present | no | **Outside search_path (WARN)** |
+| present | present | yes | The window, in the title (PASS) |
 
 `CREATE EXTENSION pg_stat_statements` succeeds even when the library is not in
 `shared_preload_libraries`, but every subsequent read of the views raises
 `ERROR: pg_stat_statements must be loaded via "shared_preload_libraries"`. The
 extension looks installed while producing nothing, and checks that depend on it are
-skipped. That is the only state this check warns about.
+skipped.
+
+The second warning covers `CREATE EXTENSION pg_stat_statements SCHEMA <schema>` where
+that schema is not in the connection's `search_path`. The views exist and are
+collecting data, but an unqualified read raises `42P01`, so the statistics are
+unreachable from this connection. Add the schema to the `search_path` of the role
+pgdoctor connects as.
 
 ## Two Independent Clocks
 

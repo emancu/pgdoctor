@@ -73,6 +73,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return c.report(report, "pg_stat_statements not created in this database", check.SeverityPass,
 			"The library is preloaded but the extension has not been created here. "+
 				"Run CREATE EXTENSION pg_stat_statements to enable query-level statistics."), nil
+
+	// Installed into a schema this connection cannot see. Reading the view would
+	// raise 42P01 and skip the whole check on a raw error string, so stop here and
+	// name the cause instead. sqlc types the probe as nullable even though
+	// "IS NOT NULL" cannot be null; an unreadable result falls through to the read
+	// rather than claiming a misconfiguration we did not observe.
+	case availability.IsReachable.Valid && !availability.IsReachable.Bool:
+		return c.report(report, "pg_stat_statements outside search_path", check.SeverityWarn,
+			"The extension is installed and loaded, but its schema is not in this "+
+				"connection's search_path, so its views cannot be read. Add the schema to "+
+				"the search_path of the role pgdoctor connects as."), nil
 	}
 
 	statsReset, err := c.queries.QueryStatisticsWindow(ctx)

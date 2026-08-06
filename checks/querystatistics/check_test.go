@@ -40,7 +40,11 @@ func (m *mockQueryStatisticsQueryer) QueryStatisticsWindow(context.Context) (pgt
 
 func available(loaded, installed bool) *mockQueryStatisticsQueryer {
 	return &mockQueryStatisticsQueryer{
-		availability: db.QueryStatisticsAvailabilityRow{IsLoaded: loaded, IsInstalled: installed},
+		availability: db.QueryStatisticsAvailabilityRow{
+			IsLoaded:    loaded,
+			IsInstalled: installed,
+			IsReachable: pgtype.Bool{Bool: loaded && installed, Valid: true},
+		},
 	}
 }
 
@@ -106,6 +110,7 @@ func Test_QueryStatistics_Availability(t *testing.T) {
 		Name             string
 		Loaded           bool
 		Installed        bool
+		Reachable        bool
 		ExpectedTitle    string
 		ExpectedSeverity check.Severity
 	}{
@@ -126,6 +131,14 @@ func Test_QueryStatistics_Availability(t *testing.T) {
 			ExpectedTitle:    "Query statistics: pg_stat_statements not created in this database",
 			ExpectedSeverity: check.SeverityPass,
 		},
+		{
+			Name:             "installed into a schema outside search_path",
+			Loaded:           true,
+			Installed:        true,
+			Reachable:        false,
+			ExpectedTitle:    "Query statistics: pg_stat_statements outside search_path",
+			ExpectedSeverity: check.SeverityWarn,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -133,6 +146,7 @@ func Test_QueryStatistics_Availability(t *testing.T) {
 			t.Parallel()
 
 			queryer := available(tc.Loaded, tc.Installed)
+			queryer.availability.IsReachable = pgtype.Bool{Bool: tc.Reachable, Valid: true}
 			result := runCheck(t, queryer)
 
 			require.Equal(t, tc.ExpectedTitle, result.Name)
