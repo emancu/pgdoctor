@@ -1,27 +1,19 @@
 -- name: QueryStatisticsAvailability :one
--- Distinguishes the three ways pg_stat_statements can be half-present.
---
--- The extension's GUCs are only registered when its library is preloaded, so the
--- existence of a pg_stat_statements.max row means "loaded", independent of whether
--- CREATE EXTENSION has run. Both catalogs are world-readable; shared_preload_libraries
--- is GUC_SUPERUSER_ONLY and is silently omitted from pg_settings for unprivileged
--- roles, so it must not be used to answer this.
--- is_reachable covers CREATE EXTENSION ... SCHEMA <s> where <s> is outside the
--- connection's search_path: the view exists but an unqualified read raises 42P01.
--- to_regclass resolves through search_path and returns NULL instead of erroring,
--- so it answers this without a schema-qualified identifier sqlc could not express.
+-- pg_stat_statements registers its GUCs only when preloaded, so a
+-- pg_stat_statements.max row means "loaded". shared_preload_libraries cannot answer
+-- this: it is superuser-only and reads as absent for unprivileged roles.
+-- to_regclass returns NULL instead of erroring when the extension was created in a
+-- schema outside search_path.
 SELECT
-  EXISTS (
-    SELECT 1 FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.max'
-  ) AS is_loaded
-  , EXISTS (
-    SELECT 1 FROM pg_catalog.pg_extension AS e WHERE e.extname = 'pg_stat_statements'
-  ) AS is_installed
+  EXISTS (SELECT 1 FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.max') AS is_loaded
+  , EXISTS (SELECT 1 FROM pg_catalog.pg_extension AS e WHERE e.extname = 'pg_stat_statements') AS is_installed
   , (to_regclass('pg_stat_statements_info') IS NOT NULL) AS is_reachable;
 
 -- name: QueryStatisticsWindow :one
--- Raises "pg_stat_statements must be loaded via shared_preload_libraries" when the
--- extension is created but not preloaded, so call it only once
--- QueryStatisticsAvailability reports both.
-SELECT stats_reset
+-- Separate query because naming pg_stat_statements_info fails to parse when the
+-- extension is absent, even inside a branch that never runs. Call it only after
+-- QueryStatisticsAvailability reports the view is usable.
+SELECT
+  stats_reset
+  , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
 FROM pg_stat_statements_info;

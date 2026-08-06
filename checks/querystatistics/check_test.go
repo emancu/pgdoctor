@@ -16,7 +16,7 @@ import (
 type mockQueryStatisticsQueryer struct {
 	availability     db.QueryStatisticsAvailabilityRow
 	availabilityErr  error
-	statsReset       pgtype.Timestamptz
+	window           db.QueryStatisticsWindowRow
 	statsResetErr    error
 	windowCalledFlag bool
 }
@@ -29,13 +29,13 @@ func (m *mockQueryStatisticsQueryer) QueryStatisticsAvailability(context.Context
 	return m.availability, nil
 }
 
-func (m *mockQueryStatisticsQueryer) QueryStatisticsWindow(context.Context) (pgtype.Timestamptz, error) {
+func (m *mockQueryStatisticsQueryer) QueryStatisticsWindow(context.Context) (db.QueryStatisticsWindowRow, error) {
 	m.windowCalledFlag = true
 	if m.statsResetErr != nil {
-		return pgtype.Timestamptz{}, m.statsResetErr
+		return db.QueryStatisticsWindowRow{}, m.statsResetErr
 	}
 
-	return m.statsReset, nil
+	return m.window, nil
 }
 
 func available(loaded, installed bool) *mockQueryStatisticsQueryer {
@@ -50,7 +50,10 @@ func available(loaded, installed bool) *mockQueryStatisticsQueryer {
 
 func resetAgo(d time.Duration) *mockQueryStatisticsQueryer {
 	m := available(true, true)
-	m.statsReset = pgtype.Timestamptz{Time: time.Now().Add(-d), Valid: true}
+	m.window = db.QueryStatisticsWindowRow{
+		StatsReset: pgtype.Timestamptz{Time: time.Now().Add(-d), Valid: true},
+		AgeSeconds: pgtype.Int8{Int64: int64(d.Seconds()), Valid: true},
+	}
 
 	return m
 }
@@ -161,7 +164,7 @@ func Test_QueryStatistics_NeverReset(t *testing.T) {
 	t.Parallel()
 
 	queryer := available(true, true)
-	queryer.statsReset = pgtype.Timestamptz{Valid: false}
+	queryer.window = db.QueryStatisticsWindowRow{StatsReset: pgtype.Timestamptz{Valid: false}}
 
 	result := runCheck(t, queryer)
 	require.Equal(t, "Query statistics: never reset", result.Name)
