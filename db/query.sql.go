@@ -340,18 +340,26 @@ func (q *Queries) DuplicateIndexes(ctx context.Context) ([]DuplicateIndexesRow, 
 }
 
 const hasPgStatStatements = `-- name: HasPgStatStatements :one
-SELECT EXISTS(
-  SELECT 1 FROM pg_extension
-  WHERE extname = 'pg_stat_statements'
-)
+SELECT
+  EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')
+  AND EXISTS(SELECT 1 FROM pg_settings WHERE name = 'pg_stat_statements.max')
+  AND to_regclass('pg_stat_statements_info') IS NOT NULL
 `
 
-// Checks if pg_stat_statements extension is installed.
-func (q *Queries) HasPgStatStatements(ctx context.Context) (bool, error) {
+// True only when pg_stat_statements can actually be read, not merely when it is
+// installed. CREATE EXTENSION succeeds without the library preloaded, and the
+// extension can be created in a schema outside search_path; in both cases the
+// pg_extension row exists but every read of the views raises an error, which would
+// skip this whole check instead of reporting the warning it already has for this.
+//
+// The extension registers its GUCs only when its library initializes, so a
+// pg_stat_statements.max row means "loaded". to_regclass resolves through
+// search_path and returns NULL instead of erroring when the schema is not visible.
+func (q *Queries) HasPgStatStatements(ctx context.Context) (pgtype.Bool, error) {
 	row := q.db.QueryRow(ctx, hasPgStatStatements)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
+	var column_1 pgtype.Bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one
