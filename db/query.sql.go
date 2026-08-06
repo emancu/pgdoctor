@@ -153,8 +153,7 @@ SELECT
   , d.datfrozenxid::text AS frozen_xid
   , age(d.datfrozenxid)::bigint AS freeze_age
   , d.datminmxid::text AS min_multixact_id
-  -- mxid_age('0'::xid) returns 2147483647. Guard it: a database that has never
-  -- allocated a MultiXact would otherwise fabricate an instant FAIL.
+  -- mxid_age('0'::xid) returns 2147483647, which would fabricate an instant FAIL.
   , CASE WHEN d.datminmxid <> '0'::xid THEN mxid_age(d.datminmxid)::bigint ELSE 0 END AS multixact_age
   , g.freeze_max_age
   , g.multixact_freeze_max_age
@@ -162,10 +161,8 @@ SELECT
   , g.multixact_failsafe_age
 FROM pg_catalog.pg_database AS d
 CROSS JOIN (
-  -- One aggregate pass instead of a correlated subquery per GUC. All are raw
-  -- integers in XID units, so setting::bigint needs no unit parsing. The failsafe
-  -- GUCs are PG14+, so COALESCE to the documented default lets an older major
-  -- degrade to the documented value instead of erroring.
+  -- The failsafe GUCs are PG14+; COALESCE degrades to the documented default
+  -- instead of erroring on an older major.
   SELECT
     coalesce(max(CASE WHEN s.name = 'autovacuum_freeze_max_age' THEN s.setting::bigint END), 200000000) AS freeze_max_age
     , coalesce(
@@ -198,12 +195,8 @@ type DatabaseFreezeAgeRow struct {
 	MultixactFailsafeAge  pgtype.Int8
 }
 
-// XID and MultiXact freeze age for the connected database, plus the GUCs the
-// thresholds are derived from.
-//
-// Only the connected database: the other rows of pg_database (template0,
-// template1, and whatever else lives in the cluster) cannot be vacuumed from
-// here, so reporting their age produces findings nobody can act on.
+// Connected database only: the other pg_database rows cannot be vacuumed from
+// this connection, so their age is not actionable here.
 func (q *Queries) DatabaseFreezeAge(ctx context.Context) (DatabaseFreezeAgeRow, error) {
 	row := q.db.QueryRow(ctx, databaseFreezeAge)
 	var i DatabaseFreezeAgeRow
@@ -2238,7 +2231,6 @@ func (q *Queries) TableCacheEfficiency(ctx context.Context) ([]TableCacheEfficie
 
 const tableFreezeAge = `-- name: TableFreezeAge :many
 WITH settings AS (
-  -- The failsafe GUCs are PG14+; COALESCE degrades to the documented default.
   SELECT
     coalesce(max(CASE WHEN s.name = 'autovacuum_freeze_max_age' THEN s.setting::bigint END), 200000000) AS freeze_max_age
     , coalesce(
@@ -2261,8 +2253,6 @@ WITH settings AS (
   SELECT
     c.relkind
     , (n.nspname || '.' || c.relname)::text AS relation_name
-    -- What the operator runs VACUUM (FREEZE) on. A TOAST relation resolves to its
-    -- parent, which processes TOAST by default.
     , coalesce(p.oid, c.oid) AS target_oid
     , coalesce(pn.nspname || '.' || p.relname, n.nspname || '.' || c.relname)::text AS vacuum_target
     , age(c.relfrozenxid)::bigint AS freeze_age
@@ -2271,8 +2261,7 @@ WITH settings AS (
     , o.multixact_reloption
     , g.failsafe_age
     , g.multixact_failsafe_age
-    -- A per-table reloption can only LOWER the trigger, never raise it, so the
-    -- GUC is always the upper bound.
+    -- A reloption can only LOWER the trigger, so the GUC is the upper bound.
     , least(coalesce(nullif(o.xid_reloption, 0), g.freeze_max_age), g.freeze_max_age) AS effective_freeze_max_age
     , least(coalesce(nullif(o.multixact_reloption, 0), g.multixact_freeze_max_age), g.multixact_freeze_max_age)
       AS effective_multixact_freeze_max_age
@@ -2281,8 +2270,7 @@ WITH settings AS (
   CROSS JOIN settings AS g
   LEFT JOIN pg_catalog.pg_class AS p ON c.relkind = 't' AND p.reltoastrelid = c.oid
   LEFT JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.relnamespace
-  -- 0 means "no per-table override": the reloption minimum is 100000, so 0 is
-  -- unambiguous and keeps the column NOT NULL.
+  -- 0 means "no override": the reloption minimum is 100000, so 0 is unambiguous.
   CROSS JOIN LATERAL (
     SELECT
       coalesce(
@@ -2301,10 +2289,9 @@ WITH settings AS (
   SELECT r.relkind, r.relation_name, r.target_oid, r.vacuum_target, r.freeze_age, r.multixact_age, r.xid_reloption, r.multixact_reloption, r.failsafe_age, r.multixact_failsafe_age, r.effective_freeze_max_age, r.effective_multixact_freeze_max_age
   FROM relations AS r
   WHERE
-    -- Reporting floor = the WARN threshold, so a healthy instance returns 0 rows.
-    -- Ages just under the trigger are the top of the normal sawtooth: nothing
+    -- Floor = the WARN threshold, so a healthy instance returns 0 rows. Nothing
     -- vacuums a low-churn relation until the trigger fires, so peak age IS the
-    -- trigger. Only exceeding it means autovacuum is losing.
+    -- trigger; only exceeding it means autovacuum is losing.
     r.freeze_age >= 2 * r.effective_freeze_max_age
     OR r.multixact_age >= 2 * r.effective_multixact_freeze_max_age
 )
@@ -2324,8 +2311,7 @@ WITH settings AS (
     , max(a.multixact_reloption) AS multixact_reloption
     , count(*) AS grouped_relations
     , count(*) FILTER (WHERE a.relkind = 't') AS toast_relations
-    -- Which member is worst, so Debug can name the TOAST relation that pulled the
-    -- group in without putting it in front of the operator.
+    -- For Debug: names the TOAST relation that pulled the group in.
     , (array_agg(a.relation_name ORDER BY a.freeze_age DESC))[1]::text AS worst_relation
     -- Counts groups, not relations: window functions run after GROUP BY.
     , count(*) OVER () AS total_above_floor
@@ -2401,31 +2387,18 @@ type TableFreezeAgeRow struct {
 	TotalAboveFloor                int64
 }
 
-// XID and MultiXact freeze age per VACUUM target, for targets that have exceeded
-// their reporting floor, ranked by how many times over their anti-wraparound
-// trigger they are.
+// Freeze age per VACUUM target, grouped by target rather than relation because a
+// TOAST relation is only ever vacuumed through its parent.
 //
-// Rows are grouped by vacuum_target, not by relation: a TOAST relation is only
-// ever vacuumed through its parent, so listing the two separately produces a
-// pg_toast_NNNNN row the operator cannot identify and cannot act on. The group
-// carries the worst age of its members.
+// relkind IN ('r','m','t') is the exact set vac_update_datfrozenxid() counts. No
+// nspname filter, so pg_stat_all_tables is required: pg_stat_user_tables excludes
+// pg_catalog and pg_toast and would NULL out most vacuum history here.
 //
-// relkind IN ('r','m','t') is the exact set vac_update_datfrozenxid() counts;
-// 'p' has no storage. There is deliberately NO nspname filter: pg_catalog
-// relations expose an abandoned logical slot's catalog_xmin pin, and matviews and
-// orphaned pg_temp_* relations age independently of anything in public.
-// pg_stat_all_tables (not pg_stat_user_tables) because the latter excludes
-// pg_catalog and pg_toast, which would NULL out the vacuum history of most rows
-// returned here.
-//
-// Size is a lock-free relpages estimate. pg_total_relation_size() takes an
-// AccessShareLock, and a new AccessShareLock request queues behind a *waiting*
-// AccessExclusiveLock, so it makes this check time out during exactly the DDL
-// pile-up it exists to diagnose. relpages is only refreshed by VACUUM/ANALYZE
-// and is 0 on a never-vacuumed relation, hence relpages is returned too so the
-// caller can render "unknown" rather than "0 B".
-// Sizes and vacuum history are joined after the LIMIT, for 50 rows rather than
-// every relation in the database.
+// Size avoids pg_total_relation_size(), whose AccessShareLock queues behind a
+// *waiting* AccessExclusiveLock and would time this check out during the DDL
+// pile-up it exists to diagnose. relpages is returned so relpages = 0 (never
+// vacuumed) renders as "unknown" rather than "0 B".
+// Joined after the LIMIT: 50 lookups, not one per relation in the database.
 func (q *Queries) TableFreezeAge(ctx context.Context) ([]TableFreezeAgeRow, error) {
 	rows, err := q.db.Query(ctx, tableFreezeAge)
 	if err != nil {
