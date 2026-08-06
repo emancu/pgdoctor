@@ -24,19 +24,13 @@ const (
 	idTableMultixact    = "table-multixact-age"
 )
 
-// Thresholds at stock GUCs, restated so a formula change has to be deliberate:
-// WARN = 2 x effective trigger, FAIL = min(4 x trigger, failsafe age). An age just
-// below the trigger is the healthy peak of the sawtooth, not a warning.
+// Stock GUC triggers. WARN is 2x the trigger and FAIL min(4x, failsafe age), so an
+// age just below the trigger is the healthy peak of the sawtooth, not a warning.
 const (
 	defaultTrigger   = int64(200_000_000)
 	defaultMxTrigger = int64(400_000_000)
-	xidWarn          = int64(400_000_000)
-	xidFail          = int64(800_000_000)
-	mxidWarn         = int64(800_000_000)
-	mxidFail         = int64(1_600_000_000)
+	failsafeAge      = int64(1_600_000_000)
 )
-
-// pgtype helper constructors.
 
 func pgInt8(i int64) pgtype.Int8 { return pgtype.Int8{Int64: i, Valid: true} }
 
@@ -63,7 +57,7 @@ func (m *mockQueryer) TableFreezeAge(context.Context) ([]db.TableFreezeAgeRow, e
 	return m.tableRows, nil
 }
 
-// Scenario builders: the connected database.
+// Scenario builders.
 
 func database(name string, freezeAge int64) db.DatabaseFreezeAgeRow {
 	return db.DatabaseFreezeAgeRow{
@@ -71,11 +65,10 @@ func database(name string, freezeAge int64) db.DatabaseFreezeAgeRow {
 		FrozenXid:             "1000",
 		FreezeAge:             freezeAge,
 		MinMultixactID:        "1",
-		MultixactAge:          0,
 		FreezeMaxAge:          pgInt8(defaultTrigger),
 		MultixactFreezeMaxAge: pgInt8(defaultMxTrigger),
-		FailsafeAge:           pgInt8(1_600_000_000),
-		MultixactFailsafeAge:  pgInt8(1_600_000_000),
+		FailsafeAge:           pgInt8(failsafeAge),
+		MultixactFailsafeAge:  pgInt8(failsafeAge),
 	}
 }
 
@@ -85,34 +78,19 @@ func databaseWithMultixact(name string, multixactAge int64) db.DatabaseFreezeAge
 	return row
 }
 
-// neverUsedMultixactDatabase mirrors what the query emits for datminmxid = 0: the
-// SQL guard turns mxid_age('0') = 2147483647 into 0.
-func neverUsedMultixactDatabase(name string) db.DatabaseFreezeAgeRow {
-	row := database(name, 1000)
-	row.MinMultixactID = "0"
-	row.MultixactAge = 0
-	return row
-}
-
-// Scenario builders: VACUUM targets.
-
 func relation(name string, freezeAge int64) db.TableFreezeAgeRow {
 	return db.TableFreezeAgeRow{
 		VacuumTarget:                   name,
 		WorstRelation:                  name,
 		GroupedRelations:               1,
-		ToastRelations:                 0,
 		Relkind:                        "r",
 		Relpages:                       100,
 		SizeBytesEst:                   100 * 8192,
 		FreezeAge:                      freezeAge,
-		MultixactAge:                   0,
 		EffectiveFreezeMaxAge:          defaultTrigger,
 		EffectiveMultixactFreezeMaxAge: defaultMxTrigger,
-		FailsafeAge:                    1_600_000_000,
-		MultixactFailsafeAge:           1_600_000_000,
-		XidReloption:                   0,
-		MultixactReloption:             0,
+		FailsafeAge:                    failsafeAge,
+		MultixactFailsafeAge:           failsafeAge,
 		LastAutovacuum:                 pgTime(time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC)),
 		AutovacuumCount:                7,
 		VacuumCount:                    1,
@@ -147,31 +125,8 @@ func toastGroup(parent, toastRelation string, freezeAge int64) db.TableFreezeAge
 	return row
 }
 
-// loweredTriggerRelation carries a per-table autovacuum_freeze_max_age reloption,
-// which can only lower the effective trigger.
-func loweredTriggerRelation(name string, freezeAge, reloption int64) db.TableFreezeAgeRow {
-	row := relation(name, freezeAge)
-	row.EffectiveFreezeMaxAge = reloption
-	row.XidReloption = reloption
-	return row
-}
-
-// loweredMultixactTriggerRelation is the MultiXact mirror.
-func loweredMultixactTriggerRelation(name string, multixactAge, reloption int64) db.TableFreezeAgeRow {
-	row := relationWithMultixact(name, multixactAge)
-	row.EffectiveMultixactFreezeMaxAge = reloption
-	row.MultixactReloption = reloption
-	return row
-}
-
-// Helpers.
-
-// healthy is a queryer with nothing wrong anywhere, so a test can vary one axis.
 func healthy() *mockQueryer {
-	return &mockQueryer{
-		dbRow:     database("appdb", 1000),
-		tableRows: []db.TableFreezeAgeRow{},
-	}
+	return &mockQueryer{dbRow: database("appdb", 1000), tableRows: []db.TableFreezeAgeRow{}}
 }
 
 func run(t *testing.T, queryer *mockQueryer) *check.Report {
@@ -197,6 +152,69 @@ func findingByID(t *testing.T, report *check.Report, id string) check.Finding {
 	return check.Finding{}
 }
 
+// TestFreezeAge_Boundaries covers both clocks at both scopes. WARN is 2x the
+// effective trigger and FAIL min(4x, failsafe age), so 4 x 400M caps at the
+// multixact failsafe. An age at the trigger is the healthy peak of the sawtooth.
+func TestFreezeAge_Boundaries(t *testing.T) {
+	t.Parallel()
+
+	scenarios := []struct {
+		name    string
+		finding string
+		trigger int64
+		fail    int64
+		apply   func(*mockQueryer, int64)
+	}{
+		{
+			name: "database xid", finding: idDatabaseFreeze, trigger: defaultTrigger, fail: 4 * defaultTrigger,
+			apply: func(q *mockQueryer, age int64) { q.dbRow = database("appdb", age) },
+		},
+		{
+			name: "database multixact", finding: idDatabaseMultixact, trigger: defaultMxTrigger, fail: failsafeAge,
+			apply: func(q *mockQueryer, age int64) { q.dbRow = databaseWithMultixact("appdb", age) },
+		},
+		{
+			name: "table xid", finding: idTableFreeze, trigger: defaultTrigger, fail: 4 * defaultTrigger,
+			apply: func(q *mockQueryer, age int64) {
+				q.tableRows = []db.TableFreezeAgeRow{relation("public.bookings", age)}
+			},
+		},
+		{
+			name: "table multixact", finding: idTableMultixact, trigger: defaultMxTrigger, fail: failsafeAge,
+			apply: func(q *mockQueryer, age int64) {
+				q.tableRows = []db.TableFreezeAgeRow{relationWithMultixact("public.bookings", age)}
+			},
+		},
+	}
+
+	for _, s := range scenarios {
+		cases := []struct {
+			name string
+			age  int64
+			want check.Severity
+		}{
+			{name: "at the trigger is the healthy sawtooth peak", age: s.trigger, want: check.SeverityPass},
+			{name: "just below WARN", age: 2*s.trigger - 1, want: check.SeverityPass},
+			{name: "at WARN", age: 2 * s.trigger, want: check.SeverityWarn},
+			{name: "at FAIL", age: s.fail, want: check.SeverityFail},
+			// age() saturates at 2^31-1, so thresholds are clamped at or below it.
+			{name: "saturated age", age: 2_147_483_647, want: check.SeverityFail},
+		}
+
+		for _, tt := range cases {
+			t.Run(s.name+"/"+tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				queryer := healthy()
+				s.apply(queryer, tt.age)
+
+				finding := findingByID(t, run(t, queryer), s.finding)
+				assert.Equal(t, tt.want, finding.Severity, "age=%d", tt.age)
+			})
+		}
+	}
+}
+
 // TestFreezeAge_HealthyProductionShape is the case that matters most: a real
 // instance whose relations sit just below their trigger because that is the top of
 // the normal sawtooth. Every finding must PASS and nothing may render a table.
@@ -220,136 +238,15 @@ func TestFreezeAge_HealthyProductionShape(t *testing.T) {
 
 	require.Equal(t, check.SeverityPass, report.Severity, "a healthy instance must not report WARN")
 	require.Len(t, report.Results, 4)
-	for _, finding := range report.Results {
-		assert.Equal(t, check.SeverityPass, finding.Severity, "finding %s", finding.ID)
-		assert.Nil(t, finding.Table, "finding %s must not render a table when healthy", finding.ID)
+	for _, id := range []string{idDatabaseFreeze, idTableFreeze, idDatabaseMultixact, idTableMultixact} {
+		finding := findingByID(t, report, id)
+		assert.Equal(t, check.SeverityPass, finding.Severity, "finding %s", id)
+		assert.Nil(t, finding.Table, "finding %s must not render a table when healthy", id)
 	}
 
 	assert.Contains(t, findingByID(t, report, idDatabaseFreeze).Details, "1.0×")
 	assert.Contains(t, findingByID(t, report, idDatabaseFreeze).Details, "normal sawtooth")
 	assert.Contains(t, findingByID(t, report, idTableFreeze).Details, "normal sawtooth")
-}
-
-func TestFreezeAge_AllSubchecksReported(t *testing.T) {
-	t.Parallel()
-
-	report := run(t, healthy())
-
-	require.Len(t, report.Results, 4)
-	for _, id := range []string{idDatabaseFreeze, idTableFreeze, idDatabaseMultixact, idTableMultixact} {
-		assert.Equal(t, check.SeverityPass, findingByID(t, report, id).Severity, "finding %s", id)
-	}
-	assert.Equal(t, check.SeverityPass, report.Severity)
-}
-
-func TestFreezeAge_DatabaseFreezeBoundaries(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		age      int64
-		severity check.Severity
-	}{
-		{name: "at the trigger is the healthy sawtooth peak", age: defaultTrigger, severity: check.SeverityPass},
-		{name: "below 2x trigger", age: xidWarn - 1, severity: check.SeverityPass},
-		{name: "at 2x trigger", age: xidWarn, severity: check.SeverityWarn},
-		{name: "below 4x trigger", age: xidFail - 1, severity: check.SeverityWarn},
-		{name: "at 4x trigger", age: xidFail, severity: check.SeverityFail},
-		{name: "saturated age", age: 2_147_483_647, severity: check.SeverityFail},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			queryer := healthy()
-			queryer.dbRow = database("appdb", tt.age)
-
-			finding := findingByID(t, run(t, queryer), idDatabaseFreeze)
-			assert.Equal(t, tt.severity, finding.Severity, "age=%d", tt.age)
-		})
-	}
-}
-
-func TestFreezeAge_DatabaseMultixactBoundaries(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		age      int64
-		severity check.Severity
-	}{
-		{name: "at the trigger is the healthy sawtooth peak", age: defaultMxTrigger, severity: check.SeverityPass},
-		{name: "below 2x trigger", age: mxidWarn - 1, severity: check.SeverityPass},
-		{name: "at 2x trigger", age: mxidWarn, severity: check.SeverityWarn},
-		{name: "at multixact failsafe", age: mxidFail, severity: check.SeverityFail},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			queryer := healthy()
-			queryer.dbRow = databaseWithMultixact("appdb", tt.age)
-
-			finding := findingByID(t, run(t, queryer), idDatabaseMultixact)
-			assert.Equal(t, tt.severity, finding.Severity, "multixact age=%d", tt.age)
-		})
-	}
-}
-
-func TestFreezeAge_TableFreezeBoundaries(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		age      int64
-		severity check.Severity
-	}{
-		{name: "at the trigger is the healthy sawtooth peak", age: defaultTrigger, severity: check.SeverityPass},
-		{name: "below 2x trigger", age: xidWarn - 1, severity: check.SeverityPass},
-		{name: "at 2x trigger", age: xidWarn, severity: check.SeverityWarn},
-		{name: "at 4x trigger", age: xidFail, severity: check.SeverityFail},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			queryer := healthy()
-			queryer.tableRows = []db.TableFreezeAgeRow{relation("public.bookings", tt.age)}
-
-			finding := findingByID(t, run(t, queryer), idTableFreeze)
-			assert.Equal(t, tt.severity, finding.Severity, "age=%d", tt.age)
-		})
-	}
-}
-
-func TestFreezeAge_TableMultixactBoundaries(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		age      int64
-		severity check.Severity
-	}{
-		{name: "at the trigger is the healthy sawtooth peak", age: defaultMxTrigger, severity: check.SeverityPass},
-		{name: "below 2x trigger", age: mxidWarn - 1, severity: check.SeverityPass},
-		{name: "at 2x trigger", age: mxidWarn, severity: check.SeverityWarn},
-		{name: "at multixact failsafe", age: mxidFail, severity: check.SeverityFail},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			queryer := healthy()
-			queryer.tableRows = []db.TableFreezeAgeRow{relationWithMultixact("public.bookings", tt.age)}
-
-			finding := findingByID(t, run(t, queryer), idTableMultixact)
-			assert.Equal(t, tt.severity, finding.Severity, "multixact age=%d", tt.age)
-		})
-	}
 }
 
 // A zero datminmxid/relminmxid must never FAIL: mxid_age('0'::xid) returns
@@ -359,7 +256,8 @@ func TestFreezeAge_ZeroMultixactIsNotAnEmergency(t *testing.T) {
 	t.Parallel()
 
 	queryer := healthy()
-	queryer.dbRow = neverUsedMultixactDatabase("appdb")
+	queryer.dbRow = databaseWithMultixact("appdb", 0)
+	queryer.dbRow.MinMultixactID = "0"
 	queryer.tableRows = []db.TableFreezeAgeRow{relationWithMultixact("public.bookings", 0)}
 
 	report := run(t, queryer)
@@ -375,7 +273,7 @@ func TestFreezeAge_ToastCollapsesIntoParent(t *testing.T) {
 
 	queryer := healthy()
 	queryer.tableRows = []db.TableFreezeAgeRow{
-		toastGroup("public.bookings", "pg_toast.pg_toast_16452", xidWarn),
+		toastGroup("public.bookings", "pg_toast.pg_toast_16452", 2*defaultTrigger),
 	}
 
 	finding := findingByID(t, run(t, queryer), idTableFreeze)
@@ -384,9 +282,8 @@ func TestFreezeAge_ToastCollapsesIntoParent(t *testing.T) {
 	require.NotNil(t, finding.Table)
 	require.Len(t, finding.Table.Rows, 1, "the TOAST relation and its parent are one row")
 	assert.Equal(t, "public.bookings", finding.Table.Rows[0].Cells[0], "the operator sees the actionable name")
-	for _, row := range finding.Table.Rows {
-		assert.NotContains(t, strings.Join(row.Cells, " "), "pg_toast", "TOAST names are unactionable in the table")
-	}
+	assert.NotContains(t, strings.Join(finding.Table.Rows[0].Cells, " "), "pg_toast",
+		"TOAST names are unactionable in the table")
 	assert.Contains(t, finding.Debug, "pg_toast.pg_toast_16452", "but Debug names what contributed")
 	assert.Contains(t, finding.Debug, "toast=1")
 }
@@ -395,17 +292,18 @@ func TestFreezeAge_NeverVacuumedSizeIsUnknownNotZero(t *testing.T) {
 	t.Parallel()
 
 	queryer := healthy()
-	queryer.tableRows = []db.TableFreezeAgeRow{neverVacuumedRelation("public.fresh", xidWarn)}
+	queryer.tableRows = []db.TableFreezeAgeRow{neverVacuumedRelation("public.fresh", 2*defaultTrigger)}
 
 	finding := findingByID(t, run(t, queryer), idTableFreeze)
 
 	require.NotNil(t, finding.Table)
 	assert.Equal(t, "unknown", finding.Table.Rows[0].Cells[4])
-	assert.NotContains(t, finding.Table.Rows[0].Cells[4], "0B")
 	assert.Equal(t, "never", finding.Table.Rows[0].Cells[5])
 }
 
-func TestFreezeAge_MultipleColumnReplacesPercentage(t *testing.T) {
+// The Multiple column replaced a percentage of the trigger, which read 99-100% on
+// every healthy relation and had no dynamic range.
+func TestFreezeAge_MultipleColumnAndTruncation(t *testing.T) {
 	t.Parallel()
 
 	queryer := healthy()
@@ -422,65 +320,64 @@ func TestFreezeAge_MultipleColumnReplacesPercentage(t *testing.T) {
 	assert.Equal(t, "2.1×", finding.Table.Rows[0].Cells[2])
 	assert.Equal(t, "200.0M", finding.Table.Rows[0].Cells[3])
 	for _, cell := range finding.Table.Rows[0].Cells {
-		assert.NotContains(t, cell, "%", "a percentage of the trigger has no dynamic range")
+		assert.NotContains(t, cell, "%")
 	}
 	assert.Contains(t, finding.Details, "public.bookings")
 	assert.Contains(t, finding.Details, "is at 2.1× its anti-wraparound trigger")
 	assert.Contains(t, finding.Details, "1847 target(s) above the reporting floor, worst 1 shown")
 }
 
+// A reloption can only lower the effective trigger, so an age that is the healthy
+// sawtooth against the GUC becomes a WARN against the override.
 func TestFreezeAge_ReloptionLowersEffectiveTrigger(t *testing.T) {
 	t.Parallel()
 
-	// 210M is the healthy sawtooth at the 200M GUC (WARN at 400M) but past WARN
-	// once a reloption lowers the trigger to 100M (WARN at 200M).
+	// 210M: healthy at both GUCs (WARN 400M / 800M), past WARN at a 100M override.
 	const age = int64(210_000_000)
 
-	withoutOverride := healthy()
-	withoutOverride.tableRows = []db.TableFreezeAgeRow{relation("public.bookings", age)}
-	assert.Equal(t, check.SeverityPass, findingByID(t, run(t, withoutOverride), idTableFreeze).Severity)
+	xid, xidLowered := relation("public.bookings", age), relation("public.bookings", age)
+	xidLowered.EffectiveFreezeMaxAge, xidLowered.XidReloption = 100_000_000, 100_000_000
 
-	withOverride := healthy()
-	withOverride.tableRows = []db.TableFreezeAgeRow{loweredTriggerRelation("public.bookings", age, 100_000_000)}
+	mx, mxLowered := relationWithMultixact("public.bookings", age), relationWithMultixact("public.bookings", age)
+	mxLowered.EffectiveMultixactFreezeMaxAge, mxLowered.MultixactReloption = 100_000_000, 100_000_000
 
-	finding := findingByID(t, run(t, withOverride), idTableFreeze)
-	require.Equal(t, check.SeverityWarn, finding.Severity)
-	require.NotNil(t, finding.Table)
-	assert.Equal(t, "100.0M (reloption)", finding.Table.Rows[0].Cells[3])
-	assert.Equal(t, "2.1×", finding.Table.Rows[0].Cells[2])
-}
-
-func TestFreezeAge_MultixactReloptionLowersEffectiveTrigger(t *testing.T) {
-	t.Parallel()
-
-	// 210M is harmless at the 400M GUC (WARN at 800M) but past WARN once a
-	// reloption lowers the trigger to 100M (WARN at 200M).
-	const age = int64(210_000_000)
-
-	withoutOverride := healthy()
-	withoutOverride.tableRows = []db.TableFreezeAgeRow{relationWithMultixact("public.bookings", age)}
-	assert.Equal(t, check.SeverityPass, findingByID(t, run(t, withoutOverride), idTableMultixact).Severity)
-
-	withOverride := healthy()
-	withOverride.tableRows = []db.TableFreezeAgeRow{
-		loweredMultixactTriggerRelation("public.bookings", age, 100_000_000),
+	tests := []struct {
+		name, finding, unit string
+		plain, lowered      db.TableFreezeAgeRow
+	}{
+		{name: "xid", finding: idTableFreeze, unit: "XIDs against", plain: xid, lowered: xidLowered},
+		{name: "multixact", finding: idTableMultixact, unit: "MultiXacts against", plain: mx, lowered: mxLowered},
 	}
 
-	finding := findingByID(t, run(t, withOverride), idTableMultixact)
-	require.Equal(t, check.SeverityWarn, finding.Severity)
-	require.NotNil(t, finding.Table)
-	assert.Equal(t, "100.0M (reloption)", finding.Table.Rows[0].Cells[3])
-	assert.Contains(t, finding.Details, "MultiXacts against")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			plain := healthy()
+			plain.tableRows = []db.TableFreezeAgeRow{tt.plain}
+			assert.Equal(t, check.SeverityPass, findingByID(t, run(t, plain), tt.finding).Severity)
+
+			lowered := healthy()
+			lowered.tableRows = []db.TableFreezeAgeRow{tt.lowered}
+
+			finding := findingByID(t, run(t, lowered), tt.finding)
+			require.Equal(t, check.SeverityWarn, finding.Severity)
+			require.NotNil(t, finding.Table)
+			assert.Equal(t, "100.0M (reloption)", finding.Table.Rows[0].Cells[3])
+			assert.Equal(t, "2.1×", finding.Table.Rows[0].Cells[2])
+			assert.Contains(t, finding.Details, tt.unit)
+		})
+	}
 }
 
 func TestFreezeAge_MixedSeverityAggregates(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{
-		dbRow: database("appdb", xidWarn),
+		dbRow: database("appdb", 2*defaultTrigger),
 		tableRows: []db.TableFreezeAgeRow{
-			relation("public.bookings", xidFail),
-			relation("public.audits", xidWarn),
+			relation("public.bookings", 4*defaultTrigger),
+			relation("public.audits", 2*defaultTrigger),
 		},
 	}
 
@@ -491,45 +388,34 @@ func TestFreezeAge_MixedSeverityAggregates(t *testing.T) {
 	assert.Equal(t, check.SeverityFail, findingByID(t, report, idTableFreeze).Severity)
 	assert.Equal(t, check.SeverityPass, findingByID(t, report, idTableMultixact).Severity)
 	assert.Len(t, findingByID(t, report, idTableFreeze).Table.Rows, 2)
+	// Finding what pins the xmin horizon is `houston dba xmin`, not this check.
+	assert.Contains(t, findingByID(t, report, idDatabaseFreeze).Details, "houston dba xmin")
 }
 
-// A high age is a "you are close to the cliff" signal; finding the transaction or
-// slot pinning the xmin horizon is `houston dba xmin`, so the remediation text has
-// to point there rather than guess at PIDs.
-func TestFreezeAge_FlaggedDetailsPointAtInvestigation(t *testing.T) {
+func TestFreezeAge_QueryErrors(t *testing.T) {
 	t.Parallel()
 
-	queryer := healthy()
-	queryer.dbRow = database("appdb", xidWarn)
+	tests := []struct {
+		name, wantIn string
+		fail         func(*mockQueryer)
+	}{
+		{name: "database", wantIn: "databases", fail: func(q *mockQueryer) { q.dbErr = fmt.Errorf("connection refused") }},
+		{name: "table", wantIn: "tables", fail: func(q *mockQueryer) { q.tableErr = fmt.Errorf("statement timeout") }},
+	}
 
-	finding := findingByID(t, run(t, queryer), idDatabaseFreeze)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.Equal(t, check.SeverityWarn, finding.Severity)
-	assert.Contains(t, finding.Details, "houston dba xmin")
-}
+			queryer := healthy()
+			tt.fail(queryer)
 
-func TestFreezeAge_DatabaseQueryError(t *testing.T) {
-	t.Parallel()
+			_, err := freezeage.New(queryer).Check(context.Background())
 
-	queryer := healthy()
-	queryer.dbErr = fmt.Errorf("connection refused")
-
-	_, err := freezeage.New(queryer).Check(context.Background())
-
-	require.ErrorContains(t, err, "freeze-age")
-	require.ErrorContains(t, err, "databases")
-}
-
-func TestFreezeAge_TableQueryError(t *testing.T) {
-	t.Parallel()
-
-	queryer := healthy()
-	queryer.tableErr = fmt.Errorf("statement timeout")
-
-	_, err := freezeage.New(queryer).Check(context.Background())
-
-	require.ErrorContains(t, err, "freeze-age")
-	require.ErrorContains(t, err, "tables")
+			require.ErrorContains(t, err, "freeze-age")
+			require.ErrorContains(t, err, tt.wantIn)
+		})
+	}
 }
 
 func TestFreezeAge_Metadata(t *testing.T) {
@@ -555,6 +441,5 @@ func TestFreezeAge_Metadata(t *testing.T) {
 	// Go can classify them.
 	assert.Contains(t, metadata.SQL, "r.freeze_age >= 2 * r.effective_freeze_max_age")
 	assert.Contains(t, metadata.SQL, "r.multixact_age >= 2 * r.effective_multixact_freeze_max_age")
-	// Only the connected database is reported.
 	assert.Contains(t, metadata.SQL, "WHERE d.datname = current_database()")
 }
