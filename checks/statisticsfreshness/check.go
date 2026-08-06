@@ -60,30 +60,19 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	// A NULL stats_reset is not evidence of a long window: an unclean shutdown, a
-	// crash, or a rebuilt replica also zeroes the counters and none of them records
-	// a timestamp. Report the fact without inferring maturity from it.
-	if !row.StatsReset.Valid {
+	window, exact := statsWindow(row)
+
+	// An unrecorded reset is the dangerous case, not the safe one: a crash, unclean
+	// shutdown or rebuilt replica zeroes the counters and records nothing, so a short
+	// uptime means they may be far younger than they look. Judging only explicit
+	// resets warns about the one event an operator already knows about and stays
+	// quiet about the ones they do not.
+	if window >= minStatsDaysForAccuracy*secondsPerDay {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
-			Name:     "Statistics: never reset",
+			Name:     windowTitle(window, exact),
 			Severity: check.SeverityPass,
-			Details:  "No reset recorded for this database.",
-		})
-		return report, nil
-	}
-
-	// The window goes in the title because renderers drop Details on a PASS finding,
-	// so anything stated there is invisible in the case this check is usually in.
-	ageSeconds := row.AgeSeconds.Int64
-	window := check.FormatDurationSec(ageSeconds)
-
-	if ageSeconds >= minStatsDaysForAccuracy*secondsPerDay {
-		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     fmt.Sprintf("Statistics: %s since last reset", window),
-			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Counters have accumulated since %s.", row.StatsReset.Time.Format(time.RFC3339)),
+			Details:  windowDetails(row, window, exact),
 		})
 		return report, nil
 	}
@@ -97,13 +86,42 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
-		Name:     fmt.Sprintf("Statistics: %s since last reset", window),
+		Name:     windowTitle(window, exact),
 		Severity: check.SeverityWarn,
-		Details: fmt.Sprintf("Counters cover %s, less than the %d days recommended.\n\nThis may affect the accuracy of usage-based checks:\n%s",
-			window,
+		Details: fmt.Sprintf("%s\n\nThat is less than the %d days recommended, which may affect the accuracy of usage-based checks:\n%s",
+			windowDetails(row, window, exact),
 			minStatsDaysForAccuracy,
 			strings.Join(affectedChecks, "\n")),
 	})
 
 	return report, nil
+}
+
+// statsWindow returns how far back the counters reach, and whether that is exact.
+// Only pg_stat_reset() records a timestamp, so without one the best that can be said
+// is that they reach back at least as far as the server start.
+func statsWindow(row db.StatisticsFreshnessRow) (seconds int64, exact bool) {
+	if row.StatsReset.Valid {
+		return row.AgeSeconds.Int64, true
+	}
+
+	return row.UptimeSeconds.Int64, false
+}
+
+func windowTitle(window int64, exact bool) string {
+	if exact {
+		return fmt.Sprintf("Statistics: %s since last reset", check.FormatDurationSec(window))
+	}
+
+	return fmt.Sprintf("Statistics: at least %s, no reset recorded", check.FormatDurationSec(window))
+}
+
+func windowDetails(row db.StatisticsFreshnessRow, window int64, exact bool) string {
+	if exact {
+		return fmt.Sprintf("Counters have accumulated since %s.", row.StatsReset.Time.Format(time.RFC3339))
+	}
+
+	return fmt.Sprintf(
+		"No reset recorded, and the server started %s ago. A crash, unclean shutdown or rebuilt replica zeroes the counters without recording a reset, so they may cover no more than that.",
+		check.FormatDurationSec(window))
 }

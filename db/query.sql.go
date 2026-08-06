@@ -1986,23 +1986,29 @@ const statisticsFreshness = `-- name: StatisticsFreshness :one
 SELECT
   stats_reset
   , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
+  , extract(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint AS uptime_seconds
 FROM pg_stat_database
 WHERE datname = current_database()
 `
 
 type StatisticsFreshnessRow struct {
-	StatsReset pgtype.Timestamptz
-	AgeSeconds pgtype.Int8
+	StatsReset    pgtype.Timestamptz
+	AgeSeconds    pgtype.Int8
+	UptimeSeconds pgtype.Int8
 }
 
 // Returns statistics age for the current database.
 // Use to validate stats are meaningful before relying on usage-based checks.
-// The age is computed here so it is measured against the server's clock and is not
-// truncated to whole days: a reset an hour ago is 3600, not 0.
+//
+// A NULL stats_reset does not mean the counters are old. Only pg_stat_reset()
+// records a timestamp; a crash, unclean shutdown or rebuilt replica zeroes the
+// counters and leaves it NULL. All of those coincide with a server start, and a
+// clean restart preserves the counters (PG15+), so uptime is a lower bound on how
+// far back they reach when no reset was recorded.
 func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessRow, error) {
 	row := q.db.QueryRow(ctx, statisticsFreshness)
 	var i StatisticsFreshnessRow
-	err := row.Scan(&i.StatsReset, &i.AgeSeconds)
+	err := row.Scan(&i.StatsReset, &i.AgeSeconds, &i.UptimeSeconds)
 	return i, err
 }
 

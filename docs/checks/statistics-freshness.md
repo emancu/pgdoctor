@@ -9,8 +9,18 @@ Validates that PostgreSQL runtime statistics are mature enough for accurate usag
 Checks how long ago `pg_stat_reset()` was called or PostgreSQL was restarted.
 
 **Thresholds**:
-- **OK**: Statistics are ≥ 7 days old
-- **WARN**: Statistics are < 7 days old
+- **OK**: Counters reach back ≥ 7 days
+- **WARN**: Counters reach back < 7 days, or may not
+
+Only `pg_stat_reset()` records a timestamp. A crash, unclean shutdown, or rebuilt
+replica zeroes the counters and leaves `stats_reset` NULL, so the absence of a reset
+is not evidence the counters are old. With no reset recorded the window is measured
+from server start instead, which is a lower bound: a clean restart preserves the
+counters (PG15+), and everything that zeroes them coincides with a start.
+
+That means a recently restarted server reports WARN even with no reset recorded —
+which is the point. It is the state where `index-usage` will report a busy index as
+having zero scans.
 
 ## Why Statistics Age Matters
 
