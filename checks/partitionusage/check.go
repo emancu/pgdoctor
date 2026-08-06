@@ -99,8 +99,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("checking pg_stat_statements extension: %w", err)
 	}
 
-	// A NULL result means the probe could not be evaluated; treat it as unusable so
-	// the finding below explains the gap rather than a later query erroring out.
 	if !hasExtension.Bool {
 		report.AddFinding(check.Finding{
 			ID:       "extension-unavailable",
