@@ -85,9 +85,10 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	// Derive the age from the timestamp rather than the query's integer day count,
-	// which truncates: a reset an hour ago would otherwise read "0 days".
-	age := int64(time.Since(row.StatsReset.Time).Seconds())
+	// age_seconds is measured against the server's clock and is not truncated to
+	// whole days, so a reset an hour ago reads "1h" rather than the "0 days" the
+	// old day count produced.
+	age := row.AgeSeconds.Int64
 	window := check.FormatDurationSec(age)
 
 	if age >= minMatureWindowSeconds {

@@ -16,6 +16,26 @@ func showTiming(opts *runOptions) bool {
 	return opts.detail == string(detailVerbose) || opts.detail == string(detailDebug)
 }
 
+// isSingleFinding reports whether a check folds into one line: exactly one finding,
+// carrying the check's own ID rather than a subcheck's.
+func isSingleFinding(report *check.Report) bool {
+	return len(report.Results) == 1 && report.Results[0].ID == report.CheckID
+}
+
+// reportTitle is the heading a check renders under. A single-finding check may carry
+// a title of its own, which is how it states a fact that has to stay visible at PASS
+// severity — Details are dropped there. Anything else uses the check's own name.
+//
+// Not used for skipped reports: the runner replaces those with a "Check Error"
+// finding, whose name is not what the reader needs at the head of the line.
+func reportTitle(report *check.Report) string {
+	if isSingleFinding(report) && report.Results[0].Name != "" {
+		return report.Results[0].Name
+	}
+
+	return report.Name
+}
+
 func printCheckSummary(w io.Writer, report *check.Report, opts *runOptions) {
 	label, colorFunc := severityDisplay(report.Severity)
 	dimFunc := dimColor()
@@ -46,7 +66,7 @@ func printCheckSummary(w io.Writer, report *check.Report, opts *runOptions) {
 
 	fmt.Fprintf(w, "%s %s %s %s%s\n",
 		colorFunc(fmt.Sprintf("[%s]", label)),
-		report.Name,
+		reportTitle(report),
 		dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 		dimFunc(fmt.Sprintf("(%d/%d)", okCount, total)),
 		timingStr)
@@ -72,23 +92,13 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 		return
 	}
 
-	singleFinding := len(report.Results) == 1 && report.Results[0].ID == report.CheckID
-
 	// For single-finding checks, fold the details into the header line
-	if singleFinding {
+	if isSingleFinding(report) {
 		result := report.Results[0]
-
-		// A finding may carry a title of its own, which is how a check states a
-		// fact that has to stay visible at PASS severity — Details are dropped
-		// below. Checks that don't set one reuse the check's name.
-		title := report.Name
-		if result.Name != "" {
-			title = result.Name
-		}
 
 		fmt.Fprintf(w, "%s %s %s%s\n",
 			colorFunc(fmt.Sprintf("[%s]", label)),
-			title,
+			reportTitle(report),
 			dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 			timingStr)
 		if result.Severity != check.SeverityPass && result.Details != "" {

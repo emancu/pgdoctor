@@ -34,22 +34,19 @@ func newMockQueryerWithError(err error) *mockDBStatisticsQueryer {
 	return &mockDBStatisticsQueryer{err: err}
 }
 
-func makeInt4(value int32) pgtype.Int4 {
-	return pgtype.Int4{Int32: value, Valid: true}
-}
-
-// resetAgo builds a row whose counters were reset the given duration ago. AgeDays is
-// deliberately left unset: the check must derive the age from the timestamp.
+// resetAgo builds a row whose counters were reset the given duration ago. The age
+// arrives from the server as seconds; the timestamp is only used for display.
 func resetAgo(d time.Duration) db.DBStatisticsRow {
 	return db.DBStatisticsRow{
 		StatsReset: pgtype.Timestamptz{Time: time.Now().Add(-d), Valid: true},
+		AgeSeconds: pgtype.Int8{Int64: int64(d.Seconds()), Valid: true},
 	}
 }
 
 func neverReset() db.DBStatisticsRow {
 	return db.DBStatisticsRow{
 		StatsReset: pgtype.Timestamptz{Valid: false},
-		AgeDays:    pgtype.Int4{Valid: false},
+		AgeSeconds: pgtype.Int8{Valid: false},
 	}
 }
 
@@ -140,16 +137,21 @@ func Test_DBStatistics_SubDayWindowIsNotZeroDays(t *testing.T) {
 	}
 }
 
-// The truncated day count is still selected by the query but must not be trusted.
-func Test_DBStatistics_IgnoresAgeDaysColumn(t *testing.T) {
+// The age must come from the server-computed seconds, not from differencing the
+// server's timestamp against the CLI host's clock: the two can disagree, and the
+// difference decides both the rendered window and the seven-day threshold.
+func Test_DBStatistics_UsesServerComputedAge(t *testing.T) {
 	t.Parallel()
 
-	row := resetAgo(30 * day)
-	row.AgeDays = makeInt4(999)
+	// A timestamp implying ~30d, but the server says 3d. The server wins.
+	row := db.DBStatisticsRow{
+		StatsReset: pgtype.Timestamptz{Time: time.Now().Add(-30 * day), Valid: true},
+		AgeSeconds: pgtype.Int8{Int64: int64((3 * day).Seconds()), Valid: true},
+	}
 
 	result := runCheck(t, row)
-	require.Equal(t, "DB statistics: 30d since last reset", result.Name)
-	require.Equal(t, check.SeverityPass, result.Severity)
+	require.Equal(t, "DB statistics: 3d since last reset", result.Name)
+	require.Equal(t, check.SeverityWarn, result.Severity)
 }
 
 // A NULL stats_reset is not evidence of a long window: a crash or a rebuilt replica
