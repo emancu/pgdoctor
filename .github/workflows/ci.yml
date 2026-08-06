@@ -101,6 +101,16 @@ jobs:
             fi
           done
 
+          # ...and every markdown file must belong to a check in the manifest,
+          # otherwise a removed or renamed check keeps serving stale docs
+          for f in docs/checks/*.md; do
+            id=$(basename "$f" .md)
+            if ! jq -e --arg id "$id" '.checks[] | select(.id == $id)' docs/checks.json > /dev/null; then
+              echo "::error::Orphaned $f - no check '${id}' in docs/checks.json. Run 'go generate ./...'"
+              exit 1
+            fi
+          done
+
           # Required page assets must exist
           for f in docs/index.html docs/logo.png docs/checks.json; do
             if [ ! -f "$f" ]; then
