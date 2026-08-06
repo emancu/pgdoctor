@@ -58,6 +58,12 @@ Tables that go too long without maintenance may have:
 - Accumulated dead tuples causing bloat
 - Increased disk usage from unreclaimed space
 
+## Size Column
+
+Table size is a **lock-free estimate** derived from `pg_class`: heap `relpages` + the TOAST relation's `relpages` + the sum of `relpages` over the table's indexes, times `block_size`.
+
+It is deliberately not `pg_total_relation_size()`, which takes an `AccessShareLock`. A new `AccessShareLock` request queues behind a *waiting* `AccessExclusiveLock`, so with a 2-second `statement_timeout` this check would SKIP during a DDL pile-up — and it runs for every table, not a top-N. The trade-off: `relpages` is only refreshed by `VACUUM`/`ANALYZE`, so the estimate is stale by definition and `0` on a never-vacuumed table.
+
 ## Pending Work Column
 
 The "Pending Work" column is the larger of:
