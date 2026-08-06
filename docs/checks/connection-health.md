@@ -284,7 +284,7 @@ Connection problems?
 │       └─► Reduce pool size (save memory)
 │
 ├─► "Locks / blocked queries"
-│   └─► Check: freeze-age / horizon-blockers
+│   └─► Run: houston dba xmin
 │       └─► Identify what pins the xmin horizon (long transaction,
 │           replication slot, prepared transaction), then act on that
 │           single object
