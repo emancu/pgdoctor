@@ -220,10 +220,9 @@ WHERE state = 'idle in transaction'
   AND query_start < NOW() - INTERVAL '5 minutes';
 
 # Step 3: Kill stuck connections (if timeout doesn't work)
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE state = 'idle in transaction'
-  AND query_start < NOW() - INTERVAL '10 minutes';
+# One PID at a time, verified from the query above. Never run a set-valued
+# pg_terminate_backend() against a live primary.
+SELECT pg_terminate_backend(12345); -- one PID, verified from the query above
 
 # Step 4: Fix application code
 # Common causes:
@@ -245,10 +244,9 @@ WHERE state = 'idle'
 ORDER BY state_change;
 
 # Step 2: Kill old idle connections
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE state = 'idle'
-  AND state_change < NOW() - INTERVAL '1 hour';
+# One PID at a time, verified from the query above. Never run a set-valued
+# pg_terminate_backend() against a live primary.
+SELECT pg_terminate_backend(12345); -- one PID, verified from the query above
 
 # Step 3: Enable connection timeout
 # For PgBouncer:
@@ -286,8 +284,10 @@ Connection problems?
 │       └─► Reduce pool size (save memory)
 │
 ├─► "Locks / blocked queries"
-│   └─► Check: idle-in-transaction
-│       └─► Fix application transaction handling
+│   └─► Check: freeze-age / horizon-blockers
+│       └─► Identify what pins the xmin horizon (long transaction,
+│           replication slot, prepared transaction), then act on that
+│           single object
 │
 └─► "Connection count growing over time"
     └─► Check: long-idle
