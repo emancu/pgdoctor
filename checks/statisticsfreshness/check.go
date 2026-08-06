@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -19,6 +20,7 @@ var readme string
 
 const (
 	minStatsDaysForAccuracy = 7
+	secondsPerDay           = 24 * 60 * 60
 )
 
 type StatisticsFreshnessQueries interface {
@@ -58,26 +60,30 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
+	// A NULL stats_reset is not evidence of a long window: an unclean shutdown, a
+	// crash, or a rebuilt replica also zeroes the counters and none of them records
+	// a timestamp. Report the fact without inferring maturity from it.
 	if !row.StatsReset.Valid {
-		// NULL stats_reset means statistics have NEVER been reset.
-		// This is actually the ideal state - maximum data accumulation for accurate analysis.
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
-			Name:     report.Name,
+			Name:     "Statistics: never reset",
 			Severity: check.SeverityPass,
-			Details:  "Statistics have never been reset (optimal for usage-based analysis)",
+			Details:  "No reset recorded for this database.",
 		})
 		return report, nil
 	}
 
-	ageDays := row.AgeDays.Int32
+	// The window goes in the title because renderers drop Details on a PASS finding,
+	// so anything stated there is invisible in the case this check is usually in.
+	ageSeconds := row.AgeSeconds.Int64
+	window := check.FormatDurationSec(ageSeconds)
 
-	if ageDays >= minStatsDaysForAccuracy {
+	if ageSeconds >= minStatsDaysForAccuracy*secondsPerDay {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
-			Name:     report.Name,
+			Name:     fmt.Sprintf("Statistics: %s since last reset", window),
 			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Statistics are %d days old (mature enough for analysis)", ageDays),
+			Details:  fmt.Sprintf("Counters have accumulated since %s.", row.StatsReset.Time.Format(time.RFC3339)),
 		})
 		return report, nil
 	}
@@ -86,14 +92,15 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		"index-usage",
 		"table-seq-scans",
 		"cache-efficiency",
+		"temp-usage",
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
-		Name:     report.Name,
+		Name:     fmt.Sprintf("Statistics: %s since last reset", window),
 		Severity: check.SeverityWarn,
-		Details: fmt.Sprintf("Statistics were reset %d days ago (less than %d days recommended).\n\nThis may affect the accuracy of usage-based checks:\n%s",
-			ageDays,
+		Details: fmt.Sprintf("Counters cover %s, less than the %d days recommended.\n\nThis may affect the accuracy of usage-based checks:\n%s",
+			window,
 			minStatsDaysForAccuracy,
 			strings.Join(affectedChecks, "\n")),
 	})

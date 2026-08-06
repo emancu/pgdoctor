@@ -1985,27 +1985,24 @@ func (q *Queries) SessionStatistics(ctx context.Context) (SessionStatisticsRow, 
 const statisticsFreshness = `-- name: StatisticsFreshness :one
 SELECT
   stats_reset
-  , coalesce(
-    extract(EPOCH FROM (now() - stats_reset)) / 86400
-    , 999
-  )::int AS age_days
-  , (now() - stats_reset) AS age_interval
+  , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
 FROM pg_stat_database
 WHERE datname = current_database()
 `
 
 type StatisticsFreshnessRow struct {
-	StatsReset  pgtype.Timestamptz
-	AgeDays     pgtype.Int4
-	AgeInterval pgtype.Interval
+	StatsReset pgtype.Timestamptz
+	AgeSeconds pgtype.Int8
 }
 
 // Returns statistics age for the current database.
 // Use to validate stats are meaningful before relying on usage-based checks.
+// The age is computed here so it is measured against the server's clock and is not
+// truncated to whole days: a reset an hour ago is 3600, not 0.
 func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessRow, error) {
 	row := q.db.QueryRow(ctx, statisticsFreshness)
 	var i StatisticsFreshnessRow
-	err := row.Scan(&i.StatsReset, &i.AgeDays, &i.AgeInterval)
+	err := row.Scan(&i.StatsReset, &i.AgeSeconds)
 	return i, err
 }
 
