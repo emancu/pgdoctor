@@ -174,7 +174,9 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 	}
 	severity = capSeverity(severity, maxSeverity)
 
-	statsResetInfo := " (over at least the server uptime; no stats reset recorded, so this rate is an upper bound)"
+	// Only the exact window is worth naming inline. When it is anchored to uptime
+	// there is no date to give, and how that bound works belongs in the README.
+	var statsResetInfo string
 	if row.StatsReset.Valid {
 		statsResetInfo = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
 	}
