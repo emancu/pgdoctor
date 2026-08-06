@@ -15,12 +15,22 @@ import (
 )
 
 type mockQueryer struct {
-	row db.TempUsageRow
-	err error
+	row        db.TempUsageRow
+	err        error
+	pgssOK     bool
+	statements []db.TempUsageByStatementRow
 }
 
 func (m *mockQueryer) TempUsage(ctx context.Context) (db.TempUsageRow, error) {
 	return m.row, m.err
+}
+
+func (m *mockQueryer) HasPgStatStatements(context.Context) (pgtype.Bool, error) {
+	return pgtype.Bool{Bool: m.pgssOK, Valid: true}, nil
+}
+
+func (m *mockQueryer) TempUsageByStatement(context.Context) ([]db.TempUsageByStatementRow, error) {
+	return m.statements, nil
 }
 
 func makeTempUsageRow(
@@ -293,7 +303,7 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
-	assert.Len(t, report.Results, 2)
+	assert.Len(t, report.Results, 3, "two rate findings plus the attribution finding")
 
 	// Both should be FAIL
 	assert.Equal(t, check.SeverityFail, report.Results[0].Severity)
@@ -457,7 +467,7 @@ func TestTempUsage_LowerBoundWindowCapsSeverity(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedSeverity, report.Severity)
-			assert.Len(t, report.Results, 2, "both rate subchecks must run")
+			assert.GreaterOrEqual(t, len(report.Results), 2, "both rate subchecks must run")
 		})
 	}
 }
@@ -475,4 +485,86 @@ func TestTempUsage_ExactWindowAllowsFail(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
+}
+
+// Attribution runs only when a rate finding fired: reading pg_stat_statements
+// materialises the whole query-text corpus, so a healthy database must not pay for it.
+func TestTempUsage_AttributionOnlyWhenRatesWarn(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+
+	healthy := makeTempUsageRow(10, 1024, oneHourInSeconds*24, 1.0, 1024, &statsReset)
+	report, err := tempusage.New(&mockQueryer{row: healthy, pgssOK: true}).Check(context.Background())
+	require.NoError(t, err)
+	require.Len(t, report.Results, 2, "no attribution finding on a healthy database")
+}
+
+func TestTempUsage_AttributionTable(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+	since := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
+	queryer := &mockQueryer{
+		row:    row,
+		pgssOK: true,
+		statements: []db.TempUsageByStatementRow{
+			{
+				Queryid:          pgtype.Int8{Int64: 42, Valid: true},
+				Calls:            pgtype.Int8{Int64: 1200, Valid: true},
+				TempBytesWritten: pgtype.Int8{Int64: 4 * 1024 * 1024 * 1024, Valid: true},
+				EntrySince:       pgtype.Timestamptz{Time: since, Valid: true},
+				QueryText:        pgtype.Text{String: "select * from bookings order by created_at", Valid: true},
+			},
+			{
+				// PG15/16 have no stats_since column.
+				Queryid:          pgtype.Int8{Int64: 7, Valid: true},
+				Calls:            pgtype.Int8{Int64: 90, Valid: true},
+				TempBytesWritten: pgtype.Int8{Int64: 1024 * 1024, Valid: true},
+				EntrySince:       pgtype.Timestamptz{Valid: false},
+				QueryText:        pgtype.Text{String: "select 1", Valid: true},
+			},
+		},
+	}
+
+	report, err := tempusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	var sources *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == "temp-file-sources" {
+			sources = &report.Results[i]
+		}
+	}
+
+	require.NotNil(t, sources, "attribution finding must be present")
+	require.Equal(t, check.SeverityInfo, sources.Severity, "attribution must not escalate the report")
+	require.NotNil(t, sources.Table)
+	require.Len(t, sources.Table.Rows, 2)
+	require.Equal(t, []string{"Temp Written", "Calls", "Tracked Since", "Query ID", "Query"}, sources.Table.Headers)
+	require.Equal(t, "4.0GiB", sources.Table.Rows[0].Cells[0])
+	require.Equal(t, "2026-05-01", sources.Table.Rows[0].Cells[2])
+	require.Equal(t, "-", sources.Table.Rows[1].Cells[2], "missing stats_since renders as a dash")
+	// The report severity still comes from the rate findings, not from this one.
+	require.Equal(t, check.SeverityFail, report.Severity)
+}
+
+func TestTempUsage_AttributionUnavailable(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
+	report, err := tempusage.New(&mockQueryer{row: row, pgssOK: false}).Check(context.Background())
+	require.NoError(t, err)
+
+	last := report.Results[len(report.Results)-1]
+	require.Equal(t, "temp-file-sources", last.ID)
+	require.Equal(t, check.SeverityInfo, last.Severity)
+	require.Contains(t, last.Details, "pg_stat_statements is unavailable")
 }

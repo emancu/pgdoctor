@@ -68,3 +68,28 @@ SELECT
   , ROUND(ts.temp_bytes_per_hour::numeric, 0) AS temp_bytes_per_hour
 FROM temp_stats AS ts
 CROSS JOIN memory_settings AS ms;
+
+-- name: TempUsageByStatement :many
+-- Attributes temp file writes to individual statements. Rank by this, never sum it:
+-- it counts write I/O, and a multi-pass external sort rewrites the same file, so it
+-- exceeds the disk footprint pg_stat_database.temp_bytes measures.
+-- toplevel drops the duplicate rows pg_stat_statements.track = 'all' creates.
+-- stats_since is when the entry was created, not when the statement last ran; read
+-- via to_jsonb so one statement works on PG15/16, where the column does not exist.
+SELECT
+  s.queryid
+  , s.calls
+  , s.temp_blks_written * current_setting('block_size')::bigint AS temp_bytes_written
+  , (to_jsonb(s) ->> 'stats_since')::timestamptz AS entry_since
+  , left(regexp_replace(s.query, '\s+', ' ', 'g'), 300) AS query_text
+FROM pg_stat_statements AS s
+WHERE
+  s.dbid = (SELECT d.oid FROM pg_catalog.pg_database AS d WHERE d.datname = current_database())
+  AND s.toplevel
+  AND s.temp_blks_written > 0
+  -- Reading pg_stat_statements spills its own query-text corpus to disk, so
+  -- pgdoctor turns up in its own results. sqlc stamps every query pgdoctor issues
+  -- with this marker; blaming the diagnostic for the symptom helps nobody.
+  AND s.query NOT LIKE '-- name:%' 
+ORDER BY s.temp_blks_written DESC
+LIMIT 10;

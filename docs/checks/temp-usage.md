@@ -37,6 +37,66 @@ bounds**:
 The check reports SKIP only when the window is under an hour, where the denominator
 is small enough that a single query's temp file would dominate the rate.
 
+### Temp File Sources (`temp-file-sources`)
+
+When either rate finding fires, the check lists the top statements by temp data
+written, from `pg_stat_statements`. It is skipped on a healthy database: reading that
+view materialises the entire query-text corpus into a `work_mem` tuplestore, which can
+itself spill.
+
+**The table does not add up to the rate, by design.** `pg_stat_database.temp_bytes`
+measures the *disk footprint* of each temp file — its size when deleted.
+`pg_stat_statements.temp_blks_written` measures *write I/O*, and a multi-pass external
+sort rewrites the same file once per merge pass. Measured on PostgreSQL 17, one
+identical 71 MB sort reports 71 MB, 213 MB or 289 MB of writes depending on
+`work_mem`; hash joins and materialised CTEs reconcile 1:1. Rank by the table, never
+sum it.
+
+Three things are missing from it:
+
+- **Cancelled and failed statements.** `pg_stat_statements` records at `ExecutorEnd`,
+  which does not run on abort, but the temp file is still counted by
+  `pg_stat_database`. If you use `statement_timeout`, the worst offender may not be
+  listed. `log_temp_files` is the only source that catches those.
+- **Logical decoding spill** (Debezium and other CDC). Not counted by this check at
+  all — see `pg_stat_replication_slots.spill_bytes`.
+- **A last-execution time.** There isn't one. `pg_stat_statements` has no
+  last-seen column in any version through PostgreSQL 18. "Tracked Since" is when the
+  *entry was created*, not when the statement last ran, and it is empty before
+  PostgreSQL 17 where the column does not exist.
+
+### Verifying a Fix
+
+Because the counters are cumulative and nothing decays, a statement you fixed today
+still appears next week with the same totals. To check whether a fix landed, reset
+that one statement's entry:
+
+```sql
+SELECT pg_stat_statements_reset(
+    0,
+    (SELECT oid FROM pg_database WHERE datname = current_database()),
+    <queryid>);   -- from the table above
+```
+
+A targeted reset **deletes** the entry (measured at ~0.4 ms; it touches only the
+`pg_stat_statements` hash table). Re-run this check after a full traffic cycle:
+
+- entry still absent — the statement has not run
+- entry back with no temp writes — it ran and no longer spills
+- entry back at the top — the fix did not land
+
+This needs EXECUTE on `pg_stat_statements_reset`, which is **superuser-only by default
+and is not granted to `pg_monitor`**, so a read-only monitoring role cannot do it.
+
+**Do not run `pg_stat_reset()` on a production primary** to clear the headline rate.
+It is the only thing that clears `temp_files`/`temp_bytes`, but it also zeroes
+`n_dead_tup` and `n_mod_since_analyze` for every table — the counters autovacuum
+schedules on — so every table's next autovacuum is deferred until the churn
+re-accumulates. Compare two runs of this check over a known interval instead.
+
+The two clocks are independent: `pg_stat_statements_reset()` clears the table and
+leaves the rate untouched; `pg_stat_reset()` clears the rate and leaves the table.
+
 ## Why This Matters
 
 Temporary files are created when PostgreSQL operations exceed `work_mem`:
@@ -79,8 +139,10 @@ ALTER SYSTEM SET log_temp_files = 10240;  -- Log temp files >10MB
 SELECT pg_reload_conf();
 
 -- Query pg_stat_statements to find offenders
+-- temp_blks_written is write I/O, not disk footprint: a multi-pass external sort
+-- rewrites the same file, so this can exceed the bytes the file ever occupied.
 SELECT query, calls, temp_blks_written,
-       pg_size_pretty(temp_blks_written * 8192) AS temp_size
+       pg_size_pretty(temp_blks_written * current_setting('block_size')::bigint) AS temp_written
 FROM pg_stat_statements
 WHERE temp_blks_written > 0
 ORDER BY temp_blks_written DESC
@@ -153,8 +215,10 @@ SELECT pg_reload_conf();
 
 ### Query pg_stat_statements
 ```sql
+-- temp_blks_written is write I/O, not disk footprint: a multi-pass external sort
+-- rewrites the same file, so this can exceed the bytes the file ever occupied.
 SELECT query, calls, temp_blks_written,
-       pg_size_pretty(temp_blks_written * 8192) AS temp_size
+       pg_size_pretty(temp_blks_written * current_setting('block_size')::bigint) AS temp_written
 FROM pg_stat_statements
 WHERE temp_blks_written > 0
 ORDER BY temp_blks_written DESC
