@@ -340,18 +340,20 @@ func (q *Queries) DuplicateIndexes(ctx context.Context) ([]DuplicateIndexesRow, 
 }
 
 const hasPgStatStatements = `-- name: HasPgStatStatements :one
-SELECT EXISTS(
-  SELECT 1 FROM pg_extension
-  WHERE extname = 'pg_stat_statements'
-)
+SELECT
+  EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')
+  AND EXISTS(SELECT 1 FROM pg_settings WHERE name = 'pg_stat_statements.max')
+  AND to_regclass('pg_stat_statements_info') IS NOT NULL
 `
 
-// Checks if pg_stat_statements extension is installed.
-func (q *Queries) HasPgStatStatements(ctx context.Context) (bool, error) {
+// Checks if pg_stat_statements can be read. Installed is not enough: it can be
+// created without the library preloaded, or into a schema outside search_path, and
+// then every read errors. The GUC only exists when the library loaded.
+func (q *Queries) HasPgStatStatements(ctx context.Context) (pgtype.Bool, error) {
 	row := q.db.QueryRow(ctx, hasPgStatStatements)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
+	var column_1 pgtype.Bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const hiddenQueryTextCount = `-- name: HiddenQueryTextCount :one

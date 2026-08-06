@@ -42,15 +42,15 @@ func (m *mockQueryer) HiddenQueryTextCount(context.Context) (pgtype.Int8, error)
 	return pgtype.Int8{Int64: m.hiddenQueries, Valid: true}, nil
 }
 
-func (m *mockQueryer) HasPgStatStatements(context.Context) (bool, error) {
+func (m *mockQueryer) HasPgStatStatements(context.Context) (pgtype.Bool, error) {
 	if m.extensionErr != nil {
-		return false, m.extensionErr
+		return pgtype.Bool{}, m.extensionErr
 	}
 	// Default to true (extension available) unless explicitly set to false
 	if m.hasExtension == nil {
-		return true, nil
+		return pgtype.Bool{Bool: true, Valid: true}, nil
 	}
-	return *m.hasExtension, nil
+	return pgtype.Bool{Bool: *m.hasExtension, Valid: true}, nil
 }
 
 func (m *mockQueryer) PartitionedTablesWithKeys(context.Context) ([]db.PartitionedTablesWithKeysRow, error) {

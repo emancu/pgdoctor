@@ -1,9 +1,11 @@
 -- name: HasPgStatStatements :one
--- Checks if pg_stat_statements extension is installed.
-SELECT EXISTS(
-  SELECT 1 FROM pg_extension
-  WHERE extname = 'pg_stat_statements'
-);
+-- Checks if pg_stat_statements can be read. Installed is not enough: it can be
+-- created without the library preloaded, or into a schema outside search_path, and
+-- then every read errors. The GUC only exists when the library loaded.
+SELECT
+  EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')
+  AND EXISTS(SELECT 1 FROM pg_settings WHERE name = 'pg_stat_statements.max')
+  AND to_regclass('pg_stat_statements_info') IS NOT NULL;
 
 -- name: HiddenQueryTextCount :one
 -- Counts pg_stat_statements rows whose text the current role cannot read.
