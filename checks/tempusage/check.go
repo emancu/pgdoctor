@@ -59,13 +59,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
-	// Both findings below are rates derived from the counter window, so without a
-	// usable window there is nothing to divide by. Skip rather than pass: a bare
-	// PASS reads as "no temp file problem", which is not what we know.
+	// Both findings below are rates over the counter window, so too short a window
+	// leaves nothing meaningful to divide by. Skip rather than pass: a bare PASS
+	// reads as "no temp file problem", which is not what we know.
 	window, windowKnown := statsWindowSeconds(row)
 	switch {
 	case !windowKnown:
-		return skip(report, "Counter window unknown (pg_stat_database.stats_reset is NULL); temp file rates cannot be computed."), nil
+		return skip(report, "Counter window unknown; temp file rates cannot be computed."), nil
 	case window < minWindowSeconds:
 		return skip(report, fmt.Sprintf(
 			"Counters cover only %s; need at least 1h of data to compute temp file rates.",
@@ -73,11 +73,29 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		)), nil
 	}
 
+	// Without a recorded reset the window is anchored to server uptime, which is a
+	// lower bound on the real one, so the rates are upper bounds. A rate under the
+	// threshold is still conclusive (the true one is smaller), but one above it may
+	// just be a long history divided by a short uptime — not worth a FAIL.
+	maxSeverity := check.SeverityFail
+	if row.WindowIsLowerBound.Bool {
+		maxSeverity = check.SeverityWarn
+	}
+
 	// Run all subchecks
-	checkTempFileRate(row, report)
-	checkTempVolumeRate(row, report)
+	checkTempFileRate(row, report, maxSeverity)
+	checkTempVolumeRate(row, report, maxSeverity)
 
 	return report, nil
+}
+
+// capSeverity holds a rate-derived severity to what the window can actually support.
+func capSeverity(severity, max check.Severity) check.Severity {
+	if severity > max {
+		return max
+	}
+
+	return severity
 }
 
 // skip marks the whole report unrunnable. The runner injects SeveritySkip when
@@ -133,7 +151,7 @@ func getTempBytesPerHour(row db.TempUsageRow) float64 {
 // checkTempFileRate identifies high temp file creation rates.
 // Thresholds are tuned for production scale based on observed baselines (~0.3 files/hour).
 // These catch regressions (query plan changes, work_mem resets) rather than absolute badness.
-func checkTempFileRate(row db.TempUsageRow, report *check.Report) {
+func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity check.Severity) {
 	rate := getTempFilesPerHour(row)
 
 	// Threshold: 5 files/hour is ~20x typical production baseline
@@ -154,8 +172,9 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report) {
 	if rate >= 20 {
 		severity = check.SeverityFail
 	}
+	severity = capSeverity(severity, maxSeverity)
 
-	var statsResetInfo string
+	statsResetInfo := " (over at least the server uptime; no stats reset recorded, so this rate is an upper bound)"
 	if row.StatsReset.Valid {
 		statsResetInfo = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
 	}
@@ -176,7 +195,7 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report) {
 // checkTempVolumeRate identifies high temp data volume.
 // Thresholds are tuned for production scale based on observed baselines (~124MB/hour).
 // These catch significant increases in disk spilling rather than absolute usage.
-func checkTempVolumeRate(row db.TempUsageRow, report *check.Report) {
+func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity check.Severity) {
 	const oneGB = float64(1024 * 1024 * 1024)
 	const fiveGB = float64(5 * 1024 * 1024 * 1024)
 
@@ -200,6 +219,7 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report) {
 	if bytesPerHour >= fiveGB {
 		severity = check.SeverityFail
 	}
+	severity = capSeverity(severity, maxSeverity)
 
 	report.AddFinding(check.Finding{
 		ID:       "temp-volume-rate",
