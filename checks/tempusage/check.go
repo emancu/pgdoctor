@@ -90,9 +90,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 // capSeverity holds a rate-derived severity to what the window can actually support.
-func capSeverity(severity, max check.Severity) check.Severity {
-	if severity > max {
-		return max
+func capSeverity(severity, ceiling check.Severity) check.Severity {
+	if severity > ceiling {
+		return ceiling
 	}
 
 	return severity
