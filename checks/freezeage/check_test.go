@@ -27,12 +27,17 @@ const (
 )
 
 // Thresholds at stock GUCs, restated here so a formula change has to be
-// deliberate: WARN = min(vacuum_freeze_table_age, 0.95 * 200M), FAIL = min(4 *
-// 200M, vacuum_failsafe_age). MultiXact WARN is the trigger itself.
+// deliberate. Both counters use the same derivation:
+//
+//	WARN = min(vacuum_[multixact_]freeze_table_age, 0.95 * effective trigger)
+//	FAIL = min(4 * effective trigger, vacuum_[multixact_]failsafe_age)
+//
+// MultiXact WARN lands on 150M — vacuum_multixact_freeze_table_age — not on the
+// 400M trigger, exactly like the XID path.
 const (
 	xidWarn        = int64(150_000_000)
 	xidFail        = int64(800_000_000)
-	mxidWarn       = int64(400_000_000)
+	mxidWarn       = int64(150_000_000)
 	mxidFail       = int64(1_600_000_000)
 	blockerWarn    = int64(50_000_000)
 	blockerFail    = int64(200_000_000)
@@ -85,18 +90,20 @@ func (m *mockQueryer) XminHorizonBlockers(context.Context) ([]db.XminHorizonBloc
 // database is a connectable, current database at the given XID age with stock GUCs.
 func database(name string, freezeAge int64) db.DatabaseFreezeAgeRow {
 	return db.DatabaseFreezeAgeRow{
-		DatabaseName:          name,
-		Datallowconn:          true,
-		IsCurrentDatabase:     true,
-		FrozenXid:             "1000",
-		FreezeAge:             freezeAge,
-		MinMultixactID:        "1",
-		MultixactAge:          0,
-		FreezeMaxAge:          pgInt8(defaultTrigger),
-		MultixactFreezeMaxAge: pgInt8(defaultMxTrig),
-		FreezeTableAge:        pgInt8(150_000_000),
-		FreezeMinAge:          pgInt8(50_000_000),
-		FailsafeAge:           pgInt8(1_600_000_000),
+		DatabaseName:            name,
+		Datallowconn:            true,
+		IsCurrentDatabase:       true,
+		FrozenXid:               "1000",
+		FreezeAge:               freezeAge,
+		MinMultixactID:          "1",
+		MultixactAge:            0,
+		FreezeMaxAge:            pgInt8(defaultTrigger),
+		MultixactFreezeMaxAge:   pgInt8(defaultMxTrig),
+		FreezeTableAge:          pgInt8(150_000_000),
+		MultixactFreezeTableAge: pgInt8(150_000_000),
+		FreezeMinAge:            pgInt8(50_000_000),
+		FailsafeAge:             pgInt8(1_600_000_000),
+		MultixactFailsafeAge:    pgInt8(1_600_000_000),
 	}
 }
 
@@ -140,7 +147,9 @@ func relation(name string, freezeAge int64) db.TableFreezeAgeRow {
 		EffectiveFreezeMaxAge:          pgInt8(defaultTrigger),
 		EffectiveMultixactFreezeMaxAge: pgInt8(defaultMxTrig),
 		FreezeTableAge:                 pgInt8(150_000_000),
+		MultixactFreezeTableAge:        pgInt8(150_000_000),
 		FailsafeAge:                    pgInt8(1_600_000_000),
+		MultixactFailsafeAge:           pgInt8(1_600_000_000),
 		XidReloption:                   pgInt8(0),
 		MultixactReloption:             pgInt8(0),
 		LastAutovacuum:                 pgTime(time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC)),
@@ -190,6 +199,15 @@ func loweredTriggerRelation(name string, freezeAge, reloption int64) db.TableFre
 	row := relation(name, freezeAge)
 	row.EffectiveFreezeMaxAge = pgInt8(reloption)
 	row.XidReloption = pgInt8(reloption)
+	return row
+}
+
+// loweredMultixactTriggerRelation is the MultiXact mirror: a per-table
+// autovacuum_multixact_freeze_max_age reloption lowering the effective trigger.
+func loweredMultixactTriggerRelation(name string, multixactAge, reloption int64) db.TableFreezeAgeRow {
+	row := relationWithMultixact(name, multixactAge)
+	row.EffectiveMultixactFreezeMaxAge = pgInt8(reloption)
+	row.MultixactReloption = pgInt8(reloption)
 	return row
 }
 
@@ -342,10 +360,11 @@ func TestFreezeAge_DatabaseMultixactBoundaries(t *testing.T) {
 		age      int64
 		severity check.Severity
 	}{
-		{name: "below trigger", age: mxidWarn - 1, severity: check.SeverityPass},
-		{name: "at trigger", age: mxidWarn, severity: check.SeverityWarn},
-		{name: "below failsafe", age: mxidFail - 1, severity: check.SeverityWarn},
-		{name: "at failsafe", age: mxidFail, severity: check.SeverityFail},
+		{name: "below aggressive scan threshold", age: mxidWarn - 1, severity: check.SeverityPass},
+		{name: "at aggressive scan threshold", age: mxidWarn, severity: check.SeverityWarn},
+		{name: "at the trigger itself", age: defaultMxTrig, severity: check.SeverityWarn},
+		{name: "below multixact failsafe", age: mxidFail - 1, severity: check.SeverityWarn},
+		{name: "at multixact failsafe", age: mxidFail, severity: check.SeverityFail},
 	}
 
 	for _, tt := range tests {
@@ -396,9 +415,10 @@ func TestFreezeAge_TableMultixactBoundaries(t *testing.T) {
 		age      int64
 		severity check.Severity
 	}{
-		{name: "below trigger", age: mxidWarn - 1, severity: check.SeverityPass},
-		{name: "at trigger", age: mxidWarn, severity: check.SeverityWarn},
-		{name: "at failsafe", age: mxidFail, severity: check.SeverityFail},
+		{name: "below aggressive scan threshold", age: mxidWarn - 1, severity: check.SeverityPass},
+		{name: "at aggressive scan threshold", age: mxidWarn, severity: check.SeverityWarn},
+		{name: "at the trigger itself", age: defaultMxTrig, severity: check.SeverityWarn},
+		{name: "at multixact failsafe", age: mxidFail, severity: check.SeverityFail},
 	}
 
 	for _, tt := range tests {
@@ -521,6 +541,31 @@ func TestFreezeAge_ReloptionLowersEffectiveTrigger(t *testing.T) {
 	require.NotNil(t, finding.Table)
 	assert.Contains(t, finding.Table.Rows[0].Cells[3], "of 100.0M")
 	assert.Contains(t, finding.Table.Rows[0].Cells[3], "reloption")
+}
+
+func TestFreezeAge_MultixactReloptionLowersEffectiveTrigger(t *testing.T) {
+	t.Parallel()
+
+	// 96M is harmless at the 400M GUC (WARN at 150M, the multixact
+	// aggressive-scan point) but past WARN once a reloption lowers the trigger to
+	// 100M (WARN at 0.95 * 100M = 95M).
+	const age = int64(96_000_000)
+
+	withoutOverride := healthy()
+	withoutOverride.tableRows = []db.TableFreezeAgeRow{relationWithMultixact("public.bookings", age)}
+	assert.Equal(t, check.SeverityPass, findingByID(t, run(t, withoutOverride), idTableMultixact).Severity)
+
+	withOverride := healthy()
+	withOverride.tableRows = []db.TableFreezeAgeRow{
+		loweredMultixactTriggerRelation("public.bookings", age, 100_000_000),
+	}
+
+	finding := findingByID(t, run(t, withOverride), idTableMultixact)
+	require.Equal(t, check.SeverityWarn, finding.Severity)
+	require.NotNil(t, finding.Table)
+	assert.Contains(t, finding.Table.Rows[0].Cells[3], "of 100.0M")
+	assert.Contains(t, finding.Table.Rows[0].Cells[3], "reloption")
+	assert.Contains(t, finding.Details, "MultiXacts from its anti-wraparound trigger")
 }
 
 func TestFreezeAge_HeadlineLeadsWithHeadroom(t *testing.T) {
