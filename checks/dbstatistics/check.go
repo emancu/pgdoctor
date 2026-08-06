@@ -24,15 +24,6 @@ var readme string
 // reporting may not have run at all.
 const minMatureWindowSeconds = 7 * 24 * 60 * 60
 
-// dependentChecks read pg_stat_database-backed counters and therefore measure over
-// the window this check reports.
-var dependentChecks = []string{
-	"index-usage",
-	"table-seq-scans",
-	"cache-efficiency",
-	"temp-usage",
-}
-
 type DBStatisticsQueries interface {
 	DBStatistics(context.Context) (db.DBStatisticsRow, error)
 }
@@ -102,6 +93,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
+	affectedChecks := []string{
+		"index-usage",
+		"table-seq-scans",
+		"cache-efficiency",
+		"temp-usage",
+	}
+
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
 		Name:     fmt.Sprintf("DB statistics: %s since last reset", window),
@@ -110,7 +108,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			"Counters cover %s, less than the %d days needed to reflect a full weekly cycle.\n\nUsage-based checks measure over this window and may under-report:\n%s",
 			window,
 			minMatureWindowSeconds/(24*60*60),
-			strings.Join(dependentChecks, "\n"),
+			strings.Join(affectedChecks, "\n"),
 		),
 	})
 
