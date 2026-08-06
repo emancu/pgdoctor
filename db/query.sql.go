@@ -1264,6 +1264,50 @@ func (q *Queries) PartitionedTablesWithKeys(ctx context.Context) ([]PartitionedT
 	return items, nil
 }
 
+const queryStatisticsAvailability = `-- name: QueryStatisticsAvailability :one
+SELECT
+  EXISTS (
+    SELECT 1 FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.max'
+  ) AS is_loaded
+  , EXISTS (
+    SELECT 1 FROM pg_catalog.pg_extension AS e WHERE e.extname = 'pg_stat_statements'
+  ) AS is_installed
+`
+
+type QueryStatisticsAvailabilityRow struct {
+	IsLoaded    bool
+	IsInstalled bool
+}
+
+// Distinguishes the three ways pg_stat_statements can be half-present.
+//
+// The extension's GUCs are only registered when its library is preloaded, so the
+// existence of a pg_stat_statements.max row means "loaded", independent of whether
+// CREATE EXTENSION has run. Both catalogs are world-readable; shared_preload_libraries
+// is GUC_SUPERUSER_ONLY and is silently omitted from pg_settings for unprivileged
+// roles, so it must not be used to answer this.
+func (q *Queries) QueryStatisticsAvailability(ctx context.Context) (QueryStatisticsAvailabilityRow, error) {
+	row := q.db.QueryRow(ctx, queryStatisticsAvailability)
+	var i QueryStatisticsAvailabilityRow
+	err := row.Scan(&i.IsLoaded, &i.IsInstalled)
+	return i, err
+}
+
+const queryStatisticsWindow = `-- name: QueryStatisticsWindow :one
+SELECT stats_reset
+FROM pg_stat_statements_info
+`
+
+// Raises "pg_stat_statements must be loaded via shared_preload_libraries" when the
+// extension is created but not preloaded, so call it only once
+// QueryStatisticsAvailability reports both.
+func (q *Queries) QueryStatisticsWindow(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, queryStatisticsWindow)
+	var stats_reset pgtype.Timestamptz
+	err := row.Scan(&stats_reset)
+	return stats_reset, err
+}
+
 const queryStatsFromStatStatements = `-- name: QueryStatsFromStatStatements :many
 WITH candidates AS (
   SELECT

@@ -22,6 +22,7 @@ sql:
       - "checks/tableseqscans"
       - "checks/cacheefficiency"
       - "checks/dbstatistics"
+      - "checks/querystatistics"
       - "checks/freezeage"
       - "checks/tablebloat"
       - "checks/indexbloat"

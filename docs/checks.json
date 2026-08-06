@@ -85,6 +85,12 @@
       "description": "Validates primary keys use bigint or UUID for sufficient growth capacity"
     },
     {
+      "id": "query-statistics",
+      "name": "Query Statistics",
+      "category": "configs",
+      "description": "Reports how long pg_stat_statements counters have been accumulating"
+    },
+    {
       "id": "replication-lag",
       "name": "Replication Lag",
       "category": "performance",
