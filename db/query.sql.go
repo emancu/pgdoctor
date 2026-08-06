@@ -161,8 +161,10 @@ SELECT
   , g.freeze_max_age
   , g.multixact_freeze_max_age
   , g.freeze_table_age
+  , g.multixact_freeze_table_age
   , g.freeze_min_age
   , g.failsafe_age
+  , g.multixact_failsafe_age
 FROM pg_catalog.pg_database AS d
 CROSS JOIN (
   -- Single aggregate pass over pg_settings instead of one correlated subquery
@@ -175,33 +177,43 @@ CROSS JOIN (
       max(CASE WHEN s.name = 'autovacuum_multixact_freeze_max_age' THEN s.setting::bigint END), 400000000
     ) AS multixact_freeze_max_age
     , coalesce(max(CASE WHEN s.name = 'vacuum_freeze_table_age' THEN s.setting::bigint END), 150000000) AS freeze_table_age
+    , coalesce(
+      max(CASE WHEN s.name = 'vacuum_multixact_freeze_table_age' THEN s.setting::bigint END), 150000000
+    ) AS multixact_freeze_table_age
     , coalesce(max(CASE WHEN s.name = 'vacuum_freeze_min_age' THEN s.setting::bigint END), 50000000) AS freeze_min_age
     , coalesce(max(CASE WHEN s.name = 'vacuum_failsafe_age' THEN s.setting::bigint END), 1600000000) AS failsafe_age
+    , coalesce(
+      max(CASE WHEN s.name = 'vacuum_multixact_failsafe_age' THEN s.setting::bigint END), 1600000000
+    ) AS multixact_failsafe_age
   FROM pg_catalog.pg_settings AS s
   WHERE s.name IN (
     'autovacuum_freeze_max_age'
     , 'autovacuum_multixact_freeze_max_age'
     , 'vacuum_freeze_table_age'
+    , 'vacuum_multixact_freeze_table_age'
     , 'vacuum_freeze_min_age'
     , 'vacuum_failsafe_age'
+    , 'vacuum_multixact_failsafe_age'
   )
 ) AS g
 ORDER BY age(d.datfrozenxid) DESC
 `
 
 type DatabaseFreezeAgeRow struct {
-	DatabaseName          string
-	Datallowconn          bool
-	IsCurrentDatabase     bool
-	FrozenXid             string
-	FreezeAge             int64
-	MinMultixactID        string
-	MultixactAge          int64
-	FreezeMaxAge          pgtype.Int8
-	MultixactFreezeMaxAge pgtype.Int8
-	FreezeTableAge        pgtype.Int8
-	FreezeMinAge          pgtype.Int8
-	FailsafeAge           pgtype.Int8
+	DatabaseName            string
+	Datallowconn            bool
+	IsCurrentDatabase       bool
+	FrozenXid               string
+	FreezeAge               int64
+	MinMultixactID          string
+	MultixactAge            int64
+	FreezeMaxAge            pgtype.Int8
+	MultixactFreezeMaxAge   pgtype.Int8
+	FreezeTableAge          pgtype.Int8
+	MultixactFreezeTableAge pgtype.Int8
+	FreezeMinAge            pgtype.Int8
+	FailsafeAge             pgtype.Int8
+	MultixactFailsafeAge    pgtype.Int8
 }
 
 // Gets XID and MultiXact freeze age for EVERY database in the cluster.
@@ -230,8 +242,10 @@ func (q *Queries) DatabaseFreezeAge(ctx context.Context) ([]DatabaseFreezeAgeRow
 			&i.FreezeMaxAge,
 			&i.MultixactFreezeMaxAge,
 			&i.FreezeTableAge,
+			&i.MultixactFreezeTableAge,
 			&i.FreezeMinAge,
 			&i.FailsafeAge,
+			&i.MultixactFailsafeAge,
 		); err != nil {
 			return nil, err
 		}
@@ -2266,13 +2280,21 @@ WITH settings AS (
       max(CASE WHEN s.name = 'autovacuum_multixact_freeze_max_age' THEN s.setting::bigint END), 400000000
     ) AS multixact_freeze_max_age
     , coalesce(max(CASE WHEN s.name = 'vacuum_freeze_table_age' THEN s.setting::bigint END), 150000000) AS freeze_table_age
+    , coalesce(
+      max(CASE WHEN s.name = 'vacuum_multixact_freeze_table_age' THEN s.setting::bigint END), 150000000
+    ) AS multixact_freeze_table_age
     , coalesce(max(CASE WHEN s.name = 'vacuum_failsafe_age' THEN s.setting::bigint END), 1600000000) AS failsafe_age
+    , coalesce(
+      max(CASE WHEN s.name = 'vacuum_multixact_failsafe_age' THEN s.setting::bigint END), 1600000000
+    ) AS multixact_failsafe_age
   FROM pg_catalog.pg_settings AS s
   WHERE s.name IN (
     'autovacuum_freeze_max_age'
     , 'autovacuum_multixact_freeze_max_age'
     , 'vacuum_freeze_table_age'
+    , 'vacuum_multixact_freeze_table_age'
     , 'vacuum_failsafe_age'
+    , 'vacuum_multixact_failsafe_age'
   )
 )
 
@@ -2291,7 +2313,9 @@ WITH settings AS (
     , o.xid_reloption
     , o.multixact_reloption
     , g.freeze_table_age
+    , g.multixact_freeze_table_age
     , g.failsafe_age
+    , g.multixact_failsafe_age
     -- A per-table reloption can only LOWER the trigger, never raise it, so the
     -- GUC is always the upper bound.
     , least(coalesce(nullif(o.xid_reloption, 0), g.freeze_max_age), g.freeze_max_age) AS effective_freeze_max_age
@@ -2331,7 +2355,9 @@ WITH settings AS (
     , r.xid_reloption
     , r.multixact_reloption
     , r.freeze_table_age
+    , r.multixact_freeze_table_age
     , r.failsafe_age
+    , r.multixact_failsafe_age
     , r.effective_freeze_max_age
     , r.effective_multixact_freeze_max_age
     -- Total above the floor, so a truncated list can say "1,847 relations above
@@ -2339,9 +2365,14 @@ WITH settings AS (
     , count(*) OVER () AS total_above_floor
   FROM relations AS r
   WHERE
-    -- Reporting floor = the WARN threshold, so healthy instances return 0 rows.
+    -- Reporting floor = the WARN threshold on either counter, so healthy
+    -- instances return 0 rows. Both arms are PostgreSQL's own aggressive-scan
+    -- point for that counter; they must stay in step with the Go thresholds or
+    -- relations get filtered out before Go can classify them.
     r.freeze_age >= least(r.freeze_table_age, (0.95 * r.effective_freeze_max_age)::bigint)
-    OR r.multixact_age >= r.effective_multixact_freeze_max_age
+    OR r.multixact_age >= least(
+      r.multixact_freeze_table_age, (0.95 * r.effective_multixact_freeze_max_age)::bigint
+    )
   ORDER BY
     greatest(
       r.freeze_age::numeric / nullif(r.effective_freeze_max_age, 0)
@@ -2366,7 +2397,9 @@ SELECT
   , a.effective_freeze_max_age
   , a.effective_multixact_freeze_max_age
   , a.freeze_table_age
+  , a.multixact_freeze_table_age
   , a.failsafe_age
+  , a.multixact_failsafe_age
   , a.xid_reloption
   , a.multixact_reloption
   , s.last_autovacuum
@@ -2409,7 +2442,9 @@ type TableFreezeAgeRow struct {
 	EffectiveFreezeMaxAge          pgtype.Int8
 	EffectiveMultixactFreezeMaxAge pgtype.Int8
 	FreezeTableAge                 pgtype.Int8
+	MultixactFreezeTableAge        pgtype.Int8
 	FailsafeAge                    pgtype.Int8
+	MultixactFailsafeAge           pgtype.Int8
 	XidReloption                   pgtype.Int8
 	MultixactReloption             pgtype.Int8
 	LastAutovacuum                 pgtype.Timestamptz
@@ -2460,7 +2495,9 @@ func (q *Queries) TableFreezeAge(ctx context.Context) ([]TableFreezeAgeRow, erro
 			&i.EffectiveFreezeMaxAge,
 			&i.EffectiveMultixactFreezeMaxAge,
 			&i.FreezeTableAge,
+			&i.MultixactFreezeTableAge,
 			&i.FailsafeAge,
+			&i.MultixactFailsafeAge,
 			&i.XidReloption,
 			&i.MultixactReloption,
 			&i.LastAutovacuum,

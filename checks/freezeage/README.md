@@ -18,11 +18,13 @@ Nothing here is a number we invented. Every threshold is derived from the GUCs t
 | | WARN | FAIL | At stock GUCs |
 |---|---|---|---|
 | XID | `min(vacuum_freeze_table_age, 0.95 × effective autovacuum_freeze_max_age)` | `min(4 × effective trigger, vacuum_failsafe_age)` | 150M / 800M |
-| MultiXact | effective `autovacuum_multixact_freeze_max_age` | `min(4 × effective trigger, vacuum_failsafe_age)` | 400M / 1.6B |
+| MultiXact | `min(vacuum_multixact_freeze_table_age, 0.95 × effective autovacuum_multixact_freeze_max_age)` | `min(4 × effective trigger, vacuum_multixact_failsafe_age)` | 150M / 1.6B |
 
-**Why WARN there:** `min(vacuum_freeze_table_age, 0.95 × autovacuum_freeze_max_age)` is PostgreSQL's own formula for when it starts an *aggressive* (whole-relation) scan. The check fires at the point the database changes behaviour, not at a number that looked round. Healthy relations oscillate between `vacuum_freeze_min_age` (50M) and this value; a relation that stays above it is not oscillating any more.
+The two rows are the **same formula**. PostgreSQL gives the MultiXact counter a complete, independent set of GUCs — its own trigger (`autovacuum_multixact_freeze_max_age`), its own aggressive-scan point (`vacuum_multixact_freeze_table_age`) and its own failsafe (`vacuum_multixact_failsafe_age`) — so the derivation is identical and only the inputs differ. At stock settings both counters therefore WARN at 150M, even though the MultiXact trigger sits at 400M rather than 200M.
 
-**Why FAIL there:** `vacuum_failsafe_age` (1.6B) is the real cliff — cost delay disabled and **index vacuuming skipped entirely**. 2B is not a usable design anchor: the documented recovery from the hard stop is single-user mode, which **does not exist on RDS**.
+**Why WARN there:** `min(vacuum_[multixact_]freeze_table_age, 0.95 × trigger)` is PostgreSQL's own formula for when it starts an *aggressive* (whole-relation) scan. The check fires at the point the database changes behaviour, not at a number that looked round. Healthy relations oscillate between `vacuum_freeze_min_age` (50M) and this value; a relation that stays above it is not oscillating any more.
+
+**Why FAIL there:** the failsafe age (1.6B for both counters at defaults) is the real cliff — cost delay disabled and **index vacuuming skipped entirely**. 2B is not a usable design anchor: the documented recovery from the hard stop is single-user mode, which **does not exist on RDS**. `vacuum_failsafe_age` and `vacuum_multixact_failsafe_age` are read separately, so tuning one does not silently move the other counter's threshold.
 
 `age()` and `mxid_age()` saturate at 2147483647, so no threshold above that is meaningful and all thresholds are clamped to it.
 
@@ -72,13 +74,13 @@ VACUUM (FREEZE, VERBOSE) public.bookings;  -- processes its TOAST relation by de
 
 ### database-multixact-age
 
-Same shape against `pg_database.datminmxid` and `autovacuum_multixact_freeze_max_age`.
+Same shape against `pg_database.datminmxid`, derived from `autovacuum_multixact_freeze_max_age`, `vacuum_multixact_freeze_table_age` and `vacuum_multixact_failsafe_age` — WARN at 150M, FAIL at 1.6B on stock settings.
 
 `mxid_age('0'::xid)` returns 2147483647, so the query guards with `datminmxid <> '0'::xid`. Without that guard a database that has never allocated a MultiXact would report an instant FAIL.
 
 ### table-multixact-age
 
-Same, against `pg_class.relminmxid`, with the same `<> '0'::xid` guard.
+Same, against `pg_class.relminmxid`, with the same `<> '0'::xid` guard. A per-table `autovacuum_multixact_freeze_max_age` reloption lowers the effective MultiXact trigger exactly as its XID counterpart does.
 
 ### horizon-blockers
 
@@ -139,15 +141,17 @@ The honest relationship between them is lag, not scope: `datfrozenxid` is refres
 
 ## The real cliffs
 
-| Age | What happens |
-|---|---|
-| **150M** (`vacuum_freeze_table_age`) | Next vacuum becomes *aggressive*: scans the whole relation, not just the visibility-map-dirty part |
-| **200M** (`autovacuum_freeze_max_age`) | **Anti-wraparound** autovacuum starts, and it is **non-cancellable** |
-| **1.6B** (`vacuum_failsafe_age`) | Failsafe mode: cost delay disabled, **index vacuuming skipped entirely** — which is why index bloat shows up as a side effect of a wraparound incident |
-| **~2.134B** | `WARNING: database "x" must be vacuumed within N transactions` on every transaction |
-| **~2.1445B** | PostgreSQL refuses to assign new XIDs. Writes stop |
+Each row lists the XID GUC and its MultiXact twin, because both clocks have the full set:
 
-Recovery from the hard stop is documented as single-user mode. **That does not exist on RDS**, which is why this check treats `vacuum_failsafe_age` as the design anchor and not 2B.
+| Age (XID / MultiXact) | GUC | What happens |
+|---|---|---|
+| **150M / 150M** | `vacuum_freeze_table_age`, `vacuum_multixact_freeze_table_age` | Next vacuum becomes *aggressive*: scans the whole relation, not just the visibility-map-dirty part |
+| **200M / 400M** | `autovacuum_freeze_max_age`, `autovacuum_multixact_freeze_max_age` | **Anti-wraparound** autovacuum starts, and it is **non-cancellable** |
+| **1.6B / 1.6B** | `vacuum_failsafe_age`, `vacuum_multixact_failsafe_age` | Failsafe mode: cost delay disabled, **index vacuuming skipped entirely** — which is why index bloat shows up as a side effect of a wraparound incident |
+| **~2.134B** | — | `WARNING: database "x" must be vacuumed within N transactions` on every transaction |
+| **~2.1445B** | — | PostgreSQL refuses to assign new XIDs. Writes stop |
+
+Recovery from the hard stop is documented as single-user mode. **That does not exist on RDS**, which is why this check treats the failsafe ages as the design anchor and not 2B.
 
 Two behaviours make the 200M line sharper than it looks:
 

@@ -35,13 +35,14 @@ const (
 	maxAge = int64(2147483647)
 
 	// PostgreSQL starts an *aggressive* (whole-relation) scan at
-	// min(vacuum_freeze_table_age, 0.95 * autovacuum_freeze_max_age). That is the
+	// min(vacuum_freeze_table_age, 0.95 * autovacuum_freeze_max_age), and at the
+	// same formula over the multixact GUCs for the MultiXact counter. That is the
 	// point the database changes behaviour, so that is where we WARN. Healthy
 	// relations oscillate between vacuum_freeze_min_age and this value.
 	aggressiveScanFraction = 0.95
 
-	// FAIL at 4x the effective trigger, capped at vacuum_failsafe_age — the real
-	// cliff, where the cost delay is disabled and index vacuuming is skipped
+	// FAIL at 4x the effective trigger, capped at the counter's failsafe age — the
+	// real cliff, where the cost delay is disabled and index vacuuming is skipped
 	// entirely. 2B is not a usable anchor: the documented recovery from the hard
 	// stop is single-user mode, which does not exist on RDS.
 	failTriggerMultiplier = int64(4)
@@ -55,11 +56,13 @@ const (
 
 // Documented GUC defaults, used when a value is missing from pg_settings.
 const (
-	defaultFreezeMaxAge          = int64(200_000_000)
-	defaultMultixactFreezeMaxAge = int64(400_000_000)
-	defaultFreezeTableAge        = int64(150_000_000)
-	defaultFreezeMinAge          = int64(50_000_000)
-	defaultFailsafeAge           = int64(1_600_000_000)
+	defaultFreezeMaxAge            = int64(200_000_000)
+	defaultMultixactFreezeMaxAge   = int64(400_000_000)
+	defaultFreezeTableAge          = int64(150_000_000)
+	defaultMultixactFreezeTableAge = int64(150_000_000)
+	defaultFreezeMinAge            = int64(50_000_000)
+	defaultFailsafeAge             = int64(1_600_000_000)
+	defaultMultixactFailsafeAge    = int64(1_600_000_000)
 )
 
 // Blocker source values produced by XminHorizonBlockers.
@@ -134,24 +137,30 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
-// settings holds the cluster GUCs the thresholds are derived from.
+// settings holds the cluster GUCs the thresholds are derived from. The XID and
+// MultiXact counters have a full, independent set: trigger, aggressive-scan point
+// and failsafe age.
 type settings struct {
-	freezeMaxAge          int64
-	multixactFreezeMaxAge int64
-	freezeTableAge        int64
-	freezeMinAge          int64
-	failsafeAge           int64
+	freezeMaxAge            int64
+	multixactFreezeMaxAge   int64
+	freezeTableAge          int64
+	multixactFreezeTableAge int64
+	freezeMinAge            int64
+	failsafeAge             int64
+	multixactFailsafeAge    int64
 }
 
 // defaultSettings is the documented GUC baseline, used when pg_settings did not
 // report a value and for relation rows (which carry their own effective trigger).
 func defaultSettings() settings {
 	return settings{
-		freezeMaxAge:          defaultFreezeMaxAge,
-		multixactFreezeMaxAge: defaultMultixactFreezeMaxAge,
-		freezeTableAge:        defaultFreezeTableAge,
-		freezeMinAge:          defaultFreezeMinAge,
-		failsafeAge:           defaultFailsafeAge,
+		freezeMaxAge:            defaultFreezeMaxAge,
+		multixactFreezeMaxAge:   defaultMultixactFreezeMaxAge,
+		freezeTableAge:          defaultFreezeTableAge,
+		multixactFreezeTableAge: defaultMultixactFreezeTableAge,
+		freezeMinAge:            defaultFreezeMinAge,
+		failsafeAge:             defaultFailsafeAge,
+		multixactFailsafeAge:    defaultMultixactFailsafeAge,
 	}
 }
 
@@ -165,8 +174,18 @@ func settingsFrom(rows []db.DatabaseFreezeAgeRow) settings {
 	s.freezeMaxAge = orDefault(row.FreezeMaxAge.Int64, row.FreezeMaxAge.Valid, s.freezeMaxAge)
 	s.multixactFreezeMaxAge = orDefault(row.MultixactFreezeMaxAge.Int64, row.MultixactFreezeMaxAge.Valid, s.multixactFreezeMaxAge)
 	s.freezeTableAge = orDefault(row.FreezeTableAge.Int64, row.FreezeTableAge.Valid, s.freezeTableAge)
+	s.multixactFreezeTableAge = orDefault(
+		row.MultixactFreezeTableAge.Int64,
+		row.MultixactFreezeTableAge.Valid,
+		s.multixactFreezeTableAge,
+	)
 	s.freezeMinAge = orDefault(row.FreezeMinAge.Int64, row.FreezeMinAge.Valid, s.freezeMinAge)
 	s.failsafeAge = orDefault(row.FailsafeAge.Int64, row.FailsafeAge.Valid, s.failsafeAge)
+	s.multixactFailsafeAge = orDefault(
+		row.MultixactFailsafeAge.Int64,
+		row.MultixactFailsafeAge.Valid,
+		s.multixactFailsafeAge,
+	)
 
 	return s
 }
@@ -195,10 +214,15 @@ type thresholds struct {
 	fail int64
 }
 
-// xidThresholds mirrors PostgreSQL's own behaviour changes: WARN where it starts
-// scanning aggressively, FAIL where the failsafe strips vacuum down to bare
-// freezing.
-func xidThresholds(trigger, freezeTableAge, failsafeAge int64) thresholds {
+// deriveThresholds mirrors PostgreSQL's own behaviour changes: WARN where it
+// starts scanning aggressively, FAIL where the failsafe strips vacuum down to
+// bare freezing.
+//
+// Both counters use the same derivation because PostgreSQL treats them the same
+// way — each has its own trigger (autovacuum_[multixact_]freeze_max_age), its own
+// aggressive-scan point (vacuum_[multixact_]freeze_table_age) and its own failsafe
+// (vacuum_[multixact_]failsafe_age). Only the GUCs passed in differ.
+func deriveThresholds(trigger, freezeTableAge, failsafeAge int64) thresholds {
 	warn := int64(math.Round(aggressiveScanFraction * float64(trigger)))
 	if freezeTableAge > 0 && freezeTableAge < warn {
 		warn = freezeTableAge
@@ -210,19 +234,6 @@ func xidThresholds(trigger, freezeTableAge, failsafeAge int64) thresholds {
 	}
 
 	return thresholds{warn: clampAge(warn), fail: clampAge(fail)}
-}
-
-// multixactThresholds uses the trigger itself as WARN (400M at defaults). There
-// is no separate "begin aggressive scan" number to read for MultiXacts, and RDS
-// exposes no multixact CloudWatch metric at all, so reaching the trigger — the
-// point anti-wraparound, non-cancellable vacuum starts — is the signal.
-func multixactThresholds(trigger, failsafeAge int64) thresholds {
-	fail := trigger * failTriggerMultiplier
-	if failsafeAge > 0 && failsafeAge < fail {
-		fail = failsafeAge
-	}
-
-	return thresholds{warn: clampAge(trigger), fail: clampAge(fail)}
 }
 
 func clampAge(age int64) int64 {
@@ -267,13 +278,13 @@ var xidCounter = counter{
 	dbAge:          func(r db.DatabaseFreezeAgeRow) int64 { return r.FreezeAge },
 	relAge:         func(r db.TableFreezeAgeRow) int64 { return r.FreezeAge },
 	dbThresholds: func(_ db.DatabaseFreezeAgeRow, s settings) (int64, thresholds) {
-		return s.freezeMaxAge, xidThresholds(s.freezeMaxAge, s.freezeTableAge, s.failsafeAge)
+		return s.freezeMaxAge, deriveThresholds(s.freezeMaxAge, s.freezeTableAge, s.failsafeAge)
 	},
 	relThresholds: func(r db.TableFreezeAgeRow, s settings) (int64, thresholds) {
 		trigger := orDefault(r.EffectiveFreezeMaxAge.Int64, r.EffectiveFreezeMaxAge.Valid, s.freezeMaxAge)
 		freezeTableAge := orDefault(r.FreezeTableAge.Int64, r.FreezeTableAge.Valid, s.freezeTableAge)
 		failsafeAge := orDefault(r.FailsafeAge.Int64, r.FailsafeAge.Valid, s.failsafeAge)
-		return trigger, xidThresholds(trigger, freezeTableAge, failsafeAge)
+		return trigger, deriveThresholds(trigger, freezeTableAge, failsafeAge)
 	},
 	relOverride: func(r db.TableFreezeAgeRow) int64 { return r.XidReloption.Int64 },
 }
@@ -287,7 +298,9 @@ var multixactCounter = counter{
 	dbAge:          func(r db.DatabaseFreezeAgeRow) int64 { return r.MultixactAge },
 	relAge:         func(r db.TableFreezeAgeRow) int64 { return r.MultixactAge },
 	dbThresholds: func(_ db.DatabaseFreezeAgeRow, s settings) (int64, thresholds) {
-		return s.multixactFreezeMaxAge, multixactThresholds(s.multixactFreezeMaxAge, s.failsafeAge)
+		return s.multixactFreezeMaxAge, deriveThresholds(
+			s.multixactFreezeMaxAge, s.multixactFreezeTableAge, s.multixactFailsafeAge,
+		)
 	},
 	relThresholds: func(r db.TableFreezeAgeRow, s settings) (int64, thresholds) {
 		trigger := orDefault(
@@ -295,8 +308,13 @@ var multixactCounter = counter{
 			r.EffectiveMultixactFreezeMaxAge.Valid,
 			s.multixactFreezeMaxAge,
 		)
-		failsafeAge := orDefault(r.FailsafeAge.Int64, r.FailsafeAge.Valid, s.failsafeAge)
-		return trigger, multixactThresholds(trigger, failsafeAge)
+		freezeTableAge := orDefault(
+			r.MultixactFreezeTableAge.Int64,
+			r.MultixactFreezeTableAge.Valid,
+			s.multixactFreezeTableAge,
+		)
+		failsafeAge := orDefault(r.MultixactFailsafeAge.Int64, r.MultixactFailsafeAge.Valid, s.multixactFailsafeAge)
+		return trigger, deriveThresholds(trigger, freezeTableAge, failsafeAge)
 	},
 	relOverride: func(r db.TableFreezeAgeRow) int64 { return r.MultixactReloption.Int64 },
 }
