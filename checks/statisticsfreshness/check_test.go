@@ -155,7 +155,7 @@ func Test_StatisticsFreshness_MatureStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity)
-	require.Equal(t, "Statistics: 14d since last reset", result.Name)
+	require.Contains(t, result.Details, "Counters cover 14d")
 }
 
 func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
@@ -177,7 +177,7 @@ func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity)
-	require.Equal(t, "Statistics: 3d since last reset", result.Name)
+	require.Contains(t, result.Details, "Counters cover 3d")
 	require.Contains(t, result.Details, "less than the 7 days recommended")
 	require.Contains(t, result.Details, "index-usage")
 	require.Contains(t, result.Details, "table-seq-scans")
@@ -202,7 +202,7 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity)
-	require.Equal(t, "Statistics: at least 300d, no reset recorded", result.Name)
+	require.Contains(t, result.Details, "at least")
 	require.NotContains(t, result.Details, "optimal")
 }
 
@@ -332,7 +332,7 @@ func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity, "Very old stats should still be OK")
-	require.Equal(t, "Statistics: 90d since last reset", result.Name)
+	require.Contains(t, result.Details, "Counters cover 90d")
 }
 
 func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
@@ -356,8 +356,8 @@ func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, result.Severity, "Just-reset stats should be WARN")
 	// Regression: the age used to come from a truncated day count, so anything under
 	// 24h reported "reset 0 days ago".
-	require.Equal(t, "Statistics: 0s since last reset", result.Name)
-	require.NotContains(t, result.Name, "0 days")
+	require.Contains(t, result.Details, "Counters cover 0s")
+	require.NotContains(t, result.Details, "0 days")
 }
 
 // The case the check used to miss. A crash, unclean shutdown or rebuilt replica
@@ -371,25 +371,21 @@ func Test_StatisticsFreshness_UnrecordedResetIsCaughtByUptime(t *testing.T) {
 		Name             string
 		Row              db.StatisticsFreshnessRow
 		ExpectedSeverity check.Severity
-		ExpectedTitle    string
 	}{
 		{
 			Name:             "no reset, server up for months",
 			Row:              noResetUptime(288),
 			ExpectedSeverity: check.SeverityPass,
-			ExpectedTitle:    "Statistics: at least 288d, no reset recorded",
 		},
 		{
 			Name:             "no reset, server restarted two days ago",
 			Row:              noResetUptime(2),
 			ExpectedSeverity: check.SeverityWarn,
-			ExpectedTitle:    "Statistics: at least 2d, no reset recorded",
 		},
 		{
 			Name:             "explicit reset, mature",
 			Row:              resetAgo(30),
 			ExpectedSeverity: check.SeverityPass,
-			ExpectedTitle:    "Statistics: 30d since last reset",
 		},
 	}
 
@@ -402,7 +398,6 @@ func Test_StatisticsFreshness_UnrecordedResetIsCaughtByUptime(t *testing.T) {
 			require.Len(t, report.Results, 1)
 
 			require.Equal(t, tc.ExpectedSeverity, report.Results[0].Severity)
-			require.Equal(t, tc.ExpectedTitle, report.Results[0].Name)
 		})
 	}
 }

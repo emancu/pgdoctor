@@ -103,5 +103,4 @@ unclean shutdown, or a node rebuild.
 
 Queries `pg_stat_database` for the statistics reset timestamp. The age is computed by
 the server, so it is not skewed by the clock of the host running pgdoctor, and is not
-truncated to whole days: a recent reset reads `45m` rather than `0 days`. It is
-reported in the check's title, because renderers drop a PASS finding's details.
+truncated to whole days: a recent reset reads `45m` rather than `0 days`.
