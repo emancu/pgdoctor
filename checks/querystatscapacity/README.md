@@ -101,7 +101,11 @@ times its own size every day.
 
 ## How to Fix
 
-### Confirm the numbers
+### For `statement-eviction-rate`
+
+`entry-usage` never warns, so this is the only finding here that needs acting on.
+
+#### Confirm the numbers
 
 ```sql
 WITH cap AS (
@@ -121,7 +125,7 @@ FROM pg_stat_statements_info AS i
 CROSS JOIN cap;
 ```
 
-### Reduce the number of distinct statements
+#### Reduce the number of distinct statements
 
 Do this first. It is the only fix that does not require a restart, and it usually finds a real bug.
 Look for statements that should have normalised to one entry and did not:
@@ -139,7 +143,7 @@ Common sources: string-interpolated literals instead of bind parameters, `IN ($1
 varying length (each length is a distinct `queryid`), per-tenant table or schema names in the statement
 text, and one-off DDL under `track_utility = on`.
 
-### Raise `pg_stat_statements.max`
+#### Raise `pg_stat_statements.max`
 
 **This is `PGC_POSTMASTER`: it requires a full server restart, not a reload.** On RDS or Aurora that is
 a reboot, and on Multi-AZ a reboot with failover. It is not a casual change; schedule it.
@@ -153,7 +157,7 @@ Size it above the observed distinct-statement working set with headroom, and onl
 normalisation work above. Each entry costs shared memory allocated at startup, and the query text lives
 in an external file whose size grows with the entry count.
 
-### Reset the counter after fixing
+#### Reset the counter after fixing
 
 `pg_stat_statements_reset()` zeroes `dealloc` and restarts the window, so the next run measures the new
 behaviour instead of averaging it with the old. It also deletes every entry, which resets the totals
