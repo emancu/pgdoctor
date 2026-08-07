@@ -96,10 +96,10 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// Naming the offenders only helps once there is something to chase, and reading
 	// pg_stat_statements materialises the whole query-text corpus into a work_mem
 	// tuplestore, so a healthy database does not pay for it.
-	attributed, gap := false, ""
+	gap := ""
 	if rateSeverity > check.SeverityPass {
 		var err error
-		if attributed, gap, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
+		if _, gap, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
 			return nil, err
 		}
 	}
@@ -108,18 +108,25 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// rates keep their grade whether or not the offenders could be named. The
 	// statement list carries the same grade: it is the actionable one, and burying it
 	// under INFO was what made this check hard to read.
-	// The gap explanation belongs on whichever rate actually fired, and only once.
-	fileGap, volumeGap := "", ""
-	switch {
-	case attributed:
-	case volumeSeverity > check.SeverityPass:
-		volumeGap = gap
-	case fileSeverity > check.SeverityPass:
-		fileGap = gap
+	// The totals behind the rates and the reason nothing could be attributed are both
+	// about the check rather than either rate, so they go on whichever fired, once.
+	details := ""
+	if rateSeverity > check.SeverityPass {
+		details = tempTotals(row)
+		if gap != "" {
+			details += "\n\n" + gap
+		}
 	}
 
-	reportTempFileRate(row, report, fileSeverity, fileGap)
-	reportTempVolumeRate(row, report, volumeSeverity, volumeGap)
+	fileDetails, volumeDetails := "", ""
+	if volumeSeverity > check.SeverityPass {
+		volumeDetails = details
+	} else {
+		fileDetails = details
+	}
+
+	reportTempFileRate(row, report, fileSeverity, fileDetails)
+	reportTempVolumeRate(row, report, volumeSeverity, volumeDetails)
 
 	return report, nil
 }
@@ -221,10 +228,10 @@ func explainAttributionGap(gap db.TempUsageAttributionGapRow) string {
 	}
 
 	if len(reasons) == 0 {
-		return "No statement accounts for this. " + next
+		return "No statement accounts for this.\n\n" + next
 	}
 
-	return fmt.Sprintf("No statement accounts for this: %s. %s", strings.Join(reasons, "; "), next)
+	return fmt.Sprintf("No statement accounts for this:\n%s\n\n%s", strings.Join(reasons, "\n"), next)
 }
 
 // entrySince renders when pg_stat_statements started tracking an entry. It is not a
@@ -332,30 +339,25 @@ func tempFileRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) check
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity, gap string) {
-	rate := getTempFilesPerHour(row)
-
-	finding := check.Finding{
+func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
+	report.AddFinding(check.Finding{
 		ID:       "temp-file-rate",
-		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
+		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", getTempFilesPerHour(row)),
 		Severity: severity,
+		Details:  details,
+	})
+}
+
+// tempTotals is the volume behind the rates: the rate alone cannot say whether it
+// came from a long quiet accumulation or a short violent one.
+func tempTotals(row db.TempUsageRow) string {
+	var since string
+	if row.StatsReset.Valid {
+		since = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
 	}
 
-	if severity != check.SeverityPass {
-		var since string
-		if row.StatsReset.Valid {
-			since = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
-		}
-
-		finding.Details = fmt.Sprintf("%d files totalling %s%s.",
-			row.TempFiles.Int64, check.FormatBytes(row.TempBytes.Int64), since)
-
-		if gap != "" {
-			finding.Details += " " + gap
-		}
-	}
-
-	report.AddFinding(finding)
+	return fmt.Sprintf("%s files totalling %s%s.",
+		check.FormatNumber(row.TempFiles.Int64), check.FormatBytes(row.TempBytes.Int64), since)
 }
 
 // tempVolumeRateSeverity grades the temp data volume.
@@ -383,14 +385,11 @@ func tempVolumeRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) che
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, gap string) {
-	finding := check.Finding{
+func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
+	report.AddFinding(check.Finding{
 		ID:       "temp-volume-rate",
 		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(getTempBytesPerHour(row)))),
 		Severity: severity,
-	}
-
-	finding.Details = gap
-
-	report.AddFinding(finding)
+		Details:  details,
+	})
 }
