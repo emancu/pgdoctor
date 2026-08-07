@@ -78,6 +78,51 @@ Three things are missing from it:
   *entry was created*, not when the statement last ran, and it is empty before
   PostgreSQL 17 where the column does not exist.
 
+### Investigating
+
+**If the table is empty**, the offenders exist but `pg_stat_statements` cannot see
+them. This tells you which of the reasons applies:
+
+```sql
+SELECT
+  (SELECT count(*) FROM pg_stat_statements
+     WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+       AND temp_blks_written > 0)                                           AS with_temp,
+  (SELECT setting FROM pg_settings WHERE name = 'pg_stat_statements.track') AS track,
+  (SELECT setting FROM pg_settings
+     WHERE name = 'pg_stat_statements.track_utility')                       AS track_utility,
+  (SELECT setting FROM pg_settings WHERE name = 'pg_stat_statements.max')   AS max_entries,
+  (SELECT dealloc FROM pg_stat_statements_info)                             AS evictions,
+  (SELECT stats_reset FROM pg_stat_statements_info)                         AS pgss_reset,
+  (SELECT stats_reset FROM pg_stat_database
+     WHERE datname = current_database())                                    AS db_stats_reset,
+  (SELECT setting FROM pg_settings WHERE name = 'statement_timeout')        AS statement_timeout,
+  (SELECT setting FROM pg_settings WHERE name = 'log_temp_files')           AS log_temp_files;
+```
+
+| Reading | Meaning |
+|---|---|
+| `statement_timeout` set | Killed queries never reach `ExecutorEnd`, so they are never recorded — while their temp files still count. The likeliest cause, and the offender is by definition an expensive one |
+| `evictions` large | Entries are being discarded faster than they accumulate. Each event drops ~5% of `max`, so 19,688 events at `max=10000` is ~9.8M entries gone. Anything infrequent disappears before it can be read, and **every** `pg_stat_statements`-based check is analysing a truncated sample |
+| `track_utility = off` | `CREATE INDEX`, `CLUSTER` and `VACUUM FULL` write sort files and are not recorded |
+| `pgss_reset` ≫ `db_stats_reset` | Query stats were reset; the rate kept its history while attribution started over |
+| `track = none` | Nothing is being recorded at all |
+
+`log_temp_files = 0` logs every temp file with its size and the statement that made
+it. That is the only source that sees all of them, and the fallback whenever the
+table cannot explain the rate.
+
+**If the top entry is a monitoring query**, that is not a false positive. Reading
+`pg_stat_statements` materialises its entire query-text corpus into a `work_mem`
+tuplestore before any filter applies, so an agent polling it frequently can become the
+largest temp producer on the instance. Check the poll interval and `work_mem` for that
+role before looking anywhere else. pgdoctor's own statements are excluded from the
+table, but other tools' are not — deliberately, since they spill like anything else.
+
+**A high volume rate with a low file rate** means few, very large files: sorts, hash
+joins or index builds exceeding `work_mem` by a wide margin, rather than routine
+overflow. Divide one by the other for the average file size.
+
 ### Verifying a Fix
 
 Because the counters are cumulative and nothing decays, a statement you fixed today
