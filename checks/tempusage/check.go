@@ -66,9 +66,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
-	// Both findings below are rates over the counter window, so too short a window
-	// leaves nothing meaningful to divide by. Skip rather than pass: a bare PASS
-	// reads as "no temp file problem", which is not what we know.
+	// The finding below is a pair of rates over the counter window, so too short a
+	// window leaves nothing meaningful to divide by. Skip rather than pass: a bare
+	// PASS reads as "no temp file problem", which is not what we know.
 	window, windowKnown := statsWindowSeconds(row)
 	switch {
 	case !windowKnown:
@@ -89,44 +89,33 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		maxSeverity = check.SeverityWarn
 	}
 
-	fileSeverity := tempFileRateSeverity(row, maxSeverity)
-	volumeSeverity := tempVolumeRateSeverity(row, maxSeverity)
-	rateSeverity := worst(fileSeverity, volumeSeverity)
+	// The two rates are graded separately and reported together. They are different
+	// signals - a high volume at a low file count is a few enormous spills, the
+	// reverse is many small ones - but one condition, and one finding per condition.
+	rateSeverity := worst(tempFileRateSeverity(row, maxSeverity), tempVolumeRateSeverity(row, maxSeverity))
 
-	// Naming the offenders only helps once there is something to chase, and reading
-	// pg_stat_statements materialises the whole query-text corpus into a work_mem
-	// tuplestore, so a healthy database does not pay for it.
-	gap := ""
+	// A rate over its threshold demands action, which is not what INFO means, so the
+	// rate keeps its grade whether or not the offenders could be named. The statement
+	// list carries the same grade: it is the actionable one, and burying it under INFO
+	// was what made this check hard to read.
+	details := ""
+
 	if rateSeverity > check.SeverityPass {
-		var err error
-		if _, gap, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
+		// Naming the offenders only helps once there is something to chase, and reading
+		// pg_stat_statements materialises the whole query-text corpus into a work_mem
+		// tuplestore, so a healthy database does not pay for it.
+		gap, err := c.reportTopStatements(ctx, report, rateSeverity)
+		if err != nil {
 			return nil, err
 		}
-	}
 
-	// A rate over its threshold demands action, which is not what INFO means, so both
-	// rates keep their grade whether or not the offenders could be named. The
-	// statement list carries the same grade: it is the actionable one, and burying it
-	// under INFO was what made this check hard to read.
-	// The totals behind the rates and the reason nothing could be attributed are both
-	// about the check rather than either rate, so they go on whichever fired, once.
-	details := ""
-	if rateSeverity > check.SeverityPass {
 		details = tempTotals(row, window)
 		if gap != "" {
 			details += "\n\n" + gap
 		}
 	}
 
-	fileDetails, volumeDetails := "", ""
-	if volumeSeverity > check.SeverityPass {
-		volumeDetails = details
-	} else {
-		fileDetails = details
-	}
-
-	reportTempFileRate(row, report, fileSeverity, fileDetails)
-	reportTempVolumeRate(row, report, volumeSeverity, volumeDetails)
+	reportTempRate(row, report, rateSeverity, details)
 
 	return report, nil
 }
@@ -139,32 +128,33 @@ func worst(a, b check.Severity) check.Severity {
 	return b
 }
 
-// reportTopStatements attributes the temp writes to individual statements. The
-// figures rank offenders and must not be summed or compared against the rates above:
-// pg_stat_database measures the disk footprint of each temp file, while
-// pg_stat_statements counts write I/O, which a multi-pass external sort repeats.
-func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (bool, string, error) {
+// reportTopStatements attributes the temp writes to individual statements, and
+// returns why it could not whenever it could not. The figures rank offenders and must
+// not be summed or compared against the rate: pg_stat_database measures the disk
+// footprint of each temp file, while pg_stat_statements counts write I/O, which a
+// multi-pass external sort repeats.
+func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (string, error) {
 	available, err := c.queries.HasPgStatStatements(ctx)
 	if err != nil {
-		return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
 	if !available.Bool {
-		return false, "pg_stat_statements is not available, so nothing can be attributed.", nil
+		return "pg_stat_statements is not available, so nothing can be attributed.", nil
 	}
 
 	statements, err := c.queries.TempUsageByStatement(ctx)
 	if err != nil {
-		return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
 	if len(statements) == 0 {
 		gap, err := c.queries.TempUsageAttributionGap(ctx)
 		if err != nil {
-			return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+			return "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 		}
 
-		return false, explainAttributionGap(gap), nil
+		return explainAttributionGap(gap), nil
 	}
 
 	rows := make([]check.TableRow, 0, len(statements))
@@ -186,7 +176,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 		Name:     fmt.Sprintf("Statements Spilling To Disk: %d", len(rows)),
 		Severity: severity,
 		Details: fmt.Sprintf(
-			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals above.",
+			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals reported by the rate.",
 			len(rows)),
 		Table: &check.Table{
 			Headers: []string{"Temp Written", "Calls", "Tracked Since", "Query ID", "Query"},
@@ -194,7 +184,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 		},
 	})
 
-	return true, "", nil
+	return "", nil
 }
 
 // explainAttributionGap names the reasons pg_stat_statements holds no temp writes
@@ -339,15 +329,6 @@ func tempFileRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) check
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
-	report.AddFinding(check.Finding{
-		ID:       "temp-file-rate",
-		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", getTempFilesPerHour(row)),
-		Severity: severity,
-		Details:  details,
-	})
-}
-
 // tempTotals is the volume behind the rates: the rate alone cannot say whether it
 // came from a long quiet accumulation or a short violent one. It always states the
 // period, since a cumulative total without one says nothing. With no recorded reset
@@ -387,10 +368,15 @@ func tempVolumeRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) che
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
+// reportTempRate carries both numbers on one finding. They are graded apart but read
+// together: the volume divided by the file count is the average spill size, which is
+// what separates a few enormous sorts from a flood of small ones. Reporting them as
+// two findings made one condition look like two problems.
+func reportTempRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
 	report.AddFinding(check.Finding{
-		ID:       "temp-volume-rate",
-		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(getTempBytesPerHour(row)))),
+		ID: "temp-rate",
+		Name: fmt.Sprintf("Temp File Rate: %.1f files/hour, %s/hour",
+			getTempFilesPerHour(row), check.FormatBytes(int64(getTempBytesPerHour(row)))),
 		Severity: severity,
 		Details:  details,
 	})
