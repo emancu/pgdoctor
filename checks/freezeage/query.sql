@@ -87,7 +87,8 @@ WITH settings AS (
   CROSS JOIN settings AS g
   LEFT JOIN pg_catalog.pg_class AS p ON c.relkind = 't' AND p.reltoastrelid = c.oid
   LEFT JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.relnamespace
-  -- 0 means "no override": the reloption minimum is 100000, so 0 is unambiguous.
+  -- 0 means "no override": the reloption minimums are 100000 (XID) and 10000
+  -- (MultiXact), so 0 cannot collide with a real value.
   CROSS JOIN LATERAL (
     SELECT
       coalesce(
@@ -103,42 +104,93 @@ WITH settings AS (
 )
 
 , above_floor AS (
-  SELECT r.*
+  SELECT
+    r.*
+    -- Per-member severity, so the group can report an age and the trigger it was
+    -- measured against from the SAME member (see targets below).
+    , r.freeze_age::numeric / nullif(r.effective_freeze_max_age, 0) AS xid_ratio
+    , r.multixact_age::numeric / nullif(r.effective_multixact_freeze_max_age, 0) AS multixact_ratio
   FROM relations AS r
   WHERE
-    -- Floor = the WARN threshold, so a healthy instance returns 0 rows. Nothing
-    -- vacuums a low-churn relation until the trigger fires, so peak age IS the
-    -- trigger; only exceeding it means autovacuum is losing.
-    r.freeze_age >= 2 * r.effective_freeze_max_age
-    OR r.multixact_age >= 2 * r.effective_multixact_freeze_max_age
+    -- Floor = the LOWER of the WARN and FAIL thresholds Go will apply, never just
+    -- WARN. Go clamps WARN to the age() ceiling and caps FAIL at the failsafe, so
+    -- a high trigger can make FAIL < WARN: at a 1.2B trigger, WARN clamps to
+    -- 2147483647 and FAIL is 1.6B. Flooring at a raw 2 * trigger (2.4B) would be
+    -- unreachable and would silently discard a 1.7B relation Go would FAIL.
+    -- 4 * trigger >= 2 * trigger always, so least(2 * trigger, failsafe, ceiling)
+    -- is exactly min(clamped WARN, FAIL).
+    r.freeze_age >= least(2 * r.effective_freeze_max_age, r.failsafe_age, 2147483647)
+    OR r.multixact_age >= least(
+      2 * r.effective_multixact_freeze_max_age, r.multixact_failsafe_age, 2147483647
+    )
+)
+
+-- The worst member per counter, picked whole. Reporting max(age) against
+-- min(trigger) as independent aggregates would pair one member's age with
+-- another's trigger and fabricate a severity no relation has: a 390M/100M parent
+-- and an 800M/400M TOAST (both WARN) would combine into 800M against 100M, a
+-- FAIL. DISTINCT ON keeps age, trigger and reloption from the same row — and
+-- keeps them NOT NULL, which an array_agg subscript would not.
+, worst_xid AS (
+  SELECT DISTINCT ON (a.target_oid)
+    a.target_oid
+    , a.freeze_age
+    , a.effective_freeze_max_age
+    , a.xid_reloption
+    , a.failsafe_age
+    , coalesce(a.xid_ratio, 0) AS xid_ratio
+  FROM above_floor AS a
+  ORDER BY a.target_oid, a.xid_ratio DESC NULLS LAST
+)
+
+, worst_multixact AS (
+  SELECT DISTINCT ON (a.target_oid)
+    a.target_oid
+    , a.multixact_age
+    , a.effective_multixact_freeze_max_age
+    , a.multixact_reloption
+    , a.multixact_failsafe_age
+    , coalesce(a.multixact_ratio, 0) AS multixact_ratio
+  FROM above_floor AS a
+  ORDER BY a.target_oid, a.multixact_ratio DESC NULLS LAST
+)
+
+, grouped AS (
+  SELECT
+    a.target_oid
+    , a.vacuum_target
+    , count(*) AS grouped_relations
+    , count(*) FILTER (WHERE a.relkind = 't') AS toast_relations
+    -- For Debug: names the relation that pulled the group in, on either counter.
+    , (array_agg(
+      a.relation_name
+      ORDER BY greatest(coalesce(a.xid_ratio, 0), coalesce(a.multixact_ratio, 0)) DESC
+    ))[1]::text AS worst_relation
+  FROM above_floor AS a
+  GROUP BY a.target_oid, a.vacuum_target
 )
 
 , targets AS (
   SELECT
-    a.target_oid
-    , a.vacuum_target
-    -- The group is as bad as its worst member, against its tightest trigger.
-    , max(a.freeze_age) AS freeze_age
-    , max(a.multixact_age) AS multixact_age
-    , min(a.effective_freeze_max_age) AS effective_freeze_max_age
-    , min(a.effective_multixact_freeze_max_age) AS effective_multixact_freeze_max_age
-    , min(a.failsafe_age) AS failsafe_age
-    , min(a.multixact_failsafe_age) AS multixact_failsafe_age
-    , max(a.xid_reloption) AS xid_reloption
-    , max(a.multixact_reloption) AS multixact_reloption
-    , count(*) AS grouped_relations
-    , count(*) FILTER (WHERE a.relkind = 't') AS toast_relations
-    -- For Debug: names the TOAST relation that pulled the group in.
-    , (array_agg(a.relation_name ORDER BY a.freeze_age DESC))[1]::text AS worst_relation
-    -- Counts groups, not relations: window functions run after GROUP BY.
+    g.target_oid
+    , g.vacuum_target
+    , x.freeze_age
+    , x.effective_freeze_max_age
+    , x.xid_reloption
+    , x.failsafe_age
+    , m.multixact_age
+    , m.effective_multixact_freeze_max_age
+    , m.multixact_reloption
+    , m.multixact_failsafe_age
+    , g.grouped_relations
+    , g.toast_relations
+    , g.worst_relation
+    -- Counts groups, not relations.
     , count(*) OVER () AS total_above_floor
-  FROM above_floor AS a
-  GROUP BY a.target_oid, a.vacuum_target
-  ORDER BY
-    greatest(
-      max(a.freeze_age)::numeric / nullif(min(a.effective_freeze_max_age), 0)
-      , max(a.multixact_age)::numeric / nullif(min(a.effective_multixact_freeze_max_age), 0)
-    ) DESC
+  FROM grouped AS g
+  INNER JOIN worst_xid AS x ON x.target_oid = g.target_oid
+  INNER JOIN worst_multixact AS m ON m.target_oid = g.target_oid
+  ORDER BY greatest(x.xid_ratio, m.multixact_ratio) DESC
   LIMIT 50
 )
 
