@@ -134,7 +134,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report)
 			ID:       "temp-file-sources",
 			Name:     "Temp File Sources",
 			Severity: check.SeverityInfo,
-			Details:  "No statement in pg_stat_statements has written temp files. Cancelled and failed statements are never recorded there, so a query killed by statement_timeout will not appear.",
+			Details:  "pg_stat_statements attributes none of it: its counters reset independently of the rate above, and cancelled, untracked or evicted statements are never recorded.",
 		})
 
 		return nil
@@ -159,7 +159,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report)
 		Name:     "Temp File Sources",
 		Severity: check.SeverityInfo,
 		Details: fmt.Sprintf(
-			"Top %d statements by temp data written. These are write volume, not disk footprint, so they rank offenders but do not sum to the rates above. Cancelled or failed statements are absent.",
+			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals above.",
 			len(rows)),
 		Table: &check.Table{
 			Headers: []string{"Temp Written", "Calls", "Tracked Since", "Query ID", "Query"},

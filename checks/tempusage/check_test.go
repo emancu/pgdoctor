@@ -568,3 +568,27 @@ func TestTempUsage_AttributionUnavailable(t *testing.T) {
 	require.Equal(t, check.SeverityInfo, last.Severity)
 	require.Contains(t, last.Details, "pg_stat_statements is unavailable")
 }
+
+// The rate finding above has already reported temp data, so the attribution finding
+// must never read as "nothing wrote temp files". pg_stat_statements is a separate
+// counter set: it resets independently and drops cancelled, untracked and evicted
+// statements, so an empty result is a gap in attribution, not an absence of temp I/O.
+func TestTempUsage_EmptyAttributionDoesNotContradictTheRate(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: nil}
+
+	report, err := tempusage.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+
+	last := report.Results[len(report.Results)-1]
+	require.Equal(t, "temp-file-sources", last.ID)
+	require.Equal(t, check.SeverityInfo, last.Severity)
+	require.Contains(t, last.Details, "attributes none of it")
+	require.NotContains(t, last.Details, "No statement",
+		"must not deny temp files exist while the rate findings report them")
+}
