@@ -79,6 +79,12 @@
       "description": "Validates primary keys use bigint or UUID for sufficient growth capacity"
     },
     {
+      "id": "query-stats-capacity",
+      "name": "Query Stats Capacity",
+      "category": "configs",
+      "description": "Reports pg_stat_statements entry usage and how fast entries are evicted"
+    },
+    {
       "id": "replication-lag",
       "name": "Replication Lag",
       "category": "performance",

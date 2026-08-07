@@ -18,6 +18,7 @@ import (
 	"github.com/emancu/pgdoctor/checks/partitionusage"
 	"github.com/emancu/pgdoctor/checks/pgversion"
 	"github.com/emancu/pgdoctor/checks/pktypes"
+	"github.com/emancu/pgdoctor/checks/querystatscapacity"
 	"github.com/emancu/pgdoctor/checks/replicationlag"
 	"github.com/emancu/pgdoctor/checks/replicationslots"
 	"github.com/emancu/pgdoctor/checks/sequencehealth"
@@ -115,6 +116,12 @@ func AllChecks() []check.Package {
 			Metadata: pktypes.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return pktypes.New(db.New(conn), cfg)
+			},
+		},
+		{
+			Metadata: querystatscapacity.Metadata,
+			New: func(conn db.DBTX, cfg check.Config) check.Checker {
+				return querystatscapacity.New(db.New(conn), cfg)
 			},
 		},
 		{
