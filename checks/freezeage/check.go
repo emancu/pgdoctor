@@ -477,12 +477,11 @@ func checkHorizonPin(rows []db.HorizonPinsRow, dbAge int64, s settings, report *
 		oldest = max(oldest, item.age)
 	}
 
-	// The database age only escalates the finding when a pin is level with it.
-	// Otherwise the age has another cause and killing a pin would not move it.
+	// Coincidence drives the message, not the severity. A pin level with the age is
+	// what the age is waiting on; escalating on the age as well would be redundant,
+	// because a pin old enough to be level with a WARN-level age has already passed
+	// the 1x-trigger pin threshold above.
 	coincident := dbAge-oldest <= pinCoincidenceTolerance(trigger)
-	if coincident {
-		severity = max(severity, severityFor(dbAge, limits))
-	}
 
 	finding := check.Finding{
 		ID:       findingHorizonPin,
@@ -589,23 +588,16 @@ func worstPin(pins []pin) pin {
 	return worst
 }
 
-// pinRemediation is deliberately single-object: a set-valued command over slots or
-// prepared transactions is how an incident becomes an outage.
+// pinRemediation names one object, never a set: a set-valued command over slots or
+// prepared transactions is how an incident becomes an outage. The caveats — a
+// dropped logical slot forcing a CDC re-snapshot, confirming a standby is gone —
+// live in the README, which `pgdoctor explain freeze-age` renders.
 func pinRemediation(item pin) string {
-	switch item.source {
-	case sourcePreparedXact:
-		return fmt.Sprintf(
-			"Resolve it through the transaction manager that prepared it, or `ROLLBACK PREPARED '%s'`", item.object)
-	case sourceLogicalSlot:
-		return fmt.Sprintf(
-			"Make its consumer read again, or `SELECT pg_drop_replication_slot('%s')` — dropping a logical slot "+
-				"forces its consumer (Debezium or any other CDC reader) to re-snapshot from scratch, so that is a "+
-				"product decision to escalate, not a unilateral DBA action", item.object)
-	default:
-		return fmt.Sprintf(
-			"Restore the standby's replay, or `SELECT pg_drop_replication_slot('%s')` once you have confirmed "+
-				"the standby is gone", item.object)
+	if item.source == sourcePreparedXact {
+		return fmt.Sprintf("Resolve it, or `ROLLBACK PREPARED '%s'`", item.object)
 	}
+	return fmt.Sprintf("Make its consumer read again, or `SELECT pg_drop_replication_slot('%s')` "+
+		"— see the README before dropping it", item.object)
 }
 
 func pinSourceLabel(source string) string {

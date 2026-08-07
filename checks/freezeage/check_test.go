@@ -653,12 +653,13 @@ func TestFreezeAge_HorizonPinCoincidence(t *testing.T) {
 			wantOut: "advance or drop",
 		},
 		{
-			// Reachable only below a 10M trigger, where the tolerance floor is wider
-			// than the trigger itself: the age is what escalates, not the pin.
-			name:  "the age alone escalates when a pin is level with it",
+			// Coincidence changes the message, never the severity: a pin old enough to
+			// be level with a WARN-level age has already crossed the 1x-trigger pin
+			// threshold, so escalating on the age too would be redundant.
+			name:  "coincidence alone does not escalate",
 			dbRow: databaseWithTrigger("appdb", 10_000_000, 5_000_000),
 			pin:   activeLogicalSlot("debezium_bookings", 1_000_000),
-			want:  check.SeverityWarn, wantIn: "advance or drop it",
+			want:  check.SeverityPass, wantIn: "durable pin",
 		},
 	}
 
@@ -692,23 +693,22 @@ func TestFreezeAge_HorizonPinRemediation(t *testing.T) {
 		wantIn []string
 	}{
 		{
-			name: "logical slot carries the re-snapshot escalation",
+			name: "logical slot names one slot and defers the caveat to the README",
 			pin:  slot("logical_slot", "debezium_bookings", "lost", 5, false),
 			wantIn: []string{
 				"SELECT pg_drop_replication_slot('debezium_bookings')",
-				"re-snapshot from scratch",
-				"product decision to escalate",
+				"see the README before dropping it",
 			},
 		},
 		{
-			name:   "physical slot points at the standby first",
+			name:   "physical slot names one slot",
 			pin:    slot("physical_slot", "replica_1", "lost", 5, false),
-			wantIn: []string{"SELECT pg_drop_replication_slot('replica_1')", "standby"},
+			wantIn: []string{"SELECT pg_drop_replication_slot('replica_1')"},
 		},
 		{
 			name:   "prepared transaction names its gid",
 			pin:    preparedXact("gid-xa-42", 4*defaultTrigger),
-			wantIn: []string{"ROLLBACK PREPARED 'gid-xa-42'", "transaction manager"},
+			wantIn: []string{"ROLLBACK PREPARED 'gid-xa-42'"},
 		},
 	}
 
@@ -726,6 +726,10 @@ func TestFreezeAge_HorizonPinRemediation(t *testing.T) {
 				assert.Contains(t, finding.Details, want)
 			}
 			assert.NotContains(t, finding.Details, "XID", "user-facing prose says transactions")
+			// The property this test exists for: never a set-valued command.
+			for _, forbidden := range []string{"FROM pg_replication_slots", "FROM pg_prepared_xacts", "WHERE"} {
+				assert.NotContains(t, finding.Details, forbidden, "remediation must name one object")
+			}
 		})
 	}
 }
