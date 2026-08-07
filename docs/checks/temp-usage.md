@@ -18,14 +18,13 @@ The volume of temp data written, reported as context:
 - Above **1 GB/hour**: increased large sorts/hashes from new features or query changes
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
 
-Crossing a threshold tells you a problem exists but not what to do about it, so when
-the statements responsible **can** be named the WARN or FAIL lands on
-`temp-file-sources` below and the rates become context.
+A rate over its threshold demands action, so both rates carry WARN or FAIL, and so
+does `temp-file-sources` below when it can name the statements responsible.
 
-When they **cannot** be named the rates keep the severity. An unattributable spill is
-often the worst case rather than a benign one: `pg_stat_statements` records at
-`ExecutorEnd`, so a statement killed by `statement_timeout` never appears there while
-its temp file is still counted here. Set `log_temp_files` to catch those.
+When it cannot, the rates still carry it. An unattributable spill is often the worst
+case rather than a benign one: `pg_stat_statements` records at `ExecutorEnd`, so a
+statement killed by `statement_timeout` never appears there while its temp file is
+still counted here. Set `log_temp_files` to catch those.
 
 ### The Measurement Window
 
