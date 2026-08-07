@@ -1987,27 +1987,25 @@ func (q *Queries) SessionStatistics(ctx context.Context) (SessionStatisticsRow, 
 const statisticsFreshness = `-- name: StatisticsFreshness :one
 SELECT
   stats_reset
-  , coalesce(
-    extract(EPOCH FROM (now() - stats_reset)) / 86400
-    , 999
-  )::int AS age_days
-  , (now() - stats_reset) AS age_interval
+  , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
+  , extract(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint AS uptime_seconds
 FROM pg_stat_database
 WHERE datname = current_database()
 `
 
 type StatisticsFreshnessRow struct {
-	StatsReset  pgtype.Timestamptz
-	AgeDays     pgtype.Int4
-	AgeInterval pgtype.Interval
+	StatsReset    pgtype.Timestamptz
+	AgeSeconds    pgtype.Int8
+	UptimeSeconds pgtype.Int8
 }
 
 // Returns statistics age for the current database.
-// Use to validate stats are meaningful before relying on usage-based checks.
+// Only pg_stat_reset() records a timestamp; a crash or rebuilt replica zeroes the
+// counters silently, so uptime is the lower bound when stats_reset is NULL.
 func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessRow, error) {
 	row := q.db.QueryRow(ctx, statisticsFreshness)
 	var i StatisticsFreshnessRow
-	err := row.Scan(&i.StatsReset, &i.AgeDays, &i.AgeInterval)
+	err := row.Scan(&i.StatsReset, &i.AgeSeconds, &i.UptimeSeconds)
 	return i, err
 }
 

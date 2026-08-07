@@ -33,13 +33,31 @@ func newMockQueryerWithError(err error) *mockStatisticsFreshnessQueryer {
 	return &mockStatisticsFreshnessQueryer{err: err}
 }
 
-func makeInt4(value int32) pgtype.Int4 {
-	return pgtype.Int4{Int32: value, Valid: true}
-}
-
 func makeTimestamp(daysAgo int) pgtype.Timestamptz {
 	t := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
 	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
+func makeAgeSeconds(daysAgo int) pgtype.Int8 {
+	return pgtype.Int8{Int64: int64(daysAgo) * 24 * 60 * 60, Valid: true}
+}
+
+// resetAgo: an explicit reset, so the window is exact.
+func resetAgo(days int) db.StatisticsFreshnessRow {
+	return db.StatisticsFreshnessRow{
+		StatsReset:    makeTimestamp(days),
+		AgeSeconds:    makeAgeSeconds(days),
+		UptimeSeconds: makeAgeSeconds(days),
+	}
+}
+
+// noResetUptime: nothing recorded, so the window is only known to be >= uptime.
+func noResetUptime(days int) db.StatisticsFreshnessRow {
+	return db.StatisticsFreshnessRow{
+		StatsReset:    pgtype.Timestamptz{Valid: false},
+		AgeSeconds:    pgtype.Int8{Valid: false},
+		UptimeSeconds: makeAgeSeconds(days),
+	}
 }
 
 func Test_StatisticsFreshness(t *testing.T) {
@@ -57,7 +75,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 			Name: "mature statistics (>7 days) - OK",
 			Row: db.StatisticsFreshnessRow{
 				StatsReset: makeTimestamp(10),
-				AgeDays:    makeInt4(10),
+				AgeSeconds: makeAgeSeconds(int(10)), UptimeSeconds: makeAgeSeconds(10),
 			},
 			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
@@ -66,7 +84,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 			Name: "exactly 7 days - OK",
 			Row: db.StatisticsFreshnessRow{
 				StatsReset: makeTimestamp(7),
-				AgeDays:    makeInt4(7),
+				AgeSeconds: makeAgeSeconds(int(7)), UptimeSeconds: makeAgeSeconds(7),
 			},
 			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
@@ -75,7 +93,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 			Name: "immature statistics (<7 days) - WARN",
 			Row: db.StatisticsFreshnessRow{
 				StatsReset: makeTimestamp(3),
-				AgeDays:    makeInt4(3),
+				AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 			},
 			ExpectedSeverity: check.SeverityWarn,
 			ExpectedID:       "statistics-freshness",
@@ -84,17 +102,14 @@ func Test_StatisticsFreshness(t *testing.T) {
 			Name: "fresh statistics (1 day) - WARN",
 			Row: db.StatisticsFreshnessRow{
 				StatsReset: makeTimestamp(1),
-				AgeDays:    makeInt4(1),
+				AgeSeconds: makeAgeSeconds(int(1)), UptimeSeconds: makeAgeSeconds(1),
 			},
 			ExpectedSeverity: check.SeverityWarn,
 			ExpectedID:       "statistics-freshness",
 		},
 		{
-			Name: "stats never reset (default) - OK",
-			Row: db.StatisticsFreshnessRow{
-				StatsReset: pgtype.Timestamptz{Valid: false},
-				AgeDays:    pgtype.Int4{Valid: false},
-			},
+			Name:             "stats never reset (default) - OK",
+			Row:              noResetUptime(300),
 			ExpectedSeverity: check.SeverityPass,
 			ExpectedID:       "statistics-freshness",
 		},
@@ -126,7 +141,7 @@ func Test_StatisticsFreshness_MatureStats(t *testing.T) {
 
 	row := db.StatisticsFreshnessRow{
 		StatsReset: makeTimestamp(14),
-		AgeDays:    makeInt4(14),
+		AgeSeconds: makeAgeSeconds(int(14)),
 	}
 
 	queryer := newMockQueryer(row)
@@ -140,8 +155,7 @@ func Test_StatisticsFreshness_MatureStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity)
-	require.Contains(t, result.Details, "14 days old")
-	require.Contains(t, result.Details, "mature enough")
+	require.Contains(t, result.Details, "Counters cover 14d")
 }
 
 func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
@@ -149,7 +163,7 @@ func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
 
 	row := db.StatisticsFreshnessRow{
 		StatsReset: makeTimestamp(3),
-		AgeDays:    makeInt4(3),
+		AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 	}
 
 	queryer := newMockQueryer(row)
@@ -163,8 +177,8 @@ func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity)
-	require.Contains(t, result.Details, "3 days ago")
-	require.Contains(t, result.Details, "less than 7 days")
+	require.Contains(t, result.Details, "Counters cover 3d")
+	require.Contains(t, result.Details, "less than the 7 days recommended")
 	require.Contains(t, result.Details, "index-usage")
 	require.Contains(t, result.Details, "table-seq-scans")
 	require.Contains(t, result.Details, "cache-efficiency")
@@ -175,10 +189,7 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 
 	// NULL stats_reset means statistics have NEVER been reset
 	// This is the ideal state - maximum data accumulation
-	row := db.StatisticsFreshnessRow{
-		StatsReset: pgtype.Timestamptz{Valid: false},
-		AgeDays:    pgtype.Int4{Valid: false},
-	}
+	row := noResetUptime(300)
 
 	queryer := newMockQueryer(row)
 
@@ -191,8 +202,8 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity)
-	require.Contains(t, result.Details, "never been reset")
-	require.Contains(t, result.Details, "optimal")
+	require.Contains(t, result.Details, "at least")
+	require.NotContains(t, result.Details, "optimal")
 }
 
 func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
@@ -233,7 +244,7 @@ func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
 
 			row := db.StatisticsFreshnessRow{
 				StatsReset: makeTimestamp(int(tc.AgeDays)),
-				AgeDays:    makeInt4(tc.AgeDays),
+				AgeSeconds: makeAgeSeconds(int(tc.AgeDays)),
 			}
 
 			queryer := newMockQueryer(row)
@@ -256,7 +267,7 @@ func Test_StatisticsFreshness_AffectedChecks(t *testing.T) {
 
 	row := db.StatisticsFreshnessRow{
 		StatsReset: makeTimestamp(3),
-		AgeDays:    makeInt4(3),
+		AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 	}
 
 	queryer := newMockQueryer(row)
@@ -307,7 +318,7 @@ func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
 
 	row := db.StatisticsFreshnessRow{
 		StatsReset: makeTimestamp(90),
-		AgeDays:    makeInt4(90),
+		AgeSeconds: makeAgeSeconds(int(90)),
 	}
 
 	queryer := newMockQueryer(row)
@@ -321,7 +332,7 @@ func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityPass, result.Severity, "Very old stats should still be OK")
-	require.Contains(t, result.Details, "90 days old")
+	require.Contains(t, result.Details, "Counters cover 90d")
 }
 
 func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
@@ -329,7 +340,7 @@ func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
 
 	row := db.StatisticsFreshnessRow{
 		StatsReset: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		AgeDays:    makeInt4(0),
+		AgeSeconds: makeAgeSeconds(int(0)),
 	}
 
 	queryer := newMockQueryer(row)
@@ -343,5 +354,50 @@ func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
 
 	result := results[0]
 	require.Equal(t, check.SeverityWarn, result.Severity, "Just-reset stats should be WARN")
-	require.Contains(t, result.Details, "0 days ago")
+	// Regression: the age used to come from a truncated day count, so anything under
+	// 24h reported "reset 0 days ago".
+	require.Contains(t, result.Details, "Counters cover 0s")
+	require.NotContains(t, result.Details, "0 days")
+}
+
+// The case the check used to miss. A crash, unclean shutdown or rebuilt replica
+// zeroes the counters and leaves stats_reset NULL, so judging only explicit resets
+// warned about the deliberate reset an operator already knew about and stayed silent
+// about the one that silently invalidated every usage-based check.
+func Test_StatisticsFreshness_UnrecordedResetIsCaughtByUptime(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		Name             string
+		Row              db.StatisticsFreshnessRow
+		ExpectedSeverity check.Severity
+	}{
+		{
+			Name:             "no reset, server up for months",
+			Row:              noResetUptime(288),
+			ExpectedSeverity: check.SeverityPass,
+		},
+		{
+			Name:             "no reset, server restarted two days ago",
+			Row:              noResetUptime(2),
+			ExpectedSeverity: check.SeverityWarn,
+		},
+		{
+			Name:             "explicit reset, mature",
+			Row:              resetAgo(30),
+			ExpectedSeverity: check.SeverityPass,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := statisticsfreshness.New(newMockQueryer(tc.Row)).Check(context.Background())
+			require.NoError(t, err)
+			require.Len(t, report.Results, 1)
+
+			require.Equal(t, tc.ExpectedSeverity, report.Results[0].Severity)
+		})
+	}
 }

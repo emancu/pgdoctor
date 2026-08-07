@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -19,6 +20,7 @@ var readme string
 
 const (
 	minStatsDaysForAccuracy = 7
+	secondsPerDay           = 24 * 60 * 60
 )
 
 type StatisticsFreshnessQueries interface {
@@ -58,26 +60,19 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	if !row.StatsReset.Valid {
-		// NULL stats_reset means statistics have NEVER been reset.
-		// This is actually the ideal state - maximum data accumulation for accurate analysis.
+	window, exact := statsWindow(row)
+
+	// An unrecorded reset is the dangerous case, not the safe one: a crash, unclean
+	// shutdown or rebuilt replica zeroes the counters and records nothing, so a short
+	// uptime means they may be far younger than they look. Judging only explicit
+	// resets warns about the one event an operator already knows about and stays
+	// quiet about the ones they do not.
+	if window >= minStatsDaysForAccuracy*secondsPerDay {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
 			Severity: check.SeverityPass,
-			Details:  "Statistics have never been reset (optimal for usage-based analysis)",
-		})
-		return report, nil
-	}
-
-	ageDays := row.AgeDays.Int32
-
-	if ageDays >= minStatsDaysForAccuracy {
-		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
-			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Statistics are %d days old (mature enough for analysis)", ageDays),
+			Details:  windowDetails(row, window, exact),
 		})
 		return report, nil
 	}
@@ -86,17 +81,40 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		"index-usage",
 		"table-seq-scans",
 		"cache-efficiency",
+		"temp-usage",
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
 		Name:     report.Name,
 		Severity: check.SeverityWarn,
-		Details: fmt.Sprintf("Statistics were reset %d days ago (less than %d days recommended).\n\nThis may affect the accuracy of usage-based checks:\n%s",
-			ageDays,
+		Details: fmt.Sprintf("%s\n\nThat is less than the %d days recommended, which may affect the accuracy of usage-based checks:\n%s",
+			windowDetails(row, window, exact),
 			minStatsDaysForAccuracy,
 			strings.Join(affectedChecks, "\n")),
 	})
 
 	return report, nil
+}
+
+// statsWindow returns how far back the counters reach, and whether that is exact.
+// Only pg_stat_reset() records a timestamp, so without one the best that can be said
+// is that they reach back at least as far as the server start.
+func statsWindow(row db.StatisticsFreshnessRow) (seconds int64, exact bool) {
+	if row.StatsReset.Valid {
+		return row.AgeSeconds.Int64, true
+	}
+
+	return row.UptimeSeconds.Int64, false
+}
+
+func windowDetails(row db.StatisticsFreshnessRow, window int64, exact bool) string {
+	if exact {
+		return fmt.Sprintf("Counters cover %s, since %s.",
+			check.FormatDurationSec(window), row.StatsReset.Time.Format(time.RFC3339))
+	}
+
+	return fmt.Sprintf(
+		"No reset recorded, and the server started %s ago, so the counters cover at least that. A crash, unclean shutdown or rebuilt replica zeroes them without recording a reset, so they may cover no more.",
+		check.FormatDurationSec(window))
 }
