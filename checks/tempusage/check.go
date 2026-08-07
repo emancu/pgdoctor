@@ -112,7 +112,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// about the check rather than either rate, so they go on whichever fired, once.
 	details := ""
 	if rateSeverity > check.SeverityPass {
-		details = tempTotals(row)
+		details = tempTotals(row, window)
 		if gap != "" {
 			details += "\n\n" + gap
 		}
@@ -349,15 +349,17 @@ func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity chec
 }
 
 // tempTotals is the volume behind the rates: the rate alone cannot say whether it
-// came from a long quiet accumulation or a short violent one.
-func tempTotals(row db.TempUsageRow) string {
-	var since string
+// came from a long quiet accumulation or a short violent one. It always states the
+// period, since a cumulative total without one says nothing. With no recorded reset
+// the period is the server uptime, which is a lower bound on the real one.
+func tempTotals(row db.TempUsageRow, window float64) string {
+	period := fmt.Sprintf("over at least %s", check.FormatDurationSec(int64(window)))
 	if row.StatsReset.Valid {
-		since = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
+		period = fmt.Sprintf("since %s", row.StatsReset.Time.Format("2006-01-02"))
 	}
 
-	return fmt.Sprintf("%s files totalling %s%s.",
-		check.FormatNumber(row.TempFiles.Int64), check.FormatBytes(row.TempBytes.Int64), since)
+	return fmt.Sprintf("%s files totalling %s, %s.",
+		check.FormatNumber(row.TempFiles.Int64), check.FormatBytes(row.TempBytes.Int64), period)
 }
 
 // tempVolumeRateSeverity grades the temp data volume.
