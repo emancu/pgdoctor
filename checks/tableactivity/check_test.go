@@ -83,12 +83,14 @@ func Test_QueryError(t *testing.T) {
 	require.ErrorContains(t, err, "table-activity")
 }
 
-func Test_NoActivity_Pass(t *testing.T) {
+// Nothing to measure is not a pass: the check could not run.
+func Test_NoActivity_Skips(t *testing.T) {
 	t.Parallel()
 
 	report := runCheck(t, nil)
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityPass, report.Severity)
+	require.Equal(t, check.SeveritySkip, report.Severity)
+	require.Equal(t, check.SeveritySkip, report.Results[0].Severity)
 }
 
 func Test_HighChurn_Informational(t *testing.T) {

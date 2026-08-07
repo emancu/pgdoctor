@@ -70,7 +70,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if window >= minStatsDaysForAccuracy*secondsPerDay {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
-			Name:     report.Name,
+			Name:     windowTitle(window, exact),
 			Severity: check.SeverityPass,
 			Details:  windowDetails(row, window, exact),
 		})
@@ -86,7 +86,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
-		Name:     report.Name,
+		Name:     windowTitle(window, exact),
 		Severity: check.SeverityWarn,
 		Details: fmt.Sprintf("%s\n\nThat is less than the %d days recommended, which may affect the accuracy of usage-based checks:\n%s",
 			windowDetails(row, window, exact),
@@ -106,6 +106,16 @@ func statsWindow(row db.StatisticsFreshnessRow) (seconds int64, exact bool) {
 	}
 
 	return row.UptimeSeconds.Int64, false
+}
+
+// windowTitle puts the window in the finding's own name. A passing check drops its
+// Details, so this is the only place the figure stays visible when nothing is wrong.
+func windowTitle(window int64, exact bool) string {
+	if exact {
+		return fmt.Sprintf("Statistics: %s since last reset", check.FormatDurationSec(window))
+	}
+
+	return fmt.Sprintf("Statistics: at least %s, no reset recorded", check.FormatDurationSec(window))
 }
 
 func windowDetails(row db.StatisticsFreshnessRow, window int64, exact bool) string {

@@ -57,9 +57,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityPass,
-			Details:  "No table activity data available",
+			Severity: check.SeveritySkip,
+			Details:  "No table activity recorded yet",
 		})
+		report.Severity = check.SeveritySkip
+
 		return report, nil
 	}
 

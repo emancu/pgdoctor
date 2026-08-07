@@ -79,7 +79,7 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 		result := report.Results[0]
 		fmt.Fprintf(w, "%s %s %s%s\n",
 			colorFunc(fmt.Sprintf("[%s]", label)),
-			report.Name,
+			result.Name,
 			dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 			timingStr)
 		if result.Severity != check.SeverityPass && result.Details != "" {

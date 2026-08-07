@@ -102,11 +102,12 @@ func Test_ConnectionEfficiency_PostgreSQL13_Skipped(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, report)
 
-	// Should return single OK finding explaining PG13 doesn't support session stats.
+	// A version that cannot supply the data is a skip, and says which version it saw.
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "Does not support session statistics")
-	require.Contains(t, report.Results[0].Details, "requires PG14+")
+	require.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+	require.Equal(t, check.SeveritySkip, report.Severity)
+	require.Contains(t, report.Results[0].Details, "PostgreSQL 14 or newer")
+	require.Contains(t, report.Results[0].Details, "server is 13")
 }
 
 func Test_ConnectionEfficiency_NoMetadata_Skipped(t *testing.T) {
@@ -119,9 +120,12 @@ func Test_ConnectionEfficiency_NoMetadata_Skipped(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, report)
 
+	// Distinct from an old server: the version is unknown, not known-too-old.
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	require.Contains(t, report.Results[0].Details, "Does not support session statistics")
+	require.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+	require.Equal(t, check.SeveritySkip, report.Severity)
+	require.Contains(t, report.Results[0].Details, "Server version unknown")
+	require.NotContains(t, report.Results[0].Details, "server is")
 }
 
 func Test_ConnectionEfficiency_NoSessions(t *testing.T) {
@@ -138,9 +142,10 @@ func Test_ConnectionEfficiency_NoSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, report)
 
-	// Should return single OK finding explaining no stats yet.
+	// A supported server with nothing recorded yet still measured nothing.
 	require.Len(t, report.Results, 1)
-	require.Equal(t, check.SeverityPass, report.Results[0].Severity)
+	require.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+	require.Equal(t, check.SeveritySkip, report.Severity)
 	require.Contains(t, report.Results[0].Details, "No session statistics")
 }
 
