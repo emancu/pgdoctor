@@ -127,11 +127,8 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 	})
 }
 
-// checkLowUsageIndexes takes the window as a server-computed age rather than
-// re-deriving it from stats_reset here: the threshold below divides by it, so a CLI
-// host whose clock runs ahead of (or behind) the server would change which indexes
-// are reported. The server is the only clock that shares a frame of reference with
-// the counters.
+// checkLowUsageIndexes takes a server-computed age: the threshold divides by it, so
+// CLI clock skew would change which indexes are reported.
 func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsAgeSeconds pgtype.Int8, report *check.Report) {
 	windowKnown := statsAgeSeconds.Valid
 	windowDays := 0

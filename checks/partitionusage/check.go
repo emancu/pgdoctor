@@ -313,8 +313,7 @@ func problemDetails(affected []affectedTable, statements int, statsAgeSeconds pg
 
 // statsWindow describes the period the counters cover. pg_stat_statements totals
 // are cumulative since the last reset, so "52K calls" is meaningless without it —
-// it could be an hour of traffic or two years of it. The age comes from the server,
-// which is the only clock that shares a frame of reference with the counters.
+// it could be an hour of traffic or two years of it. The age is server-measured.
 func statsWindow(statsAgeSeconds pgtype.Int8) string {
 	// That the counters are cumulative goes without saying; only the period is
 	// worth the words. An unknown reset time leaves nothing useful to add.

@@ -186,8 +186,7 @@ func defaultVacuumTrigger(estimatedRows int64) int64 {
 }
 
 // estNextVacuum assumes dead tuples keep accumulating at their post-vacuum average
-// rate. The elapsed time comes from the server, which measured it against the same
-// clock that stamped the last vacuum.
+// rate, over a server-measured elapsed time.
 func estNextVacuum(trigger, pending int64, lastVacuumAge pgtype.Int8) string {
 	if pending == 0 {
 		return noEstimate
@@ -223,8 +222,8 @@ type staleEntry struct {
 
 // checkVacuumStale lists tables that are both overdue AND carry real pending work,
 // on either the vacuum arm (dead + inserts) or the analyze arm (mods since analyze).
-// Staleness is judged on server-measured ages: comparing the server's timestamps
-// against the CLI host's clock would let skew between the two decide the tier.
+// Server-measured ages: comparing them against the CLI clock would let skew decide
+// the tier.
 func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 	var entries []staleEntry
 	for _, row := range rows {
