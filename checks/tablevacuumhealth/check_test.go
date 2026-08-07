@@ -90,13 +90,15 @@ func (b *rowBuilder) withManualVacuumCount(count int64) *rowBuilder {
 	return b
 }
 
-func (b *rowBuilder) withLastVacuumAny(t time.Time) *rowBuilder {
-	b.row.LastVacuumAny = pgtype.Timestamptz{Time: t, Valid: true}
+// withLastVacuumAge sets the age the server reports for the last vacuum. Leaving it
+// unset is a table that was never vacuumed.
+func (b *rowBuilder) withLastVacuumAge(d time.Duration) *rowBuilder {
+	b.row.LastVacuumAgeSeconds = pgtype.Int8{Int64: int64(d.Seconds()), Valid: true}
 	return b
 }
 
-func (b *rowBuilder) withLastAnalyzeAny(t time.Time) *rowBuilder {
-	b.row.LastAnalyzeAny = pgtype.Timestamptz{Time: t, Valid: true}
+func (b *rowBuilder) withLastAnalyzeAge(d time.Duration) *rowBuilder {
+	b.row.LastAnalyzeAgeSeconds = pgtype.Int8{Int64: int64(d.Seconds()), Valid: true}
 	return b
 }
 
@@ -148,17 +150,16 @@ func findingByID(t *testing.T, report *check.Report, id string) *check.Finding {
 	return nil
 }
 
-// Time offsets shared across staleness tests. The check computes its own
-// time.Now() slightly after these are captured, so boundaries carry a 1-minute
-// margin (far larger than any execution delay) to stay deterministic.
-var (
-	recent      = time.Now().Add(-1 * time.Hour)
-	staleWarn   = time.Now().Add(-10 * 24 * time.Hour) // >7d, <25d
-	staleFail   = time.Now().Add(-30 * 24 * time.Hour) // >25d
-	justUnder7d = time.Now().Add(-(7*24*time.Hour - time.Minute))
-	justPast7d  = time.Now().Add(-(7*24*time.Hour + time.Minute))
-	justUnder25 = time.Now().Add(-(25*24*time.Hour - time.Minute))
-	justPast25d = time.Now().Add(-(25*24*time.Hour + time.Minute))
+// Ages shared across staleness tests. These are what the server reports, so they
+// are exact: no wall clock runs between building the row and evaluating it.
+const (
+	recent      = time.Hour
+	staleWarn   = 10 * 24 * time.Hour // >7d, <25d
+	staleFail   = 30 * 24 * time.Hour // >25d
+	justUnder7d = 7*24*time.Hour - time.Minute
+	justPast7d  = 7*24*time.Hour + time.Minute
+	justUnder25 = 25*24*time.Hour - time.Minute
+	justPast25d = 25*24*time.Hour + time.Minute
 )
 
 func TestTableVacuumHealth_AllHealthy(t *testing.T) {
@@ -169,8 +170,8 @@ func TestTableVacuumHealth_AllHealthy(t *testing.T) {
 			withRows(10000).
 			withSize(1024 * 1024).
 			withDeadTuples(100).
-			withLastVacuumAny(recent).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(recent).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 
@@ -188,8 +189,8 @@ func TestTableVacuumHealth_AutovacuumDisabled_Found(t *testing.T) {
 		makeRow("public.staging_table").
 			withRows(10000).
 			withReloptions("autovacuum_enabled=false").
-			withLastVacuumAny(recent).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(recent).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 
@@ -220,7 +221,7 @@ func TestTableVacuumHealth_LargeTableDefaults_WarnOnly(t *testing.T) {
 			withRows(50_000_000).
 			withSize(1024 * 1024 * 500).
 			withDeadTuples(50_000).
-			withLastVacuumAny(recent).
+			withLastVacuumAge(recent).
 			build(),
 	})
 
@@ -243,22 +244,22 @@ func TestTableVacuumHealth_LargeTableDefaults_Detection(t *testing.T) {
 	}{
 		{
 			name:   "below 1M rows is ignored",
-			row:    makeRow("public.small").withRows(999_999).withLastVacuumAny(recent).build(),
+			row:    makeRow("public.small").withRows(999_999).withLastVacuumAge(recent).build(),
 			listed: false,
 		},
 		{
 			name:   "at 1M rows on defaults is listed",
-			row:    makeRow("public.edge").withRows(1_000_000).withLastVacuumAny(recent).build(),
+			row:    makeRow("public.edge").withRows(1_000_000).withLastVacuumAge(recent).build(),
 			listed: true,
 		},
 		{
 			name:   "custom scale factor is ignored",
-			row:    makeRow("public.tuned").withRows(5_000_000).withReloptions("autovacuum_vacuum_scale_factor=0.01").withLastVacuumAny(recent).build(),
+			row:    makeRow("public.tuned").withRows(5_000_000).withReloptions("autovacuum_vacuum_scale_factor=0.01").withLastVacuumAge(recent).build(),
 			listed: false,
 		},
 		{
 			name:   "custom threshold but default scale factor is listed",
-			row:    makeRow("public.partial").withRows(5_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAny(recent).build(),
+			row:    makeRow("public.partial").withRows(5_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAge(recent).build(),
 			listed: true,
 		},
 	}
@@ -285,8 +286,8 @@ func TestTableVacuumHealth_LargeTableDefaults_TriggerAtMath(t *testing.T) {
 
 	// trigger = 0.2 * rows + 50. Custom threshold does not change the default formula.
 	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
-		makeRow("public.a").withRows(2_000_000).withDeadTuples(300_000).withInsSinceVacuum(50_000).withLastVacuumAny(recent).build(),
-		makeRow("public.b").withRows(1_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAny(recent).build(),
+		makeRow("public.a").withRows(2_000_000).withDeadTuples(300_000).withInsSinceVacuum(50_000).withLastVacuumAge(recent).build(),
+		makeRow("public.b").withRows(1_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAge(recent).build(),
 	})
 
 	byName := map[string]check.TableRow{}
@@ -312,7 +313,7 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
 		{
 			name: "overdue when pending crosses trigger",
 			// trigger 200050, pending 250000 >= trigger.
-			row:  makeRow("public.over").withRows(1_000_000).withDeadTuples(250_000).withLastVacuumAny(recent).build(),
+			row:  makeRow("public.over").withRows(1_000_000).withDeadTuples(250_000).withLastVacuumAge(recent).build(),
 			want: "overdue",
 		},
 		{
@@ -323,7 +324,7 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
 		},
 		{
 			name: "zero pending has no rate",
-			row:  makeRow("public.idle").withRows(2_000_000).withDeadTuples(0).withInsSinceVacuum(0).withLastVacuumAny(recent).build(),
+			row:  makeRow("public.idle").withRows(2_000_000).withDeadTuples(0).withInsSinceVacuum(0).withLastVacuumAge(recent).build(),
 			want: noEstimate,
 		},
 	}
@@ -344,7 +345,7 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum_DaysEstimate(t *test
 
 	// trigger 2,000,050; pending 100K accrued over 10 days -> a coarse day estimate.
 	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
-		makeRow("public.slow").withRows(10_000_000).withDeadTuples(100_000).withLastVacuumAny(staleWarn).build(),
+		makeRow("public.slow").withRows(10_000_000).withDeadTuples(100_000).withLastVacuumAge(staleWarn).build(),
 	})
 
 	require.Len(t, finding.Table.Rows, 1)
@@ -357,9 +358,9 @@ func TestTableVacuumHealth_LargeTableDefaults_SortedByPendingDesc(t *testing.T) 
 	t.Parallel()
 
 	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
-		makeRow("public.low").withRows(2_000_000).withDeadTuples(100_000).withLastVacuumAny(recent).build(),
-		makeRow("public.high").withRows(2_000_000).withDeadTuples(500_000).withLastVacuumAny(recent).build(),
-		makeRow("public.mid").withRows(2_000_000).withDeadTuples(300_000).withLastVacuumAny(recent).build(),
+		makeRow("public.low").withRows(2_000_000).withDeadTuples(100_000).withLastVacuumAge(recent).build(),
+		makeRow("public.high").withRows(2_000_000).withDeadTuples(500_000).withLastVacuumAge(recent).build(),
+		makeRow("public.mid").withRows(2_000_000).withDeadTuples(300_000).withLastVacuumAge(recent).build(),
 	})
 
 	require.Len(t, finding.Table.Rows, 3)
@@ -381,8 +382,8 @@ func TestTableVacuumHealth_VacuumStale_AllFresh(t *testing.T) {
 			withRows(10_000_000).
 			withReloptions("autovacuum_vacuum_scale_factor=0.01"). // keep large-table-defaults quiet
 			withDeadTuples(1_000_000).                             // lots of work, but fresh
-			withLastVacuumAny(recent).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(recent).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 
@@ -400,8 +401,8 @@ func TestTableVacuumHealth_VacuumStale_VacuumArmWarning(t *testing.T) {
 			withSize(1024 * 1024 * 100).
 			withDeadTuples(200_000).
 			withInsSinceVacuum(50_000). // vacuum work = 250K exactly
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(recent). // analyze fresh -> only vacuum arm trips
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(recent). // analyze fresh -> only vacuum arm trips
 			build(),
 	})
 
@@ -420,8 +421,8 @@ func TestTableVacuumHealth_VacuumStale_VacuumArmFail(t *testing.T) {
 		makeRow("public.forgotten").
 			withRows(5_000_000).
 			withDeadTuples(500_000). // >= 500K
-			withLastVacuumAny(staleFail).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleFail).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 
@@ -438,8 +439,8 @@ func TestTableVacuumHealth_VacuumStale_AnalyzeArmOnly(t *testing.T) {
 			withRows(3_000_000).
 			withDeadTuples(0). // no vacuum work at all
 			withModSinceAnalyze(300_000).
-			withLastVacuumAny(recent).     // vacuum fresh
-			withLastAnalyzeAny(staleWarn). // analyze arm trips
+			withLastVacuumAge(recent).     // vacuum fresh
+			withLastAnalyzeAge(staleWarn). // analyze arm trips
 			build(),
 	})
 
@@ -458,8 +459,8 @@ func TestTableVacuumHealth_VacuumStale_ZeroWorkStaleNotListed(t *testing.T) {
 			withDeadTuples(0).
 			withInsSinceVacuum(0).
 			withModSinceAnalyze(0).
-			withLastVacuumAny(staleFail).  // ancient
-			withLastAnalyzeAny(staleFail). // ancient
+			withLastVacuumAge(staleFail).  // ancient
+			withLastAnalyzeAge(staleFail). // ancient
 			build(),
 	})
 
@@ -485,6 +486,28 @@ func TestTableVacuumHealth_VacuumStale_NeverVacuumedWithWork(t *testing.T) {
 	assert.Equal(t, "never", stale.Table.Rows[0].Cells[5]) // Last Analyze
 }
 
+// Ages are whatever the server measured; the check never consults this host's
+// clock, so the rendered age and the tier follow the column exactly.
+func TestTableVacuumHealth_VacuumStale_AgesComeFromServer(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, []db.TableVacuumHealthRow{
+		makeRow("public.skewed").
+			withRows(2_000_000).
+			withDeadTuples(600_000).
+			withVacuumCount(7).
+			withLastVacuumAge(30 * 24 * time.Hour).
+			withLastAnalyzeAge(recent).
+			build(),
+	})
+
+	stale := findingByID(t, report, findingIDVacuumStale)
+	require.Len(t, stale.Table.Rows, 1)
+	assert.Equal(t, check.SeverityFail, stale.Table.Rows[0].Severity)
+	assert.Equal(t, "30 days ago (7)", stale.Table.Rows[0].Cells[4])
+	assert.Equal(t, "1h ago (0)", stale.Table.Rows[0].Cells[5])
+}
+
 func TestTableVacuumHealth_VacuumStale_WarnAgeBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -493,8 +516,8 @@ func TestTableVacuumHealth_VacuumStale_WarnAgeBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(300_000).
-			withLastVacuumAny(justUnder7d).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(justUnder7d).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityPass, findingByID(t, notStale, findingIDVacuumStale).Severity)
@@ -503,8 +526,8 @@ func TestTableVacuumHealth_VacuumStale_WarnAgeBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(300_000).
-			withLastVacuumAny(justPast7d).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(justPast7d).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityWarn, findingByID(t, stale, findingIDVacuumStale).Severity)
@@ -518,8 +541,8 @@ func TestTableVacuumHealth_VacuumStale_WarnWorkBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(249_999).
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityPass, findingByID(t, below, findingIDVacuumStale).Severity)
@@ -528,8 +551,8 @@ func TestTableVacuumHealth_VacuumStale_WarnWorkBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(250_000).
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityWarn, findingByID(t, atFloor, findingIDVacuumStale).Severity)
@@ -543,8 +566,8 @@ func TestTableVacuumHealth_VacuumStale_FailAgeBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(500_000).
-			withLastVacuumAny(justUnder25).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(justUnder25).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityWarn, findingByID(t, atEdge, findingIDVacuumStale).Severity)
@@ -553,8 +576,8 @@ func TestTableVacuumHealth_VacuumStale_FailAgeBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(500_000).
-			withLastVacuumAny(justPast25d).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(justPast25d).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityFail, findingByID(t, past, findingIDVacuumStale).Severity)
@@ -568,8 +591,8 @@ func TestTableVacuumHealth_VacuumStale_FailWorkBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(499_999).
-			withLastVacuumAny(staleFail).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleFail).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityWarn, findingByID(t, below, findingIDVacuumStale).Severity)
@@ -578,8 +601,8 @@ func TestTableVacuumHealth_VacuumStale_FailWorkBoundary(t *testing.T) {
 		makeRow("public.edge").
 			withRows(1_000_000).
 			withDeadTuples(500_000).
-			withLastVacuumAny(staleFail).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleFail).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 	assert.Equal(t, check.SeverityFail, findingByID(t, atFloor, findingIDVacuumStale).Severity)
@@ -594,8 +617,8 @@ func TestTableVacuumHealth_VacuumStale_PendingWorkIsLargerArm(t *testing.T) {
 			withDeadTuples(100_000).
 			withInsSinceVacuum(200_000).  // vacuum work = 300K
 			withModSinceAnalyze(400_000). // analyze work = 400K (larger)
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(staleWarn).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(staleWarn).
 			build(),
 	})
 
@@ -616,8 +639,8 @@ func TestTableVacuumHealth_VacuumStale_CountsInParens(t *testing.T) {
 			withModSinceAnalyze(300_000).
 			withManualAnalyzeCount(2).
 			withAnalyzeCount(18). // autoanalyze_count -> total 20
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(staleWarn).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(staleWarn).
 			build(),
 	})
 
@@ -634,20 +657,20 @@ func TestTableVacuumHealth_VacuumStale_SortedWorstFirst(t *testing.T) {
 		makeRow("public.warn_small").
 			withRows(1_000_000).
 			withDeadTuples(260_000).
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(recent).
 			build(),
 		makeRow("public.fail_big").
 			withRows(5_000_000).
 			withDeadTuples(900_000).
-			withLastVacuumAny(staleFail).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleFail).
+			withLastAnalyzeAge(recent).
 			build(),
 		makeRow("public.warn_big").
 			withRows(3_000_000).
 			withDeadTuples(400_000).
-			withLastVacuumAny(staleWarn).
-			withLastAnalyzeAny(recent).
+			withLastVacuumAge(staleWarn).
+			withLastAnalyzeAge(recent).
 			build(),
 	})
 

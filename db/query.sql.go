@@ -859,6 +859,13 @@ SELECT
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
+  -- Age of the counters measured by the server. The scan-rate threshold divides by
+  -- this window, so differencing stats_reset against the CLI host's clock would let
+  -- clock skew between the two decide which indexes get reported.
+  , (
+    SELECT extract(EPOCH FROM (now() - stats_reset))::bigint
+    FROM pg_stat_database WHERE datname = current_database()
+  ) AS stats_age_seconds
 FROM pg_stat_user_indexes AS psai
 INNER JOIN pg_index AS x ON psai.indexrelid = x.indexrelid
 INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
@@ -871,14 +878,15 @@ ORDER BY
 `
 
 type IndexUsageStatsRow struct {
-	TableName      pgtype.Text
-	IndexName      pgtype.Text
-	IsPrimary      bool
-	IsUnique       bool
-	IndexSizeBytes pgtype.Int8
-	IdxScan        pgtype.Int8
-	TableWrites    pgtype.Int8
-	StatsReset     pgtype.Timestamptz
+	TableName       pgtype.Text
+	IndexName       pgtype.Text
+	IsPrimary       bool
+	IsUnique        bool
+	IndexSizeBytes  pgtype.Int8
+	IdxScan         pgtype.Int8
+	TableWrites     pgtype.Int8
+	StatsReset      pgtype.Timestamptz
+	StatsAgeSeconds pgtype.Int8
 }
 
 // Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
@@ -900,6 +908,7 @@ func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, er
 			&i.IdxScan,
 			&i.TableWrites,
 			&i.StatsReset,
+			&i.StatsAgeSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -1372,8 +1381,13 @@ WITH candidates AS (
     , rows::bigint AS rows_returned
     -- Counters are cumulative since this reset, so the report has to say over
     -- what period. Available from pg_stat_statements 1.9, which the toplevel
-    -- filter above already requires.
-    , (SELECT i.stats_reset FROM pg_stat_statements_info AS i)::timestamptz AS stats_reset
+    -- filter above already requires. The age is measured by the server: taking the
+    -- difference against the CLI host's clock would report skew between the two as
+    -- part of the window.
+    , (
+      SELECT extract(EPOCH FROM (now() - i.stats_reset))::bigint
+      FROM pg_stat_statements_info AS i
+    ) AS stats_age_seconds
   FROM pg_stat_statements
   WHERE
     dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
@@ -1398,7 +1412,7 @@ SELECT
   , total_exec_time
   , mean_exec_time
   , rows_returned
-  , stats_reset
+  , stats_age_seconds
 FROM (
   SELECT
     query_id
@@ -1407,7 +1421,7 @@ FROM (
     , total_exec_time
     , mean_exec_time
     , rows_returned
-    , stats_reset
+    , stats_age_seconds
   FROM candidates
   ORDER BY total_exec_time DESC
   LIMIT 500
@@ -1422,7 +1436,7 @@ SELECT
   , total_exec_time
   , mean_exec_time
   , rows_returned
-  , stats_reset
+  , stats_age_seconds
 FROM (
   SELECT
     query_id
@@ -1431,7 +1445,7 @@ FROM (
     , total_exec_time
     , mean_exec_time
     , rows_returned
-    , stats_reset
+    , stats_age_seconds
   FROM candidates
   ORDER BY calls DESC
   LIMIT 500
@@ -1441,13 +1455,13 @@ ORDER BY total_exec_time DESC
 `
 
 type QueryStatsFromStatStatementsRow struct {
-	QueryID       pgtype.Int8
-	Query         pgtype.Text
-	Calls         pgtype.Int8
-	TotalExecTime pgtype.Float8
-	MeanExecTime  pgtype.Float8
-	RowsReturned  pgtype.Int8
-	StatsReset    pgtype.Timestamptz
+	QueryID         pgtype.Int8
+	Query           pgtype.Text
+	Calls           pgtype.Int8
+	TotalExecTime   pgtype.Float8
+	MeanExecTime    pgtype.Float8
+	RowsReturned    pgtype.Int8
+	StatsAgeSeconds pgtype.Int8
 }
 
 // Gets query statistics from pg_stat_statements for partition key analysis.
@@ -1472,7 +1486,7 @@ func (q *Queries) QueryStatsFromStatStatements(ctx context.Context) ([]QueryStat
 			&i.TotalExecTime,
 			&i.MeanExecTime,
 			&i.RowsReturned,
-			&i.StatsReset,
+			&i.StatsAgeSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -2611,8 +2625,11 @@ SELECT
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count
   , ARRAY_TO_STRING(c.reloptions, ',') AS reloptions
-  , GREATEST(s.last_vacuum, s.last_autovacuum) AS last_vacuum_any
-  , GREATEST(s.last_analyze, s.last_autoanalyze) AS last_analyze_any
+  -- Ages measured by the server. The staleness tiers and the estimated next vacuum
+  -- compare against these, so differencing the timestamps against the CLI host's
+  -- clock would fold skew between the two into the answer. NULL means never.
+  , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
+  , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
   , COALESCE(s.n_mod_since_analyze, 0) AS n_mod_since_analyze
   , COALESCE(s.analyze_count, 0) AS analyze_count
   , COALESCE(s.autoanalyze_count, 0) AS autoanalyze_count
@@ -2635,20 +2652,20 @@ ORDER BY COALESCE(s.n_live_tup, c.reltuples::bigint) DESC
 `
 
 type TableVacuumHealthRow struct {
-	TableName        pgtype.Text
-	LastAutovacuum   pgtype.Timestamptz
-	EstimatedRows    pgtype.Int8
-	TableSizeBytes   pgtype.Int8
-	NDeadTup         pgtype.Int8
-	VacuumCount      pgtype.Int8
-	AutovacuumCount  pgtype.Int8
-	Reloptions       pgtype.Text
-	LastVacuumAny    pgtype.Timestamptz
-	LastAnalyzeAny   pgtype.Timestamptz
-	NModSinceAnalyze pgtype.Int8
-	AnalyzeCount     pgtype.Int8
-	AutoanalyzeCount pgtype.Int8
-	NInsSinceVacuum  pgtype.Int8
+	TableName             pgtype.Text
+	LastAutovacuum        pgtype.Timestamptz
+	EstimatedRows         pgtype.Int8
+	TableSizeBytes        pgtype.Int8
+	NDeadTup              pgtype.Int8
+	VacuumCount           pgtype.Int8
+	AutovacuumCount       pgtype.Int8
+	Reloptions            pgtype.Text
+	LastVacuumAgeSeconds  pgtype.Int8
+	LastAnalyzeAgeSeconds pgtype.Int8
+	NModSinceAnalyze      pgtype.Int8
+	AnalyzeCount          pgtype.Int8
+	AutoanalyzeCount      pgtype.Int8
+	NInsSinceVacuum       pgtype.Int8
 }
 
 // Returns all tables with vacuum-related health metrics.
@@ -2671,8 +2688,8 @@ func (q *Queries) TableVacuumHealth(ctx context.Context) ([]TableVacuumHealthRow
 			&i.VacuumCount,
 			&i.AutovacuumCount,
 			&i.Reloptions,
-			&i.LastVacuumAny,
-			&i.LastAnalyzeAny,
+			&i.LastVacuumAgeSeconds,
+			&i.LastAnalyzeAgeSeconds,
 			&i.NModSinceAnalyze,
 			&i.AnalyzeCount,
 			&i.AutoanalyzeCount,

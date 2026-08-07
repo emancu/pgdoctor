@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -266,7 +265,7 @@ func checkPartitionKeyUsage(
 		ID:       "partition-key-unused",
 		Name:     "Queries Missing Partition Key",
 		Severity: overallSeverity,
-		Details:  problemDetails(affected, len(problems), statsReset(queries)),
+		Details:  problemDetails(affected, len(problems), statsAge(queries)),
 		Table: &check.Table{
 			Headers:      []string{"Table", "Calls", "Total Time", "Query ID", "Query"},
 			Rows:         rows,
@@ -297,11 +296,11 @@ type problemQuery struct {
 
 // problemDetails describes the affected tables, so the per-table totals stay
 // visible even when the statement list is capped at the default detail level.
-func problemDetails(affected []affectedTable, statements int, statsReset pgtype.Timestamptz) string {
+func problemDetails(affected []affectedTable, statements int, statsAgeSeconds pgtype.Int8) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Found %d statement(s) not using the partition key on %d partitioned table(s)%s",
-		statements, len(affected), statsWindow(statsReset))
+		statements, len(affected), statsWindow(statsAgeSeconds))
 
 	for _, table := range affected {
 		fmt.Fprintf(&b, "\n  %s (key: %s, %d partitions) — %d statement(s), %s calls, %s",
@@ -314,16 +313,16 @@ func problemDetails(affected []affectedTable, statements int, statsReset pgtype.
 
 // statsWindow describes the period the counters cover. pg_stat_statements totals
 // are cumulative since the last reset, so "52K calls" is meaningless without it —
-// it could be an hour of traffic or two years of it.
-func statsWindow(statsReset pgtype.Timestamptz) string {
+// it could be an hour of traffic or two years of it. The age comes from the server,
+// which is the only clock that shares a frame of reference with the counters.
+func statsWindow(statsAgeSeconds pgtype.Int8) string {
 	// That the counters are cumulative goes without saying; only the period is
 	// worth the words. An unknown reset time leaves nothing useful to add.
-	if !statsReset.Valid {
+	if !statsAgeSeconds.Valid {
 		return ""
 	}
 
-	return fmt.Sprintf(" over the last %s",
-		check.FormatDurationSec(int64(time.Since(statsReset.Time).Seconds())))
+	return fmt.Sprintf(" over the last %s", check.FormatDurationSec(statsAgeSeconds.Int64))
 }
 
 // clipQueryText shortens a normalized statement to one terminal line, counting
@@ -916,12 +915,12 @@ func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
 }
 
-// statsReset returns the pg_stat_statements reset timestamp. Every row carries
-// the same value, so the first one answers for the set.
-func statsReset(queries []db.QueryStatsFromStatStatementsRow) pgtype.Timestamptz {
+// statsAge returns how long ago pg_stat_statements was reset, as measured by the
+// server. Every row carries the same value, so the first one answers for the set.
+func statsAge(queries []db.QueryStatsFromStatStatementsRow) pgtype.Int8 {
 	if len(queries) == 0 {
-		return pgtype.Timestamptz{}
+		return pgtype.Int8{}
 	}
 
-	return queries[0].StatsReset
+	return queries[0].StatsAgeSeconds
 }
