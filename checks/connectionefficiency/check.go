@@ -58,14 +58,30 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	meta := check.InstanceMetadataFromContext(ctx)
 
-	// Skip for PostgreSQL < 14 (session statistics don't exist).
-	if meta == nil || meta.EngineVersionMajor < 14 {
+	// Session statistics do not exist before PostgreSQL 14. An unknown version is
+	// reported separately: saying "requires PostgreSQL 14" on a PG17 server whose
+	// instance metadata was simply unavailable sends the reader after the wrong thing.
+	if meta == nil {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityPass,
-			Details:  "Does not support session statistics (requires PG14+)",
+			Severity: check.SeveritySkip,
+			Details:  "Server version unknown, and session statistics need PostgreSQL 14 or newer",
 		})
+		report.Severity = check.SeveritySkip
+
+		return report, nil
+	}
+
+	if meta.EngineVersionMajor < 14 {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeveritySkip,
+			Details:  fmt.Sprintf("Session statistics need PostgreSQL 14 or newer, server is %d", meta.EngineVersionMajor),
+		})
+		report.Severity = check.SeveritySkip
+
 		return report, nil
 	}
 
@@ -81,9 +97,11 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
-			Severity: check.SeverityPass,
-			Details:  "No session statistics available yet (stats may have been recently reset)",
+			Severity: check.SeveritySkip,
+			Details:  "No session statistics accumulated yet",
 		})
+		report.Severity = check.SeveritySkip
+
 		return report, nil
 	}
 

@@ -136,13 +136,13 @@ func Test_CacheEfficiency(t *testing.T) {
 			ExpectedID:       "cache-hit-ratio",
 		},
 		{
-			Name: "no cache activity - OK",
+			Name: "no cache activity - SKIP",
 			Row: db.DatabaseCacheEfficiencyRow{
 				CacheHitRatio: pgtype.Numeric{Valid: false},
 				BlksHit:       pgtype.Int8{Int64: 0, Valid: true},
 				BlksRead:      pgtype.Int8{Int64: 0, Valid: true},
 			},
-			ExpectedSeverity: check.SeverityPass,
+			ExpectedSeverity: check.SeveritySkip,
 			ExpectedID:       "cache-hit-ratio",
 		},
 	}
@@ -207,7 +207,7 @@ func Test_CacheEfficiency_OKResult(t *testing.T) {
 
 	result := findFinding(t, report, "cache-hit-ratio")
 	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when cache ratio is healthy")
-	require.Contains(t, result.Details, "healthy", "Details should mention healthy status")
+	require.Contains(t, result.Name, "Cache Hit Ratio: ", "the ratio belongs in the title, which renders when passing")
 }
 
 func Test_CacheEfficiency_QueryError(t *testing.T) {
@@ -310,8 +310,8 @@ func Test_CacheEfficiency_NoActivityHandling(t *testing.T) {
 	checktest.AssertSeverityInvariant(t, report)
 
 	result := findFinding(t, report, "cache-hit-ratio")
-	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when no cache activity")
-	require.Contains(t, result.Details, "Insufficient cache activity", "Details should explain no activity")
+	require.Equal(t, check.SeveritySkip, result.Severity, "no blocks read or hit means nothing was measured")
+	require.Contains(t, result.Details, "no ratio to report", "Details should explain why")
 }
 
 // healthyDBRow isolates per-index findings from the database-wide finding.
