@@ -4,7 +4,7 @@ Reports how full the `pg_stat_statements` entry table is and how fast it is disc
 every other check that reads that view is only as good as the sample left in it.
 
 > **Note**: This check reads `pg_stat_statements`. When the extension is not installed, not preloaded, or
-> not reachable through `search_path`, it reports PASS and stops — there is no sample to truncate.
+> not reachable through `search_path`, it reports PASS and stops, since there is no sample to truncate.
 
 ## What It Checks
 
@@ -20,7 +20,7 @@ indefinitely and loses nothing as long as the set is stable. This finding states
 eviction rate below is what says whether entries are actually being lost.
 
 The count comes from `pg_stat_statements(false)`, which skips the external query-text file. Reading that
-text is what makes the view expensive — it materialises the whole corpus into a `work_mem` tuplestore —
+text is what makes the view expensive: it materialises the whole corpus into a `work_mem` tuplestore, and
 and a count does not need it.
 
 ### Statement Eviction Rate (`statement-eviction-rate`)
@@ -33,7 +33,7 @@ nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100);   /* USAGE_DEALLOC_P
 ```
 
 So the entries lost are `dealloc × Max(10, max × 5 / 100)`. **The floor is not a rounding detail.**
-`pg_stat_statements.max` bottoms out at 100, and below `max = 200` the floor of 10 exceeds 5% — at
+`pg_stat_statements.max` bottoms out at 100, and below `max = 200` the floor of 10 exceeds 5%. At
 `max = 100` each event discards 10 entries, a tenth of capacity rather than a twentieth. Assuming a flat
 5% there would report half the real turnover and pass a saturated instance.
 
@@ -51,7 +51,7 @@ Half the table recycled daily is the point where the tracked set stops represent
 Eviction is least-used-first, not random, so the long tail dies far sooner than the average entry
 lifetime suggests: at 0.5x, anything but the hottest statements is gone within hours of running.
 
-The grade is capped at WARN. Eviction costs nothing at runtime and degrades no query — it degrades
+The grade is capped at WARN. Eviction costs nothing at runtime and degrades no query. It degrades
 *observability*, and the fix requires a restart. That belongs in a sprint, not in a pager.
 
 **Threshold on the rate, never on `dealloc` itself.** The counter only grows. A three-year-old instance
@@ -60,8 +60,8 @@ carrying `dealloc = 4000` from a bad deploy that was reverted in 2023 is perfect
 ### The Measurement Window
 
 The rate is divided by the time since `pg_stat_statements_info.stats_reset`. Unlike
-`pg_stat_database.stats_reset` this is normally set — the extension stamps it at shared-memory
-initialisation — but the column is nullable, and `pg_stat_statements_reset()` restarts it.
+`pg_stat_database.stats_reset` this is normally set, since the extension stamps it at shared-memory
+initialisation, but the column is nullable and `pg_stat_statements_reset()` restarts it.
 
 - **SKIP** when `stats_reset` is NULL: a rate over an unknown period is not a rate.
 - **SKIP** when the window is under an hour: one eviction event extrapolated across a day says nothing.
@@ -69,7 +69,7 @@ initialisation — but the column is nullable, and `pg_stat_statements_reset()` 
   is a share of derive from it.
 
 SKIP rather than PASS, because a PASS here reads as "nothing is being evicted", which a window that short
-cannot establish. The entry usage finding is unaffected — it needs neither the window nor `max`.
+cannot establish. The entry usage finding is unaffected, since it needs neither the window nor `max`.
 
 ## Why This Matters
 
@@ -86,7 +86,7 @@ discarding an old one, and the view gives no indication that it happened. Conseq
   that runs a few times an hour is exactly the profile that gets dropped, while a trivial one running
   thousands of times a second survives forever.
 - **High turnover is itself a workload signal.** Sustained eviction means the working set of *distinct*
-  normalised statements exceeds capacity — usually unparameterised SQL, variable-length `IN` lists, or
+  normalised statements exceeds capacity: usually unparameterised SQL, variable-length `IN` lists, or
   generated DDL. Raising `max` treats the symptom.
 
 A measured example: `dealloc = 19688` against `max = 10000` over 78 days is roughly 9.8M entries
@@ -135,7 +135,7 @@ text, and one-off DDL under `track_utility = on`.
 
 ### Raise `pg_stat_statements.max`
 
-**This is `PGC_POSTMASTER` — it requires a full server restart, not a reload.** On RDS or Aurora that is
+**This is `PGC_POSTMASTER`: it requires a full server restart, not a reload.** On RDS or Aurora that is
 a reboot, and on Multi-AZ a reboot with failover. It is not a casual change; schedule it.
 
 ```sql
@@ -151,7 +151,7 @@ in an external file whose size grows with the entry count.
 
 `pg_stat_statements_reset()` zeroes `dealloc` and restarts the window, so the next run measures the new
 behaviour instead of averaging it with the old. It also deletes every entry, which resets the totals
-`partition-usage` and `temp-usage` read — do not do it casually on a primary.
+`partition-usage` and `temp-usage` read, so do not do it casually on a primary.
 
 ## Important Considerations
 
