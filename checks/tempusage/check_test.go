@@ -43,6 +43,7 @@ func makeTempUsageRow(
 		TempBytesPerHour:  bytesPerHourNumeric,
 	}
 
+	row.WindowIsLowerBound = pgtype.Bool{Bool: statsReset == nil, Valid: true}
 	if statsReset != nil {
 		row.StatsReset = pgtype.Timestamptz{Time: *statsReset, Valid: true}
 	}
@@ -423,4 +424,55 @@ func TestTempUsage_Metadata(t *testing.T) {
 	assert.NotEmpty(t, metadata.SQL)
 	assert.NotEmpty(t, metadata.Readme)
 	assert.NotEmpty(t, metadata.Description)
+}
+
+// With no recorded reset the window is anchored to server uptime, which is only a
+// lower bound, so the rates are upper bounds. A rate over the threshold may just be
+// a long history divided by a short uptime, so it must not reach FAIL - but a rate
+// under it is still conclusive and must still PASS.
+func TestTempUsage_LowerBoundWindowCapsSeverity(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+
+	tests := []struct {
+		name             string
+		filesPerHour     float64
+		bytesPerHour     float64
+		expectedSeverity check.Severity
+	}{
+		{"rate in FAIL band is capped to WARN", 50.0, 20 * 1024 * 1024, check.SeverityWarn},
+		{"rate in WARN band stays WARN", 10.0, 20 * 1024 * 1024, check.SeverityWarn},
+		{"rate below thresholds still passes", 1.0, 1024, check.SeverityPass},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// nil statsReset => window_is_lower_bound
+			row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, tt.filesPerHour, tt.bytesPerHour, nil)
+
+			report, err := tempusage.New(&mockQueryer{row: row}).Check(context.Background())
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedSeverity, report.Severity)
+			assert.Len(t, report.Results, 2, "both rate subchecks must run")
+		})
+	}
+}
+
+// The same rate with a recorded reset is an exact measurement, so FAIL is available.
+func TestTempUsage_ExactWindowAllowsFail(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+
+	statsReset := time.Now().Add(-24 * time.Hour)
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
+
+	report, err := tempusage.New(&mockQueryer{row: row}).Check(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, check.SeverityFail, report.Severity)
 }

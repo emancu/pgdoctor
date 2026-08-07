@@ -18,18 +18,24 @@ Monitors the volume of temp data written:
 - **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
 
-### When This Check Skips
+### The Measurement Window
 
-Both findings are per-hour rates measured over the window since
-`pg_stat_database.stats_reset`, so the check reports SKIP rather than PASS when that
-window cannot carry a rate:
+Both findings are per-hour rates, so they need a period to divide by. That period
+runs from `pg_stat_database.stats_reset` — but most databases have never had
+`pg_stat_reset()` called, leaving it NULL.
 
-- **Window unknown** — `stats_reset` is NULL. This is not the same as "counters have
-  run forever": an unclean shutdown, a crash, or a freshly built replica also zeroes
-  the counters, and none of them records a reset timestamp. A clean restart, by
-  contrast, preserves counters on PostgreSQL 15+.
-- **Window under 1 hour** — the denominator is small enough that a single query's
-  temp file would skew the rate into the FAIL band.
+In that case the window is anchored to `pg_postmaster_start_time()` instead. A clean
+restart preserves the counters on PostgreSQL 15+, and everything that *does* zero
+them (crash, unclean shutdown, a rebuilt replica) happens at a server start. So the
+real window is **at least** the uptime, and the rates computed from it are **upper
+bounds**:
+
+- A rate below the threshold is conclusive — the true rate is lower still.
+- A rate above it might just be a long history divided by a short uptime, so these
+  findings are capped at WARN and never escalate to FAIL.
+
+The check reports SKIP only when the window is under an hour, where the denominator
+is small enough that a single query's temp file would dominate the rate.
 
 ## Why This Matters
 
