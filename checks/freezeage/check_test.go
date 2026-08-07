@@ -22,6 +22,7 @@ const (
 	idTableFreeze       = "table-freeze-age"
 	idDatabaseMultixact = "database-multixact-age"
 	idTableMultixact    = "table-multixact-age"
+	idHorizonPin        = "horizon-pin"
 )
 
 // Stock GUC triggers. WARN is 2x the trigger and FAIL min(4x, failsafe age), so an
@@ -34,13 +35,19 @@ const (
 
 func pgInt8(i int64) pgtype.Int8 { return pgtype.Int8{Int64: i, Valid: true} }
 
+func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+
+func pgBool(b bool) pgtype.Bool { return pgtype.Bool{Bool: b, Valid: true} }
+
 func pgTime(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
 type mockQueryer struct {
 	dbRow     db.DatabaseFreezeAgeRow
 	tableRows []db.TableFreezeAgeRow
+	pinRows   []db.HorizonPinsRow
 	dbErr     error
 	tableErr  error
+	pinErr    error
 }
 
 func (m *mockQueryer) DatabaseFreezeAge(context.Context) (db.DatabaseFreezeAgeRow, error) {
@@ -57,6 +64,13 @@ func (m *mockQueryer) TableFreezeAge(context.Context) ([]db.TableFreezeAgeRow, e
 	return m.tableRows, nil
 }
 
+func (m *mockQueryer) HorizonPins(context.Context) ([]db.HorizonPinsRow, error) {
+	if m.pinErr != nil {
+		return nil, m.pinErr
+	}
+	return m.pinRows, nil
+}
+
 // Scenario builders.
 
 func database(name string, freezeAge int64) db.DatabaseFreezeAgeRow {
@@ -70,6 +84,15 @@ func database(name string, freezeAge int64) db.DatabaseFreezeAgeRow {
 		FailsafeAge:           pgInt8(failsafeAge),
 		MultixactFailsafeAge:  pgInt8(failsafeAge),
 	}
+}
+
+// databaseWithTrigger overrides autovacuum_freeze_max_age, whose GUC minimum is
+// 100000 — well below the coincidence tolerance floor.
+func databaseWithTrigger(name string, freezeAge, trigger int64) db.DatabaseFreezeAgeRow {
+	row := database(name, freezeAge)
+	row.FreezeMaxAge = pgInt8(trigger)
+
+	return row
 }
 
 func databaseWithMultixact(name string, multixactAge int64) db.DatabaseFreezeAgeRow {
@@ -123,6 +146,49 @@ func toastGroup(parent, toastRelation string, freezeAge int64) db.TableFreezeAge
 	row.GroupedRelations = 2
 	row.ToastRelations = 1
 	return row
+}
+
+// slot mirrors what HorizonPins returns for a replication slot: a logical slot
+// normally pins catalog_xmin, a physical one xmin.
+func slot(source, name, walStatus string, age int64, active bool) db.HorizonPinsRow {
+	pinColumn, state := "slot_xmin", "inactive"
+	if source == "logical_slot" {
+		pinColumn = "slot_catalog_xmin"
+	}
+	if active {
+		state = "active"
+	}
+
+	return db.HorizonPinsRow{
+		Source:     pgText(source),
+		ObjectName: pgText(name),
+		PinColumn:  pgText(pinColumn),
+		PinAge:     pgInt8(age),
+		Active:     pgBool(active),
+		WalStatus:  pgText(walStatus),
+		Detail: pgText(fmt.Sprintf("%s slot %s, %s, WAL %s",
+			strings.TrimSuffix(source, "_slot"), name, state, walStatus)),
+	}
+}
+
+func activeLogicalSlot(name string, age int64) db.HorizonPinsRow {
+	return slot("logical_slot", name, "reserved", age, true)
+}
+
+func activePhysicalSlot(name string, age int64) db.HorizonPinsRow {
+	return slot("physical_slot", name, "reserved", age, true)
+}
+
+func preparedXact(gid string, age int64) db.HorizonPinsRow {
+	return db.HorizonPinsRow{
+		Source:     pgText("prepared_xact"),
+		ObjectName: pgText(gid),
+		PinColumn:  pgText("prepared_xid"),
+		PinAge:     pgInt8(age),
+		Active:     pgBool(true),
+		WalStatus:  pgText("unknown"),
+		Detail:     pgText(fmt.Sprintf("prepared transaction %s on appdb, owner app, prepared 3 days ago", gid)),
+	}
 }
 
 func healthy() *mockQueryer {
@@ -237,8 +303,8 @@ func TestFreezeAge_HealthyProductionShape(t *testing.T) {
 	report := run(t, queryer)
 
 	require.Equal(t, check.SeverityPass, report.Severity, "a healthy instance must not report WARN")
-	require.Len(t, report.Results, 4)
-	for _, id := range []string{idDatabaseFreeze, idTableFreeze, idDatabaseMultixact, idTableMultixact} {
+	require.Len(t, report.Results, 5)
+	for _, id := range []string{idDatabaseFreeze, idTableFreeze, idDatabaseMultixact, idTableMultixact, idHorizonPin} {
 		finding := findingByID(t, report, id)
 		assert.Equal(t, check.SeverityPass, finding.Severity, "finding %s", id)
 		assert.Nil(t, finding.Table, "finding %s must not render a table when healthy", id)
@@ -413,6 +479,288 @@ func TestFreezeAge_MixedSeverityAggregates(t *testing.T) {
 	assert.Contains(t, findingByID(t, report, idDatabaseFreeze).Details, "houston dba xmin")
 }
 
+// TestFreezeAge_HorizonPinHealthyProductionState is the case that matters most for
+// this finding: the pin shape measured on a healthy production instance. Six ACTIVE
+// slots hold a recent xmin while the database sits at the top of its sawtooth, and
+// none of them is level with that age — PASS, and no table.
+func TestFreezeAge_HorizonPinHealthyProductionState(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		// age(datfrozenxid) at 99.95% of the 200M trigger.
+		dbRow: database("appdb", 199_900_000),
+		pinRows: []db.HorizonPinsRow{
+			activeLogicalSlot("debezium_bookings", 35_300),
+			activeLogicalSlot("debezium_customers", 35_300),
+			activeLogicalSlot("debezium_payments", 22_100),
+			activePhysicalSlot("replica_1", 1_100),
+			activePhysicalSlot("replica_2", 797),
+			activePhysicalSlot("replica_3", 364),
+		},
+	}
+
+	report := run(t, queryer)
+	finding := findingByID(t, report, idHorizonPin)
+
+	require.Equal(t, check.SeverityPass, finding.Severity, "active slots holding a recent xmin are the healthy shape")
+	assert.Equal(t, check.SeverityPass, report.Severity)
+	assert.Nil(t, finding.Table, "a PASS must not render a table")
+	assert.Contains(t, finding.Details, "6 durable pin(s)")
+	assert.Contains(t, finding.Details, "oldest 35.3K transactions")
+	assert.Contains(t, finding.Details, "199.9M transactions")
+	assert.NotContains(t, finding.Details, "tune it", "199.9M against a 200M trigger is the sawtooth peak")
+	assert.NotContains(t, finding.Details, "drop")
+}
+
+func TestFreezeAge_HorizonPinNoPins(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		dbAge     int64
+		wantIn    string
+		wantNotIn string
+	}{
+		{
+			name: "healthy age", dbAge: 1000,
+			wantIn: "No replication slot or prepared transaction is pinning the xmin horizon", wantNotIn: "tune it",
+		},
+		{
+			// The discriminator: nothing durable is holding the horizon, so the age is
+			// throughput and no amount of killing will move it.
+			name: "high age with nothing to kill", dbAge: 3 * defaultTrigger,
+			wantIn: "this is autovacuum throughput, tune it", wantNotIn: "advance or drop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := healthy()
+			queryer.dbRow = database("appdb", tt.dbAge)
+
+			finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+			assert.Equal(t, check.SeverityPass, finding.Severity)
+			assert.Nil(t, finding.Table)
+			assert.Contains(t, finding.Details, tt.wantIn)
+			assert.NotContains(t, finding.Details, tt.wantNotIn)
+		})
+	}
+}
+
+// An inactive slot never advances on its own, so invalidated WAL makes it pure
+// liability at any pin age, while reserved WAL needs a floor: a consumer that
+// reconnects in seconds is normal churn.
+func TestFreezeAge_HorizonPinInactiveSlot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, walStatus string
+		age             int64
+		active          bool
+		want            check.Severity
+	}{
+		{name: "lost WAL at a trivial pin age", walStatus: "lost", age: 5, want: check.SeverityFail},
+		{name: "unreserved WAL at a trivial pin age", walStatus: "unreserved", age: 5, want: check.SeverityFail},
+		{name: "reserved WAL below the floor", walStatus: "reserved", age: 999_999, want: check.SeverityPass},
+		{name: "reserved WAL at the floor", walStatus: "reserved", age: 1_000_000, want: check.SeverityWarn},
+		{name: "extended WAL at the floor", walStatus: "extended", age: 1_000_000, want: check.SeverityWarn},
+		{name: "lost WAL but active is exempt", walStatus: "lost", age: 5, active: true, want: check.SeverityPass},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := healthy()
+			queryer.pinRows = []db.HorizonPinsRow{slot("logical_slot", "debezium_bookings", tt.walStatus, tt.age, tt.active)}
+
+			finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+			assert.Equal(t, tt.want, finding.Severity, "wal_status=%s age=%d active=%t", tt.walStatus, tt.age, tt.active)
+		})
+	}
+}
+
+// WARN at 1x the trigger, a full sawtooth period before the age itself warns:
+// past that point every anti-wraparound vacuum completes without freezing past the
+// pin. FAIL at min(4x trigger, failsafe age), which is 800M at stock GUCs.
+func TestFreezeAge_HorizonPinAgeThresholds(t *testing.T) {
+	t.Parallel()
+
+	sources := []struct {
+		name string
+		row  func(int64) db.HorizonPinsRow
+	}{
+		{name: "active slot", row: func(age int64) db.HorizonPinsRow { return activeLogicalSlot("debezium_bookings", age) }},
+		{name: "prepared xact", row: func(age int64) db.HorizonPinsRow { return preparedXact("gid-xa-42", age) }},
+	}
+
+	cases := []struct {
+		name string
+		age  int64
+		want check.Severity
+	}{
+		{name: "just below the trigger", age: defaultTrigger - 1, want: check.SeverityPass},
+		{name: "at the trigger", age: defaultTrigger, want: check.SeverityWarn},
+		{name: "just below FAIL", age: 4*defaultTrigger - 1, want: check.SeverityWarn},
+		{name: "at FAIL", age: 4 * defaultTrigger, want: check.SeverityFail},
+	}
+
+	for _, source := range sources {
+		for _, tt := range cases {
+			t.Run(source.name+"/"+tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				queryer := healthy()
+				queryer.pinRows = []db.HorizonPinsRow{source.row(tt.age)}
+
+				finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+				assert.Equal(t, tt.want, finding.Severity, "age=%d", tt.age)
+			})
+		}
+	}
+}
+
+// The database age only escalates this finding when a pin is level with it, which
+// is the difference between "kill something" and "tune something".
+func TestFreezeAge_HorizonPinCoincidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		dbRow   db.DatabaseFreezeAgeRow
+		pin     db.HorizonPinsRow
+		want    check.Severity
+		wantIn  string
+		wantOut string
+	}{
+		{
+			name:  "a pin level with the age is the cause",
+			dbRow: database("appdb", 600_000_000),
+			pin:   activeLogicalSlot("debezium_bookings", 595_000_000),
+			want:  check.SeverityWarn, wantIn: "this pin is holding the horizon — advance or drop it",
+			wantOut: "tune it",
+		},
+		{
+			name:  "the same age with a young pin is throughput",
+			dbRow: database("appdb", 600_000_000),
+			pin:   activeLogicalSlot("debezium_bookings", 1_000),
+			want:  check.SeverityPass, wantIn: "this is autovacuum throughput, tune it",
+			wantOut: "advance or drop",
+		},
+		{
+			// Reachable only below a 10M trigger, where the tolerance floor is wider
+			// than the trigger itself: the age is what escalates, not the pin.
+			name:  "the age alone escalates when a pin is level with it",
+			dbRow: databaseWithTrigger("appdb", 10_000_000, 5_000_000),
+			pin:   activeLogicalSlot("debezium_bookings", 1_000_000),
+			want:  check.SeverityWarn, wantIn: "advance or drop it",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := healthy()
+			queryer.dbRow = tt.dbRow
+			queryer.pinRows = []db.HorizonPinsRow{tt.pin}
+
+			finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+			require.Equal(t, tt.want, finding.Severity)
+			assert.Contains(t, finding.Details, tt.wantIn)
+			if tt.wantOut != "" {
+				assert.NotContains(t, finding.Details, tt.wantOut)
+			}
+		})
+	}
+}
+
+// Remediation is single-object by construction: a set-valued command over slots or
+// prepared transactions is how an incident becomes an outage.
+func TestFreezeAge_HorizonPinRemediation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		pin    db.HorizonPinsRow
+		wantIn []string
+	}{
+		{
+			name: "logical slot carries the re-snapshot escalation",
+			pin:  slot("logical_slot", "debezium_bookings", "lost", 5, false),
+			wantIn: []string{
+				"SELECT pg_drop_replication_slot('debezium_bookings')",
+				"re-snapshot from scratch",
+				"product decision to escalate",
+			},
+		},
+		{
+			name:   "physical slot points at the standby first",
+			pin:    slot("physical_slot", "replica_1", "lost", 5, false),
+			wantIn: []string{"SELECT pg_drop_replication_slot('replica_1')", "standby"},
+		},
+		{
+			name:   "prepared transaction names its gid",
+			pin:    preparedXact("gid-xa-42", 4*defaultTrigger),
+			wantIn: []string{"ROLLBACK PREPARED 'gid-xa-42'", "transaction manager"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := healthy()
+			queryer.pinRows = []db.HorizonPinsRow{tt.pin}
+
+			finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+			require.Equal(t, check.SeverityFail, finding.Severity)
+			for _, want := range tt.wantIn {
+				assert.Contains(t, finding.Details, want)
+			}
+			assert.NotContains(t, finding.Details, "XID", "user-facing prose says transactions")
+		})
+	}
+}
+
+// The table is deliberately narrow: four columns an engineer who is not a DBA can
+// read, capped at the three oldest pins in brief output.
+func TestFreezeAge_HorizonPinTable(t *testing.T) {
+	t.Parallel()
+
+	queryer := healthy()
+	queryer.pinRows = []db.HorizonPinsRow{
+		slot("logical_slot", "debezium_bookings", "lost", 900_000_000, false),
+		activePhysicalSlot("replica_1", 300_000_000),
+		preparedXact("gid-xa-42", 200_000),
+		activeLogicalSlot("debezium_payments", 1_000),
+	}
+
+	finding := findingByID(t, run(t, queryer), idHorizonPin)
+
+	require.Equal(t, check.SeverityFail, finding.Severity)
+	require.NotNil(t, finding.Table)
+	assert.Equal(t, []string{"Source", "Object", "Pin Age (transactions)", "Status"}, finding.Table.Headers)
+	assert.Equal(t, 3, finding.Table.MaxRowsBrief, "brief output shows the three oldest, verbose shows all")
+	require.Len(t, finding.Table.Rows, 4)
+	assert.Equal(t,
+		[]string{"logical slot", "debezium_bookings", "900.0M", "inactive, WAL lost"}, finding.Table.Rows[0].Cells)
+	assert.Equal(t, check.SeverityFail, finding.Table.Rows[0].Severity)
+	assert.Equal(t,
+		[]string{"physical slot", "replica_1", "300.0M", "active, WAL reserved"}, finding.Table.Rows[1].Cells)
+	assert.Equal(t,
+		[]string{"prepared transaction", "gid-xa-42", "200.0K", "prepared, uncommitted"}, finding.Table.Rows[2].Cells)
+	assert.Equal(t, check.SeverityPass, finding.Table.Rows[3].Severity)
+	assert.Contains(t, finding.Debug, "coincident=")
+}
+
 func TestFreezeAge_QueryErrors(t *testing.T) {
 	t.Parallel()
 
@@ -422,6 +770,10 @@ func TestFreezeAge_QueryErrors(t *testing.T) {
 	}{
 		{name: "database", wantIn: "databases", fail: func(q *mockQueryer) { q.dbErr = fmt.Errorf("connection refused") }},
 		{name: "table", wantIn: "tables", fail: func(q *mockQueryer) { q.tableErr = fmt.Errorf("statement timeout") }},
+		{
+			name: "horizon pins", wantIn: "horizon pins",
+			fail: func(q *mockQueryer) { q.pinErr = fmt.Errorf("permission denied") },
+		},
 	}
 
 	for _, tt := range tests {
@@ -454,10 +806,19 @@ func TestFreezeAge_Metadata(t *testing.T) {
 	assert.Contains(t, metadata.Description, "wraparound")
 	assert.Equal(t, metadata, freezeage.New(healthy()).Metadata())
 
-	for _, name := range []string{"DatabaseFreezeAge", "TableFreezeAge"} {
+	for _, name := range []string{"DatabaseFreezeAge", "TableFreezeAge", "HorizonPins"} {
 		assert.Contains(t, metadata.SQL, "-- name: "+name)
 	}
 	assert.NotContains(t, metadata.SQL, "XminHorizonBlockers", "live pin investigation belongs to houston dba xmin")
+	// horizon-pin reads DURABLE pins only. Live state resolves itself between the
+	// read and the report, which is why it belongs to houston dba xmin instead.
+	for _, view := range []string{"pg_stat_activity", "pg_stat_progress_vacuum", "pg_locks"} {
+		assert.NotContains(t, metadata.SQL, view, "live state belongs to houston dba xmin, not this check")
+	}
+	for _, view := range []string{"pg_catalog.pg_replication_slots", "pg_catalog.pg_prepared_xacts"} {
+		assert.Contains(t, metadata.SQL, view)
+	}
+	assert.NotContains(t, metadata.SQL, "inactive_since", "inactive_since is PG17+ and PG14 is the floor")
 	// The floor must be the LOWER of the WARN and FAIL thresholds Go applies, not
 	// WARN alone: a high trigger clamps WARN to the age() ceiling while FAIL stays
 	// at the failsafe, so a raw 2 * trigger floor would be unreachable and would

@@ -469,6 +469,109 @@ func (q *Queries) HighSeqScanTables(ctx context.Context) ([]HighSeqScanTablesRow
 	return items, nil
 }
 
+const horizonPins = `-- name: HorizonPins :many
+WITH pins AS (
+  SELECT
+    (CASE WHEN s.slot_type = 'logical' THEN 'logical_slot' ELSE 'physical_slot' END)::text AS source
+    , s.slot_name::text AS object_name
+    , v.pin_column
+    , v.pinned_xid
+    , coalesce(s.active, FALSE) AS active
+    , coalesce(s.wal_status, 'unknown')::text AS wal_status
+    , format(
+      '%s slot %s, %s, WAL %s'
+      , s.slot_type
+      , s.slot_name
+      , CASE WHEN s.active THEN 'active' ELSE 'inactive' END
+      , coalesce(s.wal_status, 'unknown')
+    )::text AS detail
+  FROM pg_catalog.pg_replication_slots AS s
+  -- The two values pin independently: a logical slot usually holds only
+  -- catalog_xmin, a physical slot with hot_standby_feedback only xmin.
+  CROSS JOIN LATERAL (
+    VALUES ('slot_xmin'::text, s.xmin), ('slot_catalog_xmin'::text, s.catalog_xmin)
+  ) AS v (pin_column, pinned_xid)
+  -- A slot that pins nothing has a NULL here; age(NULL) is NULL, but dropping the
+  -- row keeps a non-pinning slot out of the result set entirely.
+  WHERE v.pinned_xid IS NOT NULL AND v.pinned_xid <> '0'::xid
+
+  UNION ALL
+
+  -- A prepared transaction is always holding, so there is no inactive variant to
+  -- reason about and the wal_status rules stay slot-only.
+  SELECT
+    'prepared_xact'::text
+    , x.gid::text
+    , 'prepared_xid'::text
+    , x.transaction
+    , TRUE
+    , 'unknown'::text
+    , format(
+      'prepared transaction %s on %s, owner %s, prepared %s ago'
+      , x.gid, x.database, x.owner, date_trunc('second', now() - x.prepared)
+    )::text
+  FROM pg_catalog.pg_prepared_xacts AS x
+  WHERE x.transaction <> '0'::xid
+)
+
+SELECT
+  p.source
+  , p.object_name
+  , p.pin_column
+  , age(p.pinned_xid)::bigint AS pin_age
+  , p.active
+  , p.wal_status
+  , p.detail
+FROM pins AS p
+ORDER BY pin_age DESC
+`
+
+type HorizonPinsRow struct {
+	Source     pgtype.Text
+	ObjectName pgtype.Text
+	PinColumn  pgtype.Text
+	PinAge     pgtype.Int8
+	Active     pgtype.Bool
+	WalStatus  pgtype.Text
+	Detail     pgtype.Text
+}
+
+// Durable pins on the xmin horizon: replication slots and prepared transactions
+// are on-disk state that does not resolve itself, so a single read is a snapshot
+// rather than a race. Backends, lock waiters and in-flight vacuums are
+// deliberately absent — reading those needs luck in timing and belongs to a live
+// investigation (`houston dba xmin`).
+//
+// Slot recency is the age of the pinned xid, not wall-clock time: the column PG17
+// added for that does not exist on PG14, which is this check's floor.
+func (q *Queries) HorizonPins(ctx context.Context) ([]HorizonPinsRow, error) {
+	rows, err := q.db.Query(ctx, horizonPins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []HorizonPinsRow
+	for rows.Next() {
+		var i HorizonPinsRow
+		if err := rows.Scan(
+			&i.Source,
+			&i.ObjectName,
+			&i.PinColumn,
+			&i.PinAge,
+			&i.Active,
+			&i.WalStatus,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const idleInTransaction = `-- name: IdleInTransaction :many
 SELECT
   pg_stat_activity.pid
