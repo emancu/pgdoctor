@@ -7,24 +7,20 @@ Monitors PostgreSQL temporary file creation which indicates queries spilling to 
 ## What It Checks
 
 ### Temp File Creation Rate (`temp-file-rate`)
-The rate of temporary file creation, reported as context:
-- Above **20 files/hour**: serious regression or multiple problematic queries
-- Above **5 files/hour**: new inefficient queries or query plan changes
+Monitors the rate of temporary file creation:
+- **FAIL**: ≥20 files/hour (serious regression or multiple problematic queries)
+- **WARN**: ≥5 files/hour (new inefficient queries or query plan changes)
 - **Baseline**: Well-tuned production databases typically see <1 file/hour
 
 ### Temp Data Volume Rate (`temp-volume-rate`)
-The volume of temp data written, reported as context:
-- Above **5 GB/hour**: major regression or multiple large queries spilling to disk
-- Above **1 GB/hour**: increased large sorts/hashes from new features or query changes
+Monitors the volume of temp data written:
+- **FAIL**: ≥5 GB/hour (major regression or multiple large queries spilling to disk)
+- **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
 
-A rate over its threshold demands action, so both rates carry WARN or FAIL, and so
-does `temp-file-sources` below when it can name the statements responsible.
-
-When it cannot, the rates still carry it. An unattributable spill is often the worst
-case rather than a benign one: `pg_stat_statements` records at `ExecutorEnd`, so a
-statement killed by `statement_timeout` never appears there while its temp file is
-still counted here. Set `log_temp_files` to catch those.
+`temp-file-sources` below carries the same grade when it can name the statements
+responsible. When it cannot, the rates keep it: a spill nothing accounts for is more
+often the worst case than a benign one.
 
 ### The Measurement Window
 
@@ -53,17 +49,17 @@ view materialises the entire query-text corpus into a `work_mem` tuplestore, whi
 itself spill.
 
 **The table does not add up to the rate, by design.** `pg_stat_database.temp_bytes`
-measures the *disk footprint* of each temp file — its size when deleted.
+measures the *disk footprint* of each temp file, its size when deleted.
 `pg_stat_statements.temp_blks_written` measures *write I/O*, and a multi-pass external
 sort rewrites the same file once per merge pass. Measured on PostgreSQL 17, one
 identical 71 MB sort reports 71 MB, 213 MB or 289 MB of writes depending on
 `work_mem`; hash joins and materialised CTEs reconcile 1:1. Rank by the table, never
 sum it.
 
-The finding is omitted entirely when nothing can be attributed — the rate findings
-have already reported the problem. `pg_stat_statements` is a separate counter set with
-its own reset, so `pg_stat_statements_reset()` empties this table while leaving the
-rate untouched; an absent table never means no temp file was written.
+The finding is omitted when nothing can be attributed, since the rate findings have
+already reported the problem. `pg_stat_statements` keeps its own counters with their
+own reset, so `pg_stat_statements_reset()` empties this table and leaves the rate
+untouched. An absent table never means no temp file was written.
 
 Three things are missing from it:
 
@@ -72,16 +68,16 @@ Three things are missing from it:
   `pg_stat_database`. If you use `statement_timeout`, the worst offender may not be
   listed. `log_temp_files` is the only source that catches those.
 - **Logical decoding spill** (Debezium and other CDC). Not counted by this check at
-  all — see `pg_stat_replication_slots.spill_bytes`.
-- **A last-execution time.** There isn't one. `pg_stat_statements` has no
-  last-seen column in any version through PostgreSQL 18. "Tracked Since" is when the
-  *entry was created*, not when the statement last ran, and it is empty before
-  PostgreSQL 17 where the column does not exist.
+  all. See `pg_stat_replication_slots.spill_bytes`.
+- **A last-execution time.** `pg_stat_statements` has no last-seen column in any
+  version through PostgreSQL 18. "Tracked Since" is when the *entry was created*, not
+  when the statement last ran, and it is empty before PostgreSQL 17.
 
 ### Investigating
 
 **If the table is empty**, the offenders exist but `pg_stat_statements` cannot see
-them. This tells you which of the reasons applies:
+them, and the rate finding names the reasons it found. This is the query behind that,
+if you want the full picture:
 
 ```sql
 SELECT
@@ -102,22 +98,22 @@ SELECT
 
 | Reading | Meaning |
 |---|---|
-| `statement_timeout` set | Killed queries never reach `ExecutorEnd`, so they are never recorded — while their temp files still count. The likeliest cause, and the offender is by definition an expensive one |
-| `evictions` large | Entries are being discarded faster than they accumulate. Each event drops ~5% of `max`, so 19,688 events at `max=10000` is ~9.8M entries gone. Anything infrequent disappears before it can be read, and **every** `pg_stat_statements`-based check is analysing a truncated sample |
+| `statement_timeout` set | A killed query never reaches `ExecutorEnd`, so it is never recorded, while its temp file still counts. Usually the cause, and the offender is an expensive statement by construction |
+| `evictions` large | Entries are discarded faster than they accumulate. Each event drops about 5% of `max`, so a large count means the working set of distinct statements far exceeds capacity. Anything infrequent disappears before it can be read, and **every** `pg_stat_statements`-based check is then analysing a truncated sample |
 | `track_utility = off` | `CREATE INDEX`, `CLUSTER` and `VACUUM FULL` write sort files and are not recorded |
 | `pgss_reset` ≫ `db_stats_reset` | Query stats were reset; the rate kept its history while attribution started over |
 | `track = none` | Nothing is being recorded at all |
 
-`log_temp_files = 0` logs every temp file with its size and the statement that made
-it. That is the only source that sees all of them, and the fallback whenever the
-table cannot explain the rate.
+`log_temp_files = 0` logs every temp file with its size and the statement that wrote
+it. It is the only source that sees all of them, and the fallback whenever the table
+cannot explain the rate.
 
-**If the top entry is a monitoring query**, that is not a false positive. Reading
+**If the top entry is a monitoring query**, it is not a false positive. Reading
 `pg_stat_statements` materialises its entire query-text corpus into a `work_mem`
 tuplestore before any filter applies, so an agent polling it frequently can become the
 largest temp producer on the instance. Check the poll interval and `work_mem` for that
-role before looking anywhere else. pgdoctor's own statements are excluded from the
-table, but other tools' are not — deliberately, since they spill like anything else.
+role before looking anywhere else. pgdoctor excludes its own statements from the
+table. Other tools' are left in deliberately, since they spill like anything else.
 
 **A high volume rate with a low file rate** means few, very large files: sorts, hash
 joins or index builds exceeding `work_mem` by a wide margin, rather than routine
@@ -139,17 +135,17 @@ SELECT pg_stat_statements_reset(
 A targeted reset **deletes** the entry (measured at ~0.4 ms; it touches only the
 `pg_stat_statements` hash table). Re-run this check after a full traffic cycle:
 
-- entry still absent — the statement has not run
-- entry back with no temp writes — it ran and no longer spills
-- entry back at the top — the fix did not land
+- entry still absent: the statement has not run
+- entry back with no temp writes: it ran and no longer spills
+- entry back at the top: the fix did not land
 
 This needs EXECUTE on `pg_stat_statements_reset`, which is **superuser-only by default
 and is not granted to `pg_monitor`**, so a read-only monitoring role cannot do it.
 
 **Do not run `pg_stat_reset()` on a production primary** to clear the headline rate.
 It is the only thing that clears `temp_files`/`temp_bytes`, but it also zeroes
-`n_dead_tup` and `n_mod_since_analyze` for every table — the counters autovacuum
-schedules on — so every table's next autovacuum is deferred until the churn
+`n_dead_tup` and `n_mod_since_analyze` for every table, which are the counters
+autovacuum schedules on, so every table's next autovacuum is deferred until the churn
 re-accumulates. Compare two runs of this check over a known interval instead.
 
 The two clocks are independent: `pg_stat_statements_reset()` clears the table and
