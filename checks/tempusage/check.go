@@ -183,7 +183,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 
 	report.AddFinding(check.Finding{
 		ID:       "temp-file-sources",
-		Name:     "Temp File Sources",
+		Name:     fmt.Sprintf("Statements Spilling To Disk: %d", len(rows)),
 		Severity: severity,
 		Details: fmt.Sprintf(
 			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals above.",
