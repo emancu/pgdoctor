@@ -18,13 +18,11 @@ var querySQL string
 //go:embed README.md
 var readme string
 
-// minWindowSeconds is the shortest counter window that yields a meaningful
-// per-hour rate. Below an hour the denominator is small enough that a single
-// query's temp file skews the rate into the FAIL band.
+// Below an hour a single query's temp file skews the rate into the FAIL band.
 const minWindowSeconds = 3600
 
 // TempUsageQueries defines the database queries needed by this check.
-// HasPgStatStatements is generated from partition-usage's query.sql - sqlc query
+// HasPgStatStatements is generated from partition-usage's query.sql: sqlc query
 // names are global to the shared db package, so it is declared, not redefined.
 type TempUsageQueries interface {
 	TempUsage(context.Context) (db.TempUsageRow, error)
@@ -66,9 +64,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
-	// The finding below is a pair of rates over the counter window, so too short a
-	// window leaves nothing meaningful to divide by. Skip rather than pass: a bare
-	// PASS reads as "no temp file problem", which is not what we know.
+	// Skip rather than pass: PASS would read as "no temp file problem", which too
+	// short a window cannot establish.
 	window, windowKnown := statsWindowSeconds(row)
 	switch {
 	case !windowKnown:
@@ -80,30 +77,22 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		)), nil
 	}
 
-	// Without a recorded reset the window is anchored to server uptime, which is a
-	// lower bound on the real one, so the rates are upper bounds. A rate under the
-	// threshold is still conclusive (the true one is smaller), but one above it may
-	// just be a long history divided by a short uptime — not worth a FAIL.
+	// Anchored to uptime, the window is a lower bound and the rates upper bounds:
+	// one above the threshold may be a long history over a short uptime.
 	maxSeverity := check.SeverityFail
 	if row.WindowIsLowerBound.Bool {
 		maxSeverity = check.SeverityWarn
 	}
 
-	// The two rates are graded separately and reported together. They are different
-	// signals - a high volume at a low file count is a few enormous spills, the
-	// reverse is many small ones - but one condition, and one finding per condition.
+	// Graded separately, reported together: a high volume at a low file count is a
+	// few enormous spills, the reverse is many small ones.
 	rateSeverity := worst(tempFileRateSeverity(row, maxSeverity), tempVolumeRateSeverity(row, maxSeverity))
 
-	// A rate over its threshold demands action, which is not what INFO means, so the
-	// rate keeps its grade whether or not the offenders could be named. The statement
-	// list carries the same grade: it is the actionable one, and burying it under INFO
-	// was what made this check hard to read.
 	details := ""
 
 	if rateSeverity > check.SeverityPass {
-		// Naming the offenders only helps once there is something to chase, and reading
-		// pg_stat_statements materialises the whole query-text corpus into a work_mem
-		// tuplestore, so a healthy database does not pay for it.
+		// Reading pg_stat_statements materialises its whole query-text corpus into
+		// a work_mem tuplestore, so a healthy database does not pay for it.
 		gap, err := c.reportTopStatements(ctx, report, rateSeverity)
 		if err != nil {
 			return nil, err
@@ -128,11 +117,10 @@ func worst(a, b check.Severity) check.Severity {
 	return b
 }
 
-// reportTopStatements attributes the temp writes to individual statements, and
-// returns why it could not whenever it could not. The figures rank offenders and must
-// not be summed or compared against the rate: pg_stat_database measures the disk
-// footprint of each temp file, while pg_stat_statements counts write I/O, which a
-// multi-pass external sort repeats.
+// reportTopStatements attributes temp writes to statements, returning why it could
+// not when it could not. The figures rank; they do not sum. pg_stat_database
+// measures disk footprint, pg_stat_statements write I/O, which a multi-pass sort
+// repeats.
 func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (string, error) {
 	available, err := c.queries.HasPgStatStatements(ctx)
 	if err != nil {
@@ -187,8 +175,8 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 	return "", nil
 }
 
-// explainAttributionGap names the reasons pg_stat_statements holds no temp writes
-// while the counters do. Each is independent and several usually apply at once.
+// explainAttributionGap names why pg_stat_statements holds no temp writes while the
+// counters do. Several usually apply at once.
 func explainAttributionGap(gap db.TempUsageAttributionGapRow) string {
 	var reasons []string
 
@@ -224,9 +212,8 @@ func explainAttributionGap(gap db.TempUsageAttributionGapRow) string {
 	return fmt.Sprintf("No statement accounts for this:\n%s\n\n%s", strings.Join(reasons, "\n"), next)
 }
 
-// entrySince renders when pg_stat_statements started tracking an entry. It is not a
-// last-execution time - no such column exists in any version - but it bounds how much
-// history a figure covers. Absent before PostgreSQL 17.
+// entrySince is when the entry was created, not when the statement last ran: there
+// is no last-execution column in any version. Absent before PostgreSQL 17.
 func entrySince(ts pgtype.Timestamptz) string {
 	if !ts.Valid {
 		return "-"
