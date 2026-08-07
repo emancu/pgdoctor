@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -29,6 +30,7 @@ type TempUsageQueries interface {
 	TempUsage(context.Context) (db.TempUsageRow, error)
 	HasPgStatStatements(context.Context) (pgtype.Bool, error)
 	TempUsageByStatement(context.Context) ([]db.TempUsageByStatementRow, error)
+	TempUsageAttributionGap(context.Context) (db.TempUsageAttributionGapRow, error)
 }
 
 type checker struct {
@@ -94,10 +96,10 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// Naming the offenders only helps once there is something to chase, and reading
 	// pg_stat_statements materialises the whole query-text corpus into a work_mem
 	// tuplestore, so a healthy database does not pay for it.
-	attributed := false
+	attributed, gap := false, ""
 	if rateSeverity > check.SeverityPass {
 		var err error
-		if attributed, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
+		if attributed, gap, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
 			return nil, err
 		}
 	}
@@ -106,8 +108,18 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// rates keep their grade whether or not the offenders could be named. The
 	// statement list carries the same grade: it is the actionable one, and burying it
 	// under INFO was what made this check hard to read.
-	reportTempFileRate(row, report, fileSeverity)
-	reportTempVolumeRate(row, report, volumeSeverity, attributed)
+	// The gap explanation belongs on whichever rate actually fired, and only once.
+	fileGap, volumeGap := "", ""
+	switch {
+	case attributed:
+	case volumeSeverity > check.SeverityPass:
+		volumeGap = gap
+	case fileSeverity > check.SeverityPass:
+		fileGap = gap
+	}
+
+	reportTempFileRate(row, report, fileSeverity, fileGap)
+	reportTempVolumeRate(row, report, volumeSeverity, volumeGap)
 
 	return report, nil
 }
@@ -124,23 +136,28 @@ func worst(a, b check.Severity) check.Severity {
 // figures rank offenders and must not be summed or compared against the rates above:
 // pg_stat_database measures the disk footprint of each temp file, while
 // pg_stat_statements counts write I/O, which a multi-pass external sort repeats.
-func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (bool, error) {
+func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (bool, string, error) {
 	available, err := c.queries.HasPgStatStatements(ctx)
 	if err != nil {
-		return false, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
 	if !available.Bool {
-		return false, nil
+		return false, "pg_stat_statements is not available, so nothing can be attributed.", nil
 	}
 
 	statements, err := c.queries.TempUsageByStatement(ctx)
 	if err != nil {
-		return false, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
 	if len(statements) == 0 {
-		return false, nil
+		gap, err := c.queries.TempUsageAttributionGap(ctx)
+		if err != nil {
+			return false, "", fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		}
+
+		return false, explainAttributionGap(gap), nil
 	}
 
 	rows := make([]check.TableRow, 0, len(statements))
@@ -170,7 +187,44 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 		},
 	})
 
-	return true, nil
+	return true, "", nil
+}
+
+// explainAttributionGap names the reasons pg_stat_statements holds no temp writes
+// while the counters do. Each is independent and several usually apply at once.
+func explainAttributionGap(gap db.TempUsageAttributionGapRow) string {
+	var reasons []string
+
+	if gap.StatementTimeout.String != "0" && gap.StatementTimeout.String != "" {
+		reasons = append(reasons, fmt.Sprintf(
+			"statements killed by statement_timeout=%sms are never recorded", gap.StatementTimeout.String))
+	}
+
+	if gap.Evictions.Int64 > 0 {
+		reasons = append(reasons, fmt.Sprintf(
+			"%s evictions at max=%s drop infrequent statements",
+			check.FormatNumber(gap.Evictions.Int64), gap.MaxEntries.String))
+	}
+
+	if gap.TrackUtility.String == "off" {
+		reasons = append(reasons, "track_utility is off, so index builds are not recorded")
+	}
+
+	if gap.Track.String == "none" {
+		reasons = append(reasons, "pg_stat_statements.track is none, so nothing is recorded")
+	}
+
+	// log_temp_files = -1 disables it; anything else logs files at or above that size.
+	next := "Set log_temp_files to catch them."
+	if gap.LogTempFiles.String != "-1" && gap.LogTempFiles.String != "" {
+		next = "The server log has them (log_temp_files is on)."
+	}
+
+	if len(reasons) == 0 {
+		return "No statement accounts for this. " + next
+	}
+
+	return fmt.Sprintf("No statement accounts for this: %s. %s", strings.Join(reasons, "; "), next)
 }
 
 // entrySince renders when pg_stat_statements started tracking an entry. It is not a
@@ -278,7 +332,7 @@ func tempFileRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) check
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity) {
+func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity, gap string) {
 	rate := getTempFilesPerHour(row)
 
 	finding := check.Finding{
@@ -295,6 +349,10 @@ func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity chec
 
 		finding.Details = fmt.Sprintf("%d files totalling %s%s.",
 			row.TempFiles.Int64, check.FormatBytes(row.TempBytes.Int64), since)
+
+		if gap != "" {
+			finding.Details += " " + gap
+		}
 	}
 
 	report.AddFinding(finding)
@@ -325,19 +383,14 @@ func tempVolumeRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) che
 	return capSeverity(severity, maxSeverity)
 }
 
-func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, attributed bool) {
+func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, gap string) {
 	finding := check.Finding{
 		ID:       "temp-volume-rate",
 		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(getTempBytesPerHour(row)))),
 		Severity: severity,
 	}
 
-	// Only worth saying when nothing named the offenders: pg_stat_statements records
-	// at ExecutorEnd, so a statement killed by statement_timeout never appears there
-	// even though its temp file is still counted here.
-	if severity > check.SeverityPass && !attributed {
-		finding.Details = "No statement accounts for this; check the server log (log_temp_files) - killed queries are never recorded in pg_stat_statements."
-	}
+	finding.Details = gap
 
 	report.AddFinding(finding)
 }

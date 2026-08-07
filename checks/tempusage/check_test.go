@@ -19,6 +19,7 @@ type mockQueryer struct {
 	err        error
 	pgssOK     bool
 	statements []db.TempUsageByStatementRow
+	gap        db.TempUsageAttributionGapRow
 }
 
 func (m *mockQueryer) TempUsage(ctx context.Context) (db.TempUsageRow, error) {
@@ -31,6 +32,10 @@ func (m *mockQueryer) HasPgStatStatements(context.Context) (pgtype.Bool, error) 
 
 func (m *mockQueryer) TempUsageByStatement(context.Context) ([]db.TempUsageByStatementRow, error) {
 	return m.statements, nil
+}
+
+func (m *mockQueryer) TempUsageAttributionGap(context.Context) (db.TempUsageAttributionGapRow, error) {
+	return m.gap, nil
 }
 
 func findFinding(t *testing.T, report *check.Report, id string) check.Finding {
@@ -617,11 +622,28 @@ func TestTempUsage_UnattributableSpillKeepsTheSeverity(t *testing.T) {
 	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 1.0, 2*1024*1024*1024, &statsReset)
 
 	for _, tc := range []struct {
-		name    string
-		queryer *mockQueryer
+		name       string
+		queryer    *mockQueryer
+		wantDetail string
 	}{
-		{"pg_stat_statements unavailable", &mockQueryer{row: row, pgssOK: false}},
-		{"no statement recorded any temp", &mockQueryer{row: row, pgssOK: true, statements: nil}},
+		{
+			"pg_stat_statements unavailable",
+			&mockQueryer{row: row, pgssOK: false},
+			"pg_stat_statements is not available",
+		},
+		{
+			// The gap query names the reasons, so the finding says why rather than
+			// pointing at a log and leaving the reader to work it out.
+			"killed by statement_timeout, entries evicted",
+			&mockQueryer{row: row, pgssOK: true, statements: nil, gap: db.TempUsageAttributionGapRow{
+				StatementTimeout: pgtype.Text{String: "15000", Valid: true},
+				Evictions:        pgtype.Int8{Int64: 19688, Valid: true},
+				MaxEntries:       pgtype.Text{String: "10000", Valid: true},
+				TrackUtility:     pgtype.Text{String: "off", Valid: true},
+				LogTempFiles:     pgtype.Text{String: "0", Valid: true},
+			}},
+			"statement_timeout=15000ms",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -632,10 +654,64 @@ func TestTempUsage_UnattributableSpillKeepsTheSeverity(t *testing.T) {
 			volume := findFinding(t, report, "temp-volume-rate")
 			require.Equal(t, check.SeverityWarn, volume.Severity, "the signal must survive")
 			require.Equal(t, check.SeverityWarn, report.Severity)
-			require.Contains(t, volume.Details, "log_temp_files")
+			require.Contains(t, volume.Details, tc.wantDetail)
 
 			for _, result := range report.Results {
 				require.NotEqual(t, "temp-file-sources", result.ID)
+			}
+		})
+	}
+}
+
+func Test_explainAttributionGap(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 1.0, 2*1024*1024*1024, &statsReset)
+
+	tests := []struct {
+		name     string
+		gap      db.TempUsageAttributionGapRow
+		contains []string
+	}{
+		{
+			name: "several causes at once, and the log already has them",
+			gap: db.TempUsageAttributionGapRow{
+				StatementTimeout: pgtype.Text{String: "15000", Valid: true},
+				Evictions:        pgtype.Int8{Int64: 19688, Valid: true},
+				MaxEntries:       pgtype.Text{String: "10000", Valid: true},
+				TrackUtility:     pgtype.Text{String: "off", Valid: true},
+				LogTempFiles:     pgtype.Text{String: "0", Valid: true},
+			},
+			contains: []string{
+				"statement_timeout=15000ms", "19.7K evictions at max=10000",
+				"track_utility is off", "The server log has them",
+			},
+		},
+		{
+			name: "no cause identified, logging disabled",
+			gap: db.TempUsageAttributionGapRow{
+				StatementTimeout: pgtype.Text{String: "0", Valid: true},
+				Evictions:        pgtype.Int8{Int64: 0, Valid: true},
+				TrackUtility:     pgtype.Text{String: "on", Valid: true},
+				LogTempFiles:     pgtype.Text{String: "-1", Valid: true},
+			},
+			contains: []string{"No statement accounts for this.", "Set log_temp_files"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{row: row, pgssOK: true, statements: nil, gap: tt.gap}
+			report, err := tempusage.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			details := findFinding(t, report, "temp-volume-rate").Details
+			for _, want := range tt.contains {
+				require.Contains(t, details, want)
 			}
 		})
 	}

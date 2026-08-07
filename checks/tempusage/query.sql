@@ -93,3 +93,15 @@ WHERE
   AND s.query NOT LIKE '-- name:%' 
 ORDER BY s.temp_blks_written DESC
 LIMIT 10;
+
+-- name: TempUsageAttributionGap :one
+-- Explains why no statement accounts for the temp files. Read only when the
+-- attribution query came back empty, so it deliberately avoids pg_stat_statements
+-- itself: that view materialises its whole query-text corpus on every read.
+SELECT
+  (SELECT s.setting FROM pg_catalog.pg_settings AS s WHERE s.name = 'statement_timeout') AS statement_timeout
+  , (SELECT s.setting FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.track') AS track
+  , (SELECT s.setting FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.track_utility') AS track_utility
+  , (SELECT s.setting FROM pg_catalog.pg_settings AS s WHERE s.name = 'pg_stat_statements.max') AS max_entries
+  , (SELECT s.setting FROM pg_catalog.pg_settings AS s WHERE s.name = 'log_temp_files') AS log_temp_files
+  , (SELECT i.dealloc FROM pg_stat_statements_info AS i) AS evictions;
