@@ -168,9 +168,11 @@ Temp files cause:
 
 ## How to Fix
 
-### For a high file rate
+### For `temp-rate`
 
-High temp file creation rate (>5 files/hour) indicates queries spilling to disk. Fix by increasing work_mem or optimizing queries:
+The finding reports both rates, so start with whichever crossed its threshold.
+
+**A high file creation rate** (>5 files/hour) indicates queries spilling to disk. Fix by increasing work_mem or optimizing queries:
 
 **Option 1: Increase work_mem globally (use with caution)**
 ```sql
@@ -208,9 +210,7 @@ LIMIT 20;
 -- Then optimize queries: add indexes, rewrite joins, limit result sets
 ```
 
-### For a high volume rate
-
-High temp data volume (>1GB/hour) indicates large sorts/hashes spilling to disk:
+**A high data volume** (>1GB/hour) indicates large sorts/hashes spilling to disk:
 
 **Option 1: Increase work_mem (same as above)**
 
