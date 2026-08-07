@@ -4,7 +4,8 @@ Reports how full the `pg_stat_statements` entry table is and how fast it is disc
 every other check that reads that view is only as good as the sample left in it.
 
 > **Note**: This check reads `pg_stat_statements`. When the extension is not installed, not preloaded, or
-> not reachable through `search_path`, it reports PASS and stops, since there is no sample to truncate.
+> not reachable through `search_path`, it reports SKIP: the table is cluster-wide, so its absence here says nothing
+> about whether the shared hash is evicting, and nothing was inspected.
 
 ## What It Checks
 
@@ -13,11 +14,13 @@ every other check that reads that view is only as good as the sample left in it.
 Counts the entries currently held against `pg_stat_statements.max`. Both figures are cluster-wide, so the
 count is not filtered by database.
 
-**Severity**: PASS, always.
+**Severity**: WARN at capacity, otherwise PASS. SKIP when `max` is unreadable, since there is nothing
+for "full" to be relative to.
 
-A full table is not a defect. A workload with more distinct statements than `max` sits pinned at `max`
-indefinitely and loses nothing as long as the set is stable. This finding states the position; the
-eviction rate below is what says whether entries are actually being lost.
+This is the only present-tense reading the check has. The eviction rate below is cumulative since
+`stats_reset`, so churn that began an hour ago is averaged away by a year-long window. A table at
+capacity is evicting continuously whatever that average says, because every new statement displaces
+one.
 
 The count comes from `pg_stat_statements(false)`, which skips the external query-text file. Reading that
 text is what makes the view expensive: it materialises the whole corpus into a `work_mem` tuplestore, and

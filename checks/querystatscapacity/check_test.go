@@ -77,28 +77,34 @@ func Test_EntryUsage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		row        db.QueryStatsCapacityRow
-		wantInName string
+		name         string
+		row          db.QueryStatsCapacityRow
+		wantInName   string
+		wantSeverity check.Severity
 	}{
 		{
-			name:       "entries against max",
-			row:        capacityRow(4200, 10000, 0, 30*day),
-			wantInName: "4.2K/10.0K entries",
+			name:         "entries against max",
+			row:          capacityRow(4200, 10000, 0, 30*day),
+			wantInName:   "4.2K/10.0K entries",
+			wantSeverity: check.SeverityPass,
 		},
 		{
-			name:       "at capacity",
-			row:        capacityRow(10000, 10000, 0, 30*day),
-			wantInName: "10.0K/10.0K entries",
+			name:         "at capacity",
+			row:          capacityRow(10000, 10000, 0, 30*day),
+			wantInName:   "10.0K/10.0K entries",
+			wantSeverity: check.SeverityWarn,
 		},
 		{
-			name: "max unreadable falls back to the bare count",
+			// Without max there is nothing for "full" to be relative to, so the
+			// present-tense signal is unavailable rather than healthy.
+			name: "max unreadable cannot be graded",
 			row: func() db.QueryStatsCapacityRow {
 				row := capacityRow(4200, 0, 0, 30*day)
 				row.MaxEntries = pgtype.Int8{}
 				return row
 			}(),
-			wantInName: "4.2K entries",
+			wantInName:   "4.2K entries, capacity unreadable",
+			wantSeverity: check.SeveritySkip,
 		},
 	}
 
@@ -109,7 +115,7 @@ func Test_EntryUsage(t *testing.T) {
 			report := run(t, &mockQueryer{pgssOK: true, row: tt.row})
 			result := finding(t, report, usageID)
 
-			assert.Equal(t, check.SeverityPass, result.Severity)
+			assert.Equal(t, tt.wantSeverity, result.Severity)
 			assert.Contains(t, result.Name, tt.wantInName)
 		})
 	}
@@ -132,12 +138,25 @@ func Test_EntryUsage_DoesNotRepeatTheCheckName(t *testing.T) {
 
 // A full table is a state, not a defect: a stable workload larger than max sits
 // pinned at max without losing anything.
-func Test_EntryCapacity_FullTableAloneDoesNotEscalate(t *testing.T) {
+// A full table is evicting right now, whatever the lifetime average says: every new
+// statement displaces one. dealloc = 0 over 30 days averages to nothing, so without
+// this the check would pass an instance actively losing statements.
+func Test_EntryCapacity_FullTableWarnsEvenWithNoRecordedEvictions(t *testing.T) {
 	t.Parallel()
 
 	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 0, 30*day)})
 
-	assert.Equal(t, check.SeverityPass, report.Severity)
+	assert.Equal(t, check.SeverityWarn, report.Severity)
+	assert.Equal(t, check.SeverityWarn, finding(t, report, usageID).Severity)
+	assert.Contains(t, finding(t, report, usageID).Details, "At capacity")
+}
+
+func Test_EntryCapacity_BelowCapacityPasses(t *testing.T) {
+	t.Parallel()
+
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(4200, 10000, 0, 30*day)})
+
+	assert.Equal(t, check.SeverityPass, finding(t, report, usageID).Severity)
 }
 
 func Test_EvictionRate(t *testing.T) {
@@ -158,28 +177,28 @@ func Test_EvictionRate(t *testing.T) {
 		{
 			// 30 events over 30 days = 1/day = 0.05x capacity/day.
 			name:         "occasional churn stays below the display floor",
-			row:          capacityRow(10000, 10000, 30, 30*day),
+			row:          capacityRow(4200, 10000, 30, 30*day),
 			wantSeverity: check.SeverityPass,
 			wantInName:   "<0.1x capacity/day",
 		},
 		{
 			// 60 events over 30 days = 2/day = 0.1x capacity/day.
 			name:         "measurable but tolerable churn",
-			row:          capacityRow(10000, 10000, 60, 30*day),
+			row:          capacityRow(4200, 10000, 60, 30*day),
 			wantSeverity: check.SeverityPass,
 			wantInName:   "0.1x capacity/day",
 		},
 		{
 			// 300 events over 30 days = 10/day = exactly the 0.5x threshold.
 			name:         "at the threshold",
-			row:          capacityRow(10000, 10000, 300, 30*day),
+			row:          capacityRow(4200, 10000, 300, 30*day),
 			wantSeverity: check.SeverityWarn,
 			wantInName:   "0.5x capacity/day",
 		},
 		{
 			// The measured production instance: 19688 events over 78 days.
 			name:         "sustained eviction",
-			row:          capacityRow(10000, 10000, 19688, 78*day),
+			row:          capacityRow(4200, 10000, 19688, 78*day),
 			wantSeverity: check.SeverityWarn,
 			wantInName:   "12.6x capacity/day",
 		},
@@ -187,7 +206,7 @@ func Test_EvictionRate(t *testing.T) {
 			// A counter that only grows: 4000 events over three years is 3.7/day,
 			// 0.18x capacity. Thresholding on dealloc itself would flag this.
 			name:         "large absolute count over a long window",
-			row:          capacityRow(10000, 10000, 4000, 1095*day),
+			row:          capacityRow(4200, 10000, 4000, 1095*day),
 			wantSeverity: check.SeverityPass,
 			wantInName:   "0.1x capacity/day",
 		},
@@ -202,6 +221,8 @@ func Test_EvictionRate(t *testing.T) {
 
 			assert.Equal(t, tt.wantSeverity, result.Severity)
 			assert.Contains(t, result.Name, tt.wantInName)
+			// Entries are held below capacity so the fill signal stays PASS and the
+			// report severity reflects the rate alone.
 			assert.Equal(t, tt.wantSeverity, report.Severity)
 		})
 	}
@@ -347,10 +368,19 @@ func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {
 			report := run(t, &mockQueryer{pgssOK: true, row: tt.row})
 
 			assert.Equal(t, check.SeveritySkip, finding(t, report, rateID).Severity)
-			// The usage finding needs neither window nor max, so the report still
-			// has a result.
-			assert.Equal(t, check.SeverityPass, report.Severity)
+
+			if tt.name == "max unreadable" {
+				// max is what both findings measure against, so neither can grade
+				// and the report follows them down.
+				assert.Equal(t, check.SeveritySkip, finding(t, report, usageID).Severity)
+				assert.Equal(t, check.SeveritySkip, report.Severity)
+
+				return
+			}
+
+			// Entry usage needs neither the window nor max, so it still reports.
 			assert.Equal(t, check.SeverityPass, finding(t, report, usageID).Severity)
+			assert.Equal(t, check.SeverityPass, report.Severity)
 		})
 	}
 }
@@ -362,10 +392,15 @@ func Test_ExtensionUnavailable(t *testing.T) {
 
 	report := run(t, &mockQueryer{pgssOK: false})
 
-	assert.Equal(t, check.SeverityPass, report.Severity)
+	// Nothing was inspected. pg_stat_statements is cluster-wide, so its absence from
+	// this database says nothing about whether the shared hash is evicting, and PASS
+	// would claim a capacity the check never measured.
+	assert.Equal(t, check.SeveritySkip, report.Severity)
 	require.Len(t, report.Results, 1)
 	assert.Equal(t, usageID, report.Results[0].ID)
-	assert.Empty(t, report.Results[0].Details)
+	assert.Equal(t, check.SeveritySkip, report.Results[0].Severity)
+	// A skipped report renders the Details, not the finding name.
+	assert.Contains(t, report.Results[0].Details, "not available")
 }
 
 func Test_QueryError(t *testing.T) {

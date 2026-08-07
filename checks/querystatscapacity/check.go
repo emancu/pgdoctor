@@ -44,6 +44,12 @@ const (
 	// statements is gone within hours of running.
 	turnoverWarnPerDay = 0.5
 
+	// entryUsageWarnFill is the occupancy at which the table is effectively full and
+	// every new statement displaces an existing one. Unlike the eviction rate this
+	// is a present-tense reading, so it catches churn that started too recently to
+	// move a lifetime average.
+	entryUsageWarnFill = 0.99
+
 	// turnoverDisplayEpsilon absorbs binary representation error before the
 	// displayed value is truncated. 0.7*10 is 6.999999999999999 in float64, which
 	// would otherwise truncate to 0.6.
@@ -91,14 +97,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	// Nothing reads pg_stat_statements when it is absent, so no check is working
-	// from a truncated sample and there is no capacity to report on.
+	// The table is cluster-wide, so its absence from this database says nothing
+	// about whether the shared hash is evicting. Nothing was inspected, and PASS
+	// would claim a capacity we never measured.
 	if !available.Bool {
 		report.AddFinding(check.Finding{
 			ID:       entryUsageID,
 			Name:     entryUsageName + ": pg_stat_statements not available",
-			Severity: check.SeverityPass,
+			Severity: check.SeveritySkip,
+			Details:  "pg_stat_statements is not available, so its capacity cannot be inspected.",
 		})
+		report.Severity = check.SeveritySkip
 
 		return report, nil
 	}
@@ -111,7 +120,23 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	reportEntryUsage(row, report)
 	reportEvictionRate(row, report)
 
+	// AddFinding only raises severity and SKIP sorts below PASS, so a check that
+	// graded nothing would otherwise report PASS. See internal/checktest.
+	if allSkipped(report) {
+		report.Severity = check.SeveritySkip
+	}
+
 	return report, nil
+}
+
+func allSkipped(report *check.Report) bool {
+	for _, result := range report.Results {
+		if result.Severity != check.SeveritySkip {
+			return false
+		}
+	}
+
+	return len(report.Results) > 0
 }
 
 // The finding carries its own id and name rather than reusing the check's: the
@@ -122,21 +147,40 @@ const (
 	entryUsageName = "Entry Usage"
 )
 
-// reportEntryUsage states how much of the table is occupied. A full table is not
-// a defect on its own - a stable workload larger than max sits pinned at max
-// forever without losing anything - so this finding grades nothing. The eviction
-// rate below is what says whether entries are actually being lost.
+// reportEntryUsage states how much of the table is occupied, and grades it. This is
+// the only present-tense signal the check has: the eviction rate is cumulative since
+// stats_reset, so a spike that began an hour ago is averaged away by a year-long
+// window. A table at capacity is evicting continuously right now whatever that
+// average says, because every new statement displaces one.
 func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
-	name := fmt.Sprintf("%s: %s entries", entryUsageName, check.FormatNumber(row.Entries.Int64))
-	if row.MaxEntries.Valid && row.MaxEntries.Int64 > 0 {
-		name = fmt.Sprintf("%s: %s/%s entries",
-			entryUsageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
+	// max is what "full" is relative to; without it there is nothing to grade.
+	if !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0 {
+		report.AddFinding(check.Finding{
+			ID: entryUsageID,
+			Name: fmt.Sprintf("%s: %s entries, capacity unreadable",
+				entryUsageName, check.FormatNumber(row.Entries.Int64)),
+			Severity: check.SeveritySkip,
+			Debug:    capacityDebug(row),
+		})
+
+		return
 	}
+
+	severity, details := check.SeverityPass, ""
+	if float64(row.Entries.Int64)/float64(row.MaxEntries.Int64) >= entryUsageWarnFill {
+		severity = check.SeverityWarn
+		details = "At capacity, so every new statement displaces an existing one. " +
+			"partition-usage and temp-usage read what is left."
+	}
+
+	name := fmt.Sprintf("%s: %s/%s entries",
+		entryUsageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
 
 	report.AddFinding(check.Finding{
 		ID:       entryUsageID,
 		Name:     name,
-		Severity: check.SeverityPass,
+		Severity: severity,
+		Details:  details,
 		Debug:    capacityDebug(row),
 	})
 }
@@ -212,8 +256,9 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	}
 
 	report.AddFinding(check.Finding{
-		ID:       id,
-		Name:     name + ": " + formatTurnover(turnover),
+		ID: id,
+		Name: fmt.Sprintf("%s: %s averaged over %s",
+			name, formatTurnover(turnover), check.FormatDurationSec(int64(window))),
 		Severity: severity,
 		Details:  details,
 	})
