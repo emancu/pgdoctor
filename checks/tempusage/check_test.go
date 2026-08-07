@@ -172,11 +172,9 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 	assert.Len(t, report.Results, 2)
 
 	// Both subchecks should be OK
-	assert.Equal(t, "temp-file-rate", report.Results[0].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
 	assert.Contains(t, report.Results[0].Name, "/hour")
 
-	assert.Equal(t, "temp-volume-rate", report.Results[1].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
 	assert.Contains(t, report.Results[1].Name, "/hour")
 }
@@ -262,8 +260,7 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	volumeFinding := report.Results[1]
-	assert.Equal(t, "temp-volume-rate", volumeFinding.ID)
+	volumeFinding := findFinding(t, report, "temp-volume-rate")
 	assert.Equal(t, check.SeverityInfo, volumeFinding.Severity)
 	assert.Contains(t, volumeFinding.Name, "2.0GiB/hour")
 }
@@ -603,6 +600,42 @@ func TestTempUsage_NoAttributionFindingWhenNothingToShow(t *testing.T) {
 
 			for _, result := range report.Results {
 				require.NotEqual(t, "temp-file-sources", result.ID, "no attribution finding expected")
+			}
+		})
+	}
+}
+
+// An unattributable spill is not a quiet one. pg_stat_statements records at
+// ExecutorEnd, so a statement killed by statement_timeout never appears there while
+// its temp file is still counted - which makes "cannot attribute" a signal that the
+// offender was expensive, not that nothing is wrong. The rate keeps the severity.
+func TestTempUsage_UnattributableSpillKeepsTheSeverity(t *testing.T) {
+	t.Parallel()
+
+	const oneHourInSeconds = 3600.0
+	statsReset := time.Now().Add(-24 * time.Hour)
+	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 1.0, 2*1024*1024*1024, &statsReset)
+
+	for _, tc := range []struct {
+		name    string
+		queryer *mockQueryer
+	}{
+		{"pg_stat_statements unavailable", &mockQueryer{row: row, pgssOK: false}},
+		{"no statement recorded any temp", &mockQueryer{row: row, pgssOK: true, statements: nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := tempusage.New(tc.queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			volume := findFinding(t, report, "temp-volume-rate")
+			require.Equal(t, check.SeverityWarn, volume.Severity, "the signal must survive")
+			require.Equal(t, check.SeverityWarn, report.Severity)
+			require.Contains(t, volume.Details, "log_temp_files")
+
+			for _, result := range report.Results {
+				require.NotEqual(t, "temp-file-sources", result.ID)
 			}
 		})
 	}
