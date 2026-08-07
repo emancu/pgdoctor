@@ -190,9 +190,9 @@ var xidCounter = counter{
 	trigger:        func(s settings) int64 { return s.freezeMaxAge },
 	failsafe:       func(s settings) int64 { return s.failsafeAge },
 	relAge:         func(r db.TableFreezeAgeRow) int64 { return r.FreezeAge },
-	relTrigger:     func(r db.TableFreezeAgeRow) int64 { return r.EffectiveFreezeMaxAge },
-	relFailsafe:    func(r db.TableFreezeAgeRow) int64 { return r.FailsafeAge },
-	relOverridden:  func(r db.TableFreezeAgeRow) bool { return r.XidReloption > 0 },
+	relTrigger:     func(r db.TableFreezeAgeRow) int64 { return orDefault(r.EffectiveFreezeMaxAge, defaultFreezeMaxAge) },
+	relFailsafe:    func(r db.TableFreezeAgeRow) int64 { return orDefault(r.FailsafeAge, defaultFailsafeAge) },
+	relOverridden:  func(r db.TableFreezeAgeRow) bool { return r.XidReloption.Valid && r.XidReloption.Int64 > 0 },
 }
 
 var multixactCounter = counter{
@@ -205,9 +205,15 @@ var multixactCounter = counter{
 	trigger:        func(s settings) int64 { return s.multixactFreezeMaxAge },
 	failsafe:       func(s settings) int64 { return s.multixactFailsafeAge },
 	relAge:         func(r db.TableFreezeAgeRow) int64 { return r.MultixactAge },
-	relTrigger:     func(r db.TableFreezeAgeRow) int64 { return r.EffectiveMultixactFreezeMaxAge },
-	relFailsafe:    func(r db.TableFreezeAgeRow) int64 { return r.MultixactFailsafeAge },
-	relOverridden:  func(r db.TableFreezeAgeRow) bool { return r.MultixactReloption > 0 },
+	relTrigger: func(r db.TableFreezeAgeRow) int64 {
+		return orDefault(r.EffectiveMultixactFreezeMaxAge, defaultMultixactFreezeMaxAge)
+	},
+	relFailsafe: func(r db.TableFreezeAgeRow) int64 {
+		return orDefault(r.MultixactFailsafeAge, defaultMultixactFailsafeAge)
+	},
+	relOverridden: func(r db.TableFreezeAgeRow) bool {
+		return r.MultixactReloption.Valid && r.MultixactReloption.Int64 > 0
+	},
 }
 
 // ageRow is a counter-agnostic view of one database or VACUUM target, so both

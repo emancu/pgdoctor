@@ -87,10 +87,10 @@ func relation(name string, freezeAge int64) db.TableFreezeAgeRow {
 		Relpages:                       100,
 		SizeBytesEst:                   100 * 8192,
 		FreezeAge:                      freezeAge,
-		EffectiveFreezeMaxAge:          defaultTrigger,
-		EffectiveMultixactFreezeMaxAge: defaultMxTrigger,
-		FailsafeAge:                    failsafeAge,
-		MultixactFailsafeAge:           failsafeAge,
+		EffectiveFreezeMaxAge:          pgInt8(defaultTrigger),
+		EffectiveMultixactFreezeMaxAge: pgInt8(defaultMxTrigger),
+		FailsafeAge:                    pgInt8(failsafeAge),
+		MultixactFailsafeAge:           pgInt8(failsafeAge),
 		LastAutovacuum:                 pgTime(time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC)),
 		AutovacuumCount:                7,
 		VacuumCount:                    1,
@@ -329,6 +329,26 @@ func TestFreezeAge_MultipleColumnAndTruncation(t *testing.T) {
 
 // A reloption can only lower the effective trigger, so an age that is the healthy
 // sawtooth against the GUC becomes a WARN against the override.
+// A trigger high enough that 2 x trigger exceeds the age() ceiling makes FAIL
+// (capped at the failsafe) lower than WARN (clamped to the ceiling). Such a
+// relation must still be classified, and the SQL floor must admit it — flooring
+// at a raw 2 x trigger would put the cutoff at 2.4B, which age() never reaches.
+func TestFreezeAge_FloorAdmitsClampedFail(t *testing.T) {
+	t.Parallel()
+
+	const highTrigger = int64(1_200_000_000) // WARN clamps to 2147483647, FAIL = 1.6B failsafe.
+
+	row := relation("public.bookings", 1_700_000_000)
+	row.EffectiveFreezeMaxAge = pgInt8(highTrigger)
+
+	q := healthy()
+	q.tableRows = []db.TableFreezeAgeRow{row}
+
+	finding := findingByID(t, run(t, q), idTableFreeze)
+	assert.Equal(t, check.SeverityFail, finding.Severity,
+		"1.7B is past the 1.6B failsafe, so it is a FAIL even though WARN clamped above it")
+}
+
 func TestFreezeAge_ReloptionLowersEffectiveTrigger(t *testing.T) {
 	t.Parallel()
 
@@ -336,10 +356,11 @@ func TestFreezeAge_ReloptionLowersEffectiveTrigger(t *testing.T) {
 	const age = int64(210_000_000)
 
 	xid, xidLowered := relation("public.bookings", age), relation("public.bookings", age)
-	xidLowered.EffectiveFreezeMaxAge, xidLowered.XidReloption = 100_000_000, 100_000_000
+	xidLowered.EffectiveFreezeMaxAge, xidLowered.XidReloption = pgInt8(100_000_000), pgInt8(100_000_000)
 
 	mx, mxLowered := relationWithMultixact("public.bookings", age), relationWithMultixact("public.bookings", age)
-	mxLowered.EffectiveMultixactFreezeMaxAge, mxLowered.MultixactReloption = 100_000_000, 100_000_000
+	mxLowered.EffectiveMultixactFreezeMaxAge, mxLowered.MultixactReloption =
+		pgInt8(100_000_000), pgInt8(100_000_000)
 
 	tests := []struct {
 		name, finding, unit string
@@ -437,9 +458,12 @@ func TestFreezeAge_Metadata(t *testing.T) {
 		assert.Contains(t, metadata.SQL, "-- name: "+name)
 	}
 	assert.NotContains(t, metadata.SQL, "XminHorizonBlockers", "live pin investigation belongs to houston dba xmin")
-	// The floor must track the WARN multiple or relations are filtered out before
-	// Go can classify them.
-	assert.Contains(t, metadata.SQL, "r.freeze_age >= 2 * r.effective_freeze_max_age")
-	assert.Contains(t, metadata.SQL, "r.multixact_age >= 2 * r.effective_multixact_freeze_max_age")
+	// The floor must be the LOWER of the WARN and FAIL thresholds Go applies, not
+	// WARN alone: a high trigger clamps WARN to the age() ceiling while FAIL stays
+	// at the failsafe, so a raw 2 * trigger floor would be unreachable and would
+	// discard relations Go would FAIL. See TestFreezeAge_FloorAdmitsClampedFail.
+	assert.Contains(t, metadata.SQL,
+		"r.freeze_age >= least(2 * r.effective_freeze_max_age, r.failsafe_age, 2147483647)")
+	assert.Contains(t, metadata.SQL, "2 * r.effective_multixact_freeze_max_age, r.multixact_failsafe_age, 2147483647")
 	assert.Contains(t, metadata.SQL, "WHERE d.datname = current_database()")
 }
