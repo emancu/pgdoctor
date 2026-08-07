@@ -174,14 +174,11 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityPass, report.Severity)
-	assert.Len(t, report.Results, 2)
+	assert.Len(t, report.Results, 1)
 
-	// Both subchecks should be OK
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Contains(t, report.Results[0].Name, "/hour")
-
-	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
-	assert.Contains(t, report.Results[1].Name, "/hour")
+	// Both numbers ride on the name, since renderers drop Details on PASS.
+	assert.Equal(t, "Temp File Rate: 4.2 files/hour, 2.0MiB/hour", report.Results[0].Name)
 }
 
 func TestTempUsage_HighFileRate_Warning(t *testing.T) {
@@ -207,9 +204,9 @@ func TestTempUsage_HighFileRate_Warning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-sources").Severity)
-	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "10.0 files/hour")
+	assert.Contains(t, findFinding(t, report, "temp-rate").Name, "10.0 files/hour")
 }
 
 func TestTempUsage_HighFileRate_Critical(t *testing.T) {
@@ -235,10 +232,10 @@ func TestTempUsage_HighFileRate_Critical(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
-	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity,
 		"the actionable finding carries the same grade")
-	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "50.0 files/hour")
+	assert.Contains(t, findFinding(t, report, "temp-rate").Name, "50.0 files/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
@@ -265,9 +262,11 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	volumeFinding := findFinding(t, report, "temp-volume-rate")
-	assert.Equal(t, check.SeverityWarn, volumeFinding.Severity)
-	assert.Contains(t, volumeFinding.Name, "2.0GiB/hour")
+	// The file rate is below its threshold: the volume alone raises the finding, and
+	// both numbers stay on the name.
+	rateFinding := findFinding(t, report, "temp-rate")
+	assert.Equal(t, check.SeverityWarn, rateFinding.Severity)
+	assert.Equal(t, "Temp File Rate: 4.2 files/hour, 2.0GiB/hour", rateFinding.Name)
 }
 
 func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
@@ -294,9 +293,9 @@ func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
-	volumeFinding := findFinding(t, report, "temp-volume-rate")
-	assert.Equal(t, check.SeverityFail, volumeFinding.Severity)
-	assert.Contains(t, volumeFinding.Name, "8.0GiB/hour")
+	rateFinding := findFinding(t, report, "temp-rate")
+	assert.Equal(t, check.SeverityFail, rateFinding.Severity)
+	assert.Contains(t, rateFinding.Name, "8.0GiB/hour")
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
 
@@ -323,12 +322,12 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
-	assert.Len(t, report.Results, 3, "two rate findings plus the attribution finding")
+	assert.Len(t, report.Results, 2, "one rate finding plus the attribution finding")
 
 	// Every finding carries the same grade: a rate over its threshold demands action.
-	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-rate").Severity)
-	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-volume-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
+	assert.Equal(t, "Temp File Rate: 833.0 files/hour, 6.2GiB/hour", findFinding(t, report, "temp-rate").Name)
 }
 
 func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {
@@ -409,12 +408,13 @@ func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {
 
 			require.NoError(t, err)
 
-			// The thresholds still decide the outcome, they just land on the report
-			// via the attribution finding rather than on the rate findings.
+			// The two thresholds are still graded independently; the single finding
+			// carries whichever grades worse.
 			want := tt.expectedFileRateSeverity
 			if tt.expectedVolumeRateSeverity > want {
 				want = tt.expectedVolumeRateSeverity
 			}
+			assert.Equal(t, want, findFinding(t, report, "temp-rate").Severity, "threshold outcome")
 			assert.Equal(t, want, report.Severity, "threshold outcome")
 		})
 	}
@@ -478,7 +478,8 @@ func TestTempUsage_LowerBoundWindowCapsSeverity(t *testing.T) {
 		bytesPerHour     float64
 		expectedSeverity check.Severity
 	}{
-		{"rate in FAIL band is capped to WARN", 50.0, 20 * 1024 * 1024, check.SeverityWarn},
+		{"file rate in FAIL band is capped to WARN", 50.0, 20 * 1024 * 1024, check.SeverityWarn},
+		{"volume rate in FAIL band is capped to WARN", 1.0, 8 * 1024 * 1024 * 1024, check.SeverityWarn},
 		{"rate in WARN band stays WARN", 10.0, 20 * 1024 * 1024, check.SeverityWarn},
 		{"rate below thresholds still passes", 1.0, 1024, check.SeverityPass},
 	}
@@ -494,7 +495,7 @@ func TestTempUsage_LowerBoundWindowCapsSeverity(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedSeverity, report.Severity)
-			assert.GreaterOrEqual(t, len(report.Results), 2, "both rate subchecks must run")
+			assert.Equal(t, tt.expectedSeverity, findFinding(t, report, "temp-rate").Severity)
 		})
 	}
 }
@@ -525,7 +526,7 @@ func TestTempUsage_AttributionOnlyWhenRatesWarn(t *testing.T) {
 	healthy := makeTempUsageRow(10, 1024, oneHourInSeconds*24, 1.0, 1024, &statsReset)
 	report, err := tempusage.New(&mockQueryer{row: healthy, pgssOK: true}).Check(context.Background())
 	require.NoError(t, err)
-	require.Len(t, report.Results, 2, "no attribution finding on a healthy database")
+	require.Len(t, report.Results, 1, "no attribution finding on a healthy database")
 }
 
 func TestTempUsage_AttributionTable(t *testing.T) {
@@ -613,7 +614,8 @@ func TestTempUsage_NoAttributionFindingWhenNothingToShow(t *testing.T) {
 // An unattributable spill is not a quiet one. pg_stat_statements records at
 // ExecutorEnd, so a statement killed by statement_timeout never appears there while
 // its temp file is still counted - which makes "cannot attribute" a signal that the
-// offender was expensive, not that nothing is wrong. The rate keeps the severity.
+// offender was expensive, not that nothing is wrong. The rate keeps the severity, and
+// carries the explanation.
 func TestTempUsage_UnattributableSpillKeepsTheSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -651,10 +653,11 @@ func TestTempUsage_UnattributableSpillKeepsTheSeverity(t *testing.T) {
 			report, err := tempusage.New(tc.queryer).Check(context.Background())
 			require.NoError(t, err)
 
-			volume := findFinding(t, report, "temp-volume-rate")
-			require.Equal(t, check.SeverityWarn, volume.Severity, "the signal must survive")
+			rate := findFinding(t, report, "temp-rate")
+			require.Equal(t, check.SeverityWarn, rate.Severity, "the signal must survive")
 			require.Equal(t, check.SeverityWarn, report.Severity)
-			require.Contains(t, volume.Details, tc.wantDetail)
+			require.Contains(t, rate.Details, tc.wantDetail)
+			require.Contains(t, rate.Details, "12.0K files totalling 500.0MiB", "the totals stay on the rate")
 
 			for _, result := range report.Results {
 				require.NotEqual(t, "temp-file-sources", result.ID)
@@ -709,7 +712,7 @@ func Test_explainAttributionGap(t *testing.T) {
 			report, err := tempusage.New(queryer).Check(context.Background())
 			require.NoError(t, err)
 
-			details := findFinding(t, report, "temp-volume-rate").Details
+			details := findFinding(t, report, "temp-rate").Details
 			for _, want := range tt.contains {
 				require.Contains(t, details, want)
 			}

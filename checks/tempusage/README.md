@@ -6,25 +6,28 @@ Monitors PostgreSQL temporary file creation which indicates queries spilling to 
 
 ## What It Checks
 
-### Temp File Creation Rate (`temp-file-rate`)
-Monitors the rate of temporary file creation:
+### Temp File Rate (`temp-rate`)
+
+One finding carrying two numbers, the files created and the bytes written. Each is
+graded against its own thresholds and the finding reports the worse of the two.
+
+Files created:
 - **FAIL**: ≥20 files/hour (serious regression or multiple problematic queries)
 - **WARN**: ≥5 files/hour (new inefficient queries or query plan changes)
 - **Baseline**: Well-tuned production databases typically see <1 file/hour
 
-### Temp Data Volume Rate (`temp-volume-rate`)
-Monitors the volume of temp data written:
+Bytes written:
 - **FAIL**: ≥5 GB/hour (major regression or multiple large queries spilling to disk)
 - **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
 
 `temp-file-sources` below carries the same grade when it can name the statements
-responsible. When it cannot, the rates keep it: a spill nothing accounts for is more
+responsible. When it cannot, the rate keeps it: a spill nothing accounts for is more
 often the worst case than a benign one.
 
 ### The Measurement Window
 
-Both findings are per-hour rates, so they need a period to divide by. That period
+Both numbers are per-hour rates, so they need a period to divide by. That period
 runs from `pg_stat_database.stats_reset` — but most databases have never had
 `pg_stat_reset()` called, leaving it NULL.
 
@@ -35,15 +38,15 @@ real window is **at least** the uptime, and the rates computed from it are **upp
 bounds**:
 
 - A rate below the threshold is conclusive — the true rate is lower still.
-- A rate above it might just be a long history divided by a short uptime, so these
-  findings are capped at WARN and never escalate to FAIL.
+- A rate above it might just be a long history divided by a short uptime, so the
+  finding is capped at WARN and never escalates to FAIL.
 
 The check reports SKIP only when the window is under an hour, where the denominator
 is small enough that a single query's temp file would dominate the rate.
 
 ### Statements Spilling To Disk (`temp-file-sources`)
 
-When either rate finding fires, the check lists the top statements by temp data
+When the rate finding fires, the check lists the top statements by temp data
 written, from `pg_stat_statements`. It is skipped on a healthy database: reading that
 view materialises the entire query-text corpus into a `work_mem` tuplestore, which can
 itself spill.
@@ -56,7 +59,7 @@ identical 71 MB sort reports 71 MB, 213 MB or 289 MB of writes depending on
 `work_mem`; hash joins and materialised CTEs reconcile 1:1. Rank by the table, never
 sum it.
 
-The finding is omitted when nothing can be attributed, since the rate findings have
+The finding is omitted when nothing can be attributed, since the rate finding has
 already reported the problem. `pg_stat_statements` keeps its own counters with their
 own reset, so `pg_stat_statements_reset()` empties this table and leaves the rate
 untouched. An absent table never means no temp file was written.
@@ -165,7 +168,7 @@ Temp files cause:
 
 ## How to Fix
 
-### For `temp-file-rate`
+### For a high file rate
 
 High temp file creation rate (>5 files/hour) indicates queries spilling to disk. Fix by increasing work_mem or optimizing queries:
 
@@ -205,11 +208,11 @@ LIMIT 20;
 -- Then optimize queries: add indexes, rewrite joins, limit result sets
 ```
 
-### For `temp-volume-rate`
+### For a high volume rate
 
 High temp data volume (>1GB/hour) indicates large sorts/hashes spilling to disk:
 
-**Option 1: Increase work_mem (same as temp-file-rate)**
+**Option 1: Increase work_mem (same as above)**
 
 **Option 2: Optimize large queries**
 ```sql
