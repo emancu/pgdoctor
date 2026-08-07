@@ -92,7 +92,7 @@ func Test_EntryUsage(t *testing.T) {
 			name:         "at capacity",
 			row:          capacityRow(10000, 10000, 0, 30*day),
 			wantInName:   "10.0K/10.0K entries",
-			wantSeverity: check.SeverityWarn,
+			wantSeverity: check.SeverityPass,
 		},
 		{
 			// Without max there is nothing for "full" to be relative to, so the
@@ -138,17 +138,39 @@ func Test_EntryUsage_DoesNotRepeatTheCheckName(t *testing.T) {
 
 // A full table is a state, not a defect: a stable workload larger than max sits
 // pinned at max without losing anything.
-// A full table is evicting right now, whatever the lifetime average says: every new
-// statement displaces one. dealloc = 0 over 30 days averages to nothing, so without
-// this the check would pass an instance actively losing statements.
-func Test_EntryCapacity_FullTableWarnsEvenWithNoRecordedEvictions(t *testing.T) {
+// Occupancy alone is not a defect and must not warn: a stable workload larger than
+// max sits pinned there indefinitely without losing anything, and just short of max
+// there is still headroom.
+func Test_EntryCapacity_OccupancyAloneDoesNotWarn(t *testing.T) {
 	t.Parallel()
 
-	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 0, 30*day)})
+	for _, tt := range []struct {
+		name string
+		row  db.QueryStatsCapacityRow
+	}{
+		{"full but nothing ever evicted", capacityRow(10000, 10000, 0, 30*day)},
+		{"near capacity with headroom left", capacityRow(9900, 10000, 0, 30*day)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, check.SeverityWarn, report.Severity)
+			report := run(t, &mockQueryer{pgssOK: true, row: tt.row})
+			assert.Equal(t, check.SeverityPass, finding(t, report, usageID).Severity)
+		})
+	}
+}
+
+// No headroom plus evictions on record is the state a lifetime average understates:
+// churn that began recently barely moves the rate, but the table is losing entries.
+func Test_EntryCapacity_FullAndEvictingWarns(t *testing.T) {
+	t.Parallel()
+
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 300, 3000*day)})
+
 	assert.Equal(t, check.SeverityWarn, finding(t, report, usageID).Severity)
-	assert.Contains(t, finding(t, report, usageID).Details, "At capacity")
+	assert.Contains(t, finding(t, report, usageID).Details, "No headroom")
+	// The rate itself is diluted to nothing by the long window, which is the point.
+	assert.Equal(t, check.SeverityPass, finding(t, report, rateID).Severity)
 }
 
 func Test_EntryCapacity_BelowCapacityPasses(t *testing.T) {
