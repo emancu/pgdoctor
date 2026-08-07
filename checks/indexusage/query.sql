@@ -9,9 +9,6 @@ SELECT
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
-  -- Age of the counters measured by the server. The scan-rate threshold divides by
-  -- this window, so differencing stats_reset against the CLI host's clock would let
-  -- clock skew between the two decide which indexes get reported.
   , (
     SELECT extract(EPOCH FROM (now() - stats_reset))::bigint
     FROM pg_stat_database WHERE datname = current_database()

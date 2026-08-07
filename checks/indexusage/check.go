@@ -127,8 +127,6 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 	})
 }
 
-// checkLowUsageIndexes takes a server-computed age: the threshold divides by it, so
-// CLI clock skew would change which indexes are reported.
 func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsAgeSeconds pgtype.Int8, report *check.Report) {
 	windowKnown := statsAgeSeconds.Valid
 	windowDays := 0

@@ -914,8 +914,8 @@ func queryHasJoin(queryText string) bool {
 	return strings.Contains(queryText, " join ")
 }
 
-// statsAge returns how long ago pg_stat_statements was reset, as measured by the
-// server. Every row carries the same value, so the first one answers for the set.
+// statsAge returns how long ago pg_stat_statements was reset. Every row carries the
+// same value.
 func statsAge(queries []db.QueryStatsFromStatStatementsRow) pgtype.Int8 {
 	if len(queries) == 0 {
 		return pgtype.Int8{}
