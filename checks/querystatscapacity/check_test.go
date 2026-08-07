@@ -488,3 +488,38 @@ func Test_EvictionRate_DisplayAndGradeCannotDisagree(t *testing.T) {
 		})
 	}
 }
+
+// pgdoctor's own availability probe can trigger an eviction against a full table.
+// One event must never be enough to warn, whatever max is.
+func Test_EvictionRate_OneEventCannotWarn(t *testing.T) {
+	t.Parallel()
+
+	for _, mx := range []int64{100, 200, 5000, 10000} {
+		t.Run(fmt.Sprintf("max=%d", mx), func(t *testing.T) {
+			t.Parallel()
+
+			// Just past the point where grading starts.
+			window := minWindowFor(mx) + 1
+			report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(mx/2, mx, 1, window)})
+
+			assert.NotEqual(t, check.SeverityWarn, finding(t, report, rateID).Severity,
+				"a single eviction warned at max=%d", mx)
+		})
+	}
+}
+
+// minWindowFor mirrors the check's own minimum: one eviction's share of capacity
+// divided by the warn threshold, floored at an hour.
+func minWindowFor(maxEntries int64) float64 {
+	batch := maxEntries * 5 / 100
+	if batch < 10 {
+		batch = 10
+	}
+
+	seconds := float64(batch) / float64(maxEntries) / 0.5 * 86400
+	if seconds < 3600 {
+		return 3600
+	}
+
+	return seconds
+}

@@ -20,8 +20,8 @@ var querySQL string
 var readme string
 
 const (
-	// Below an hour a single eviction event extrapolates to a meaningless rate.
-	minWindowSeconds = 3600
+	// Floor for the window below, and the point at which a rate means anything.
+	minWindowFloorSeconds = 3600
 
 	secondsPerDay = 86400
 
@@ -165,6 +165,15 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	// none of these states can establish.
 	window, ok := windowSeconds(row)
 	switch {
+	case !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0:
+		report.AddFinding(check.Finding{
+			ID:       id,
+			Name:     name,
+			Severity: check.SeveritySkip,
+			Details:  "pg_stat_statements.max is unreadable; turnover has no capacity to be a share of.",
+		})
+
+		return
 	case !ok:
 		report.AddFinding(check.Finding{
 			ID:       id,
@@ -174,22 +183,13 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 		})
 
 		return
-	case window < minWindowSeconds:
+	case window < minWindowSeconds(row.MaxEntries.Int64):
 		report.AddFinding(check.Finding{
 			ID:       id,
 			Name:     name,
 			Severity: check.SeveritySkip,
-			Details: fmt.Sprintf("Counters cover only %s; need at least 1h to compute an eviction rate.",
+			Details: fmt.Sprintf("Counters cover only %s, too short to distinguish a rate from a single eviction.",
 				check.FormatDurationSec(int64(window))),
-		})
-
-		return
-	case !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0:
-		report.AddFinding(check.Finding{
-			ID:       id,
-			Name:     name,
-			Severity: check.SeveritySkip,
-			Details:  "pg_stat_statements.max is unreadable; turnover has no capacity to be a share of.",
 		})
 
 		return
@@ -260,6 +260,15 @@ func entriesPerEviction(maxEntries int64) int64 {
 	}
 
 	return batch
+}
+
+// minWindowSeconds is short enough to be useful but long enough that one eviction
+// cannot reach the threshold by itself. pgdoctor's own availability probe can
+// trigger one against a full table, and a self-inflicted WARN is the worst kind.
+func minWindowSeconds(maxEntries int64) float64 {
+	share := float64(entriesPerEviction(maxEntries)) / float64(maxEntries)
+
+	return math.Max(minWindowFloorSeconds, share/turnoverWarnPerDay*secondsPerDay)
 }
 
 // turnoverPerDay converts eviction events into the share of capacity lost per day.
