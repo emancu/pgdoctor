@@ -202,7 +202,7 @@ func TestTempUsage_HighFileRate_Warning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-rate").Severity)
 	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-sources").Severity)
 	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "10.0 files/hour")
 }
@@ -230,9 +230,9 @@ func TestTempUsage_HighFileRate_Critical(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
-	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity,
-		"the graded severity rides on the actionable finding")
+		"the actionable finding carries the same grade")
 	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "50.0 files/hour")
 }
 
@@ -261,7 +261,7 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	volumeFinding := findFinding(t, report, "temp-volume-rate")
-	assert.Equal(t, check.SeverityInfo, volumeFinding.Severity)
+	assert.Equal(t, check.SeverityWarn, volumeFinding.Severity)
 	assert.Contains(t, volumeFinding.Name, "2.0GiB/hour")
 }
 
@@ -290,7 +290,7 @@ func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
 	volumeFinding := findFinding(t, report, "temp-volume-rate")
-	assert.Equal(t, check.SeverityInfo, volumeFinding.Severity)
+	assert.Equal(t, check.SeverityFail, volumeFinding.Severity)
 	assert.Contains(t, volumeFinding.Name, "8.0GiB/hour")
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
@@ -320,9 +320,9 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 	assert.Equal(t, check.SeverityFail, report.Severity)
 	assert.Len(t, report.Results, 3, "two rate findings plus the attribution finding")
 
-	// The rates are context; the attribution finding carries the graded severity.
-	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
-	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-volume-rate").Severity)
+	// Every finding carries the same grade: a rate over its threshold demands action.
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-volume-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
 

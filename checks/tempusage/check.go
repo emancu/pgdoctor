@@ -102,23 +102,14 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		}
 	}
 
-	// The rates say a problem exists; only the statement list says what to do about
-	// it, so when there is a list the severity rides on that and the rates become
-	// context. When there is not, an unattributable spill is not a quiet one - it is
-	// often the worst case, a statement expensive enough that statement_timeout kills
-	// it before pg_stat_statements can record it - so the rates keep the severity.
-	reportTempFileRate(row, report, displaySeverity(fileSeverity, attributed))
-	reportTempVolumeRate(row, report, displaySeverity(volumeSeverity, attributed), attributed)
+	// A rate over its threshold demands action, which is not what INFO means, so both
+	// rates keep their grade whether or not the offenders could be named. The
+	// statement list carries the same grade: it is the actionable one, and burying it
+	// under INFO was what made this check hard to read.
+	reportTempFileRate(row, report, fileSeverity)
+	reportTempVolumeRate(row, report, volumeSeverity, attributed)
 
 	return report, nil
-}
-
-func displaySeverity(severity check.Severity, attributed bool) check.Severity {
-	if attributed && severity > check.SeverityPass {
-		return check.SeverityInfo
-	}
-
-	return severity
 }
 
 func worst(a, b check.Severity) check.Severity {
