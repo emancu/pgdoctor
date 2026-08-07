@@ -33,6 +33,29 @@ func (m *mockQueryer) TempUsageByStatement(context.Context) ([]db.TempUsageBySta
 	return m.statements, nil
 }
 
+func findFinding(t *testing.T, report *check.Report, id string) check.Finding {
+	t.Helper()
+
+	for _, result := range report.Results {
+		if result.ID == id {
+			return result
+		}
+	}
+
+	t.Fatalf("finding %q not found", id)
+
+	return check.Finding{}
+}
+
+func oneStatement() []db.TempUsageByStatementRow {
+	return []db.TempUsageByStatementRow{{
+		Queryid:          pgtype.Int8{Int64: 1, Valid: true},
+		Calls:            pgtype.Int8{Int64: 10, Valid: true},
+		TempBytesWritten: pgtype.Int8{Int64: 1024 * 1024, Valid: true},
+		QueryText:        pgtype.Text{String: "select 1", Valid: true},
+	}}
+}
+
 func makeTempUsageRow(
 	tempFiles, tempBytes int64,
 	secondsSinceReset float64,
@@ -111,7 +134,7 @@ func TestTempUsage_UnknownWindow(t *testing.T) {
 	row := makeTempUsageRow(100, 1000000, 0, 10.0, 100000.0, nil)
 	row.SecondsSinceReset = pgtype.Numeric{Valid: false}
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 
 	report, err := checker.Check(context.Background())
@@ -140,7 +163,7 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
@@ -174,17 +197,16 @@ func TestTempUsage_HighFileRate_Warning(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
-	fileRateFinding := report.Results[0]
-	assert.Equal(t, "temp-file-rate", fileRateFinding.ID)
-	assert.Equal(t, check.SeverityWarn, fileRateFinding.Severity)
-	assert.Contains(t, fileRateFinding.Name, "10.0 files/hour")
+	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-sources").Severity)
+	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "10.0 files/hour")
 }
 
 func TestTempUsage_HighFileRate_Critical(t *testing.T) {
@@ -203,17 +225,17 @@ func TestTempUsage_HighFileRate_Critical(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
-	fileRateFinding := report.Results[0]
-	assert.Equal(t, "temp-file-rate", fileRateFinding.ID)
-	assert.Equal(t, check.SeverityFail, fileRateFinding.Severity)
-	assert.Contains(t, fileRateFinding.Name, "50.0 files/hour")
+	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity,
+		"the graded severity rides on the actionable finding")
+	assert.Contains(t, findFinding(t, report, "temp-file-rate").Name, "50.0 files/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
@@ -233,7 +255,7 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
@@ -242,7 +264,7 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 
 	volumeFinding := report.Results[1]
 	assert.Equal(t, "temp-volume-rate", volumeFinding.ID)
-	assert.Equal(t, check.SeverityWarn, volumeFinding.Severity)
+	assert.Equal(t, check.SeverityInfo, volumeFinding.Severity)
 	assert.Contains(t, volumeFinding.Name, "2.0GiB/hour")
 }
 
@@ -263,17 +285,17 @@ func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
 
-	volumeFinding := report.Results[1]
-	assert.Equal(t, "temp-volume-rate", volumeFinding.ID)
-	assert.Equal(t, check.SeverityFail, volumeFinding.Severity)
+	volumeFinding := findFinding(t, report, "temp-volume-rate")
+	assert.Equal(t, check.SeverityInfo, volumeFinding.Severity)
 	assert.Contains(t, volumeFinding.Name, "8.0GiB/hour")
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
 
 func TestTempUsage_BothHighRates(t *testing.T) {
@@ -293,17 +315,18 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 		&statsReset,
 	)
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
-	assert.Len(t, report.Results, 2, "attribution is omitted when pg_stat_statements has nothing")
+	assert.Len(t, report.Results, 3, "two rate findings plus the attribution finding")
 
-	// Both should be FAIL
-	assert.Equal(t, check.SeverityFail, report.Results[0].Severity)
-	assert.Equal(t, check.SeverityFail, report.Results[1].Severity)
+	// The rates are context; the attribution finding carries the graded severity.
+	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-file-rate").Severity)
+	assert.Equal(t, check.SeverityInfo, findFinding(t, report, "temp-volume-rate").Severity)
+	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
 
 func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {
@@ -378,13 +401,19 @@ func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {
 				&statsReset,
 			)
 
-			queryer := &mockQueryer{row: row}
+			queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 			checker := tempusage.New(queryer)
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedFileRateSeverity, report.Results[0].Severity, "file rate severity")
-			assert.Equal(t, tt.expectedVolumeRateSeverity, report.Results[1].Severity, "volume rate severity")
+
+			// The thresholds still decide the outcome, they just land on the report
+			// via the attribution finding rather than on the rate findings.
+			want := tt.expectedFileRateSeverity
+			if tt.expectedVolumeRateSeverity > want {
+				want = tt.expectedVolumeRateSeverity
+			}
+			assert.Equal(t, want, report.Severity, "threshold outcome")
 		})
 	}
 }
@@ -406,7 +435,7 @@ func TestTempUsage_InvalidNumeric(t *testing.T) {
 		StatsReset:        pgtype.Timestamptz{Time: statsReset, Valid: true},
 	}
 
-	queryer := &mockQueryer{row: row}
+	queryer := &mockQueryer{row: row, pgssOK: true, statements: oneStatement()}
 	checker := tempusage.New(queryer)
 	report, err := checker.Check(context.Background())
 
@@ -459,7 +488,7 @@ func TestTempUsage_LowerBoundWindowCapsSeverity(t *testing.T) {
 			// nil statsReset => window_is_lower_bound
 			row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, tt.filesPerHour, tt.bytesPerHour, nil)
 
-			report, err := tempusage.New(&mockQueryer{row: row}).Check(context.Background())
+			report, err := tempusage.New(&mockQueryer{row: row, pgssOK: true, statements: oneStatement()}).Check(context.Background())
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedSeverity, report.Severity)
@@ -477,7 +506,7 @@ func TestTempUsage_ExactWindowAllowsFail(t *testing.T) {
 	statsReset := time.Now().Add(-24 * time.Hour)
 	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
 
-	report, err := tempusage.New(&mockQueryer{row: row}).Check(context.Background())
+	report, err := tempusage.New(&mockQueryer{row: row, pgssOK: true, statements: oneStatement()}).Check(context.Background())
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
@@ -538,7 +567,7 @@ func TestTempUsage_AttributionTable(t *testing.T) {
 	}
 
 	require.NotNil(t, sources, "attribution finding must be present")
-	require.Equal(t, check.SeverityInfo, sources.Severity, "attribution must not escalate the report")
+	require.Equal(t, check.SeverityFail, sources.Severity, "the actionable finding carries the graded severity")
 	require.NotNil(t, sources.Table)
 	require.Len(t, sources.Table.Rows, 2)
 	require.Equal(t, []string{"Temp Written", "Calls", "Tracked Since", "Query ID", "Query"}, sources.Table.Headers)
