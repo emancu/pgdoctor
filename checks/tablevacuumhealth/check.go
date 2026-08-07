@@ -185,8 +185,7 @@ func defaultVacuumTrigger(estimatedRows int64) int64 {
 	return int64(defaultVacuumScaleFactor*float64(estimatedRows)) + defaultVacuumThreshold
 }
 
-// estNextVacuum assumes dead tuples keep accumulating at their post-vacuum average
-// rate, over a server-measured elapsed time.
+// estNextVacuum assumes dead tuples keep accumulating at their post-vacuum rate.
 func estNextVacuum(trigger, pending int64, lastVacuumAge pgtype.Int8) string {
 	if pending == 0 {
 		return noEstimate
@@ -222,8 +221,6 @@ type staleEntry struct {
 
 // checkVacuumStale lists tables that are both overdue AND carry real pending work,
 // on either the vacuum arm (dead + inserts) or the analyze arm (mods since analyze).
-// Server-measured ages: comparing them against the CLI clock would let skew decide
-// the tier.
 func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 	var entries []staleEntry
 	for _, row := range rows {
@@ -305,7 +302,7 @@ func staleSeverity(vacuumWork, analyzeWork int64, lastVacuumAge, lastAnalyzeAge 
 	return check.SeverityPass
 }
 
-// staleAge reads a server-measured age, treating "never ran" as infinitely stale.
+// staleAge treats "never ran" as infinitely stale.
 func staleAge(age pgtype.Int8) int64 {
 	if !age.Valid {
 		return math.MaxInt64
@@ -334,7 +331,7 @@ func isUsingDefaultSettings(reloptions string) bool {
 	return !strings.Contains(strings.ToLower(reloptions), "autovacuum_vacuum_scale_factor")
 }
 
-// formatAge renders a server-measured age in whole days, falling back to hours.
+// formatAge renders an age in whole days, falling back to hours.
 func formatAge(seconds int64) string {
 	days := seconds / secondsPerDay
 	if days == 0 {

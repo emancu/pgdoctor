@@ -118,9 +118,7 @@ WITH candidates AS (
     , rows::bigint AS rows_returned
     -- Counters are cumulative since this reset, so the report has to say over
     -- what period. Available from pg_stat_statements 1.9, which the toplevel
-    -- filter above already requires. The age is measured by the server: taking the
-    -- difference against the CLI host's clock would report skew between the two as
-    -- part of the window.
+    -- filter above already requires.
     , (
       SELECT extract(EPOCH FROM (now() - i.stats_reset))::bigint
       FROM pg_stat_statements_info AS i

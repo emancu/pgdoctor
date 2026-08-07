@@ -16,9 +16,7 @@ SELECT
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count
   , ARRAY_TO_STRING(c.reloptions, ',') AS reloptions
-  -- Ages measured by the server. The staleness tiers and the estimated next vacuum
-  -- compare against these, so differencing the timestamps against the CLI host's
-  -- clock would fold skew between the two into the answer. NULL means never.
+  -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
   , COALESCE(s.n_mod_since_analyze, 0) AS n_mod_since_analyze

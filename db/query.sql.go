@@ -859,9 +859,6 @@ SELECT
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
-  -- Age of the counters measured by the server. The scan-rate threshold divides by
-  -- this window, so differencing stats_reset against the CLI host's clock would let
-  -- clock skew between the two decide which indexes get reported.
   , (
     SELECT extract(EPOCH FROM (now() - stats_reset))::bigint
     FROM pg_stat_database WHERE datname = current_database()
@@ -1381,9 +1378,7 @@ WITH candidates AS (
     , rows::bigint AS rows_returned
     -- Counters are cumulative since this reset, so the report has to say over
     -- what period. Available from pg_stat_statements 1.9, which the toplevel
-    -- filter above already requires. The age is measured by the server: taking the
-    -- difference against the CLI host's clock would report skew between the two as
-    -- part of the window.
+    -- filter above already requires.
     , (
       SELECT extract(EPOCH FROM (now() - i.stats_reset))::bigint
       FROM pg_stat_statements_info AS i
@@ -2625,9 +2620,7 @@ SELECT
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count
   , ARRAY_TO_STRING(c.reloptions, ',') AS reloptions
-  -- Ages measured by the server. The staleness tiers and the estimated next vacuum
-  -- compare against these, so differencing the timestamps against the CLI host's
-  -- clock would fold skew between the two into the answer. NULL means never.
+  -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
   , COALESCE(s.n_mod_since_analyze, 0) AS n_mod_since_analyze
