@@ -52,9 +52,10 @@ identical 71 MB sort reports 71 MB, 213 MB or 289 MB of writes depending on
 `work_mem`; hash joins and materialised CTEs reconcile 1:1. Rank by the table, never
 sum it.
 
-An empty table does not mean nothing wrote temp files — the rate above already says
-otherwise. `pg_stat_statements` is a separate counter set with its own reset, so
-`pg_stat_statements_reset()` empties this table while leaving the rate untouched.
+The finding is omitted entirely when nothing can be attributed — the rate findings
+have already reported the problem. `pg_stat_statements` is a separate counter set with
+its own reset, so `pg_stat_statements_reset()` empties this table while leaving the
+rate untouched; an absent table never means no temp file was written.
 
 Three things are missing from it:
 

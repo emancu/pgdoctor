@@ -151,11 +151,11 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 	// Both subchecks should be OK
 	assert.Equal(t, "temp-file-rate", report.Results[0].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Contains(t, report.Results[0].Details, "acceptable")
+	assert.Contains(t, report.Results[0].Name, "/hour")
 
 	assert.Equal(t, "temp-volume-rate", report.Results[1].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
-	assert.Contains(t, report.Results[1].Details, "acceptable")
+	assert.Contains(t, report.Results[1].Name, "/hour")
 }
 
 func TestTempUsage_HighFileRate_Warning(t *testing.T) {
@@ -184,8 +184,7 @@ func TestTempUsage_HighFileRate_Warning(t *testing.T) {
 	fileRateFinding := report.Results[0]
 	assert.Equal(t, "temp-file-rate", fileRateFinding.ID)
 	assert.Equal(t, check.SeverityWarn, fileRateFinding.Severity)
-	assert.Contains(t, fileRateFinding.Details, "High temp file creation rate")
-	assert.Contains(t, fileRateFinding.Details, "10.0 files/hour")
+	assert.Contains(t, fileRateFinding.Name, "10.0 files/hour")
 }
 
 func TestTempUsage_HighFileRate_Critical(t *testing.T) {
@@ -214,8 +213,7 @@ func TestTempUsage_HighFileRate_Critical(t *testing.T) {
 	fileRateFinding := report.Results[0]
 	assert.Equal(t, "temp-file-rate", fileRateFinding.ID)
 	assert.Equal(t, check.SeverityFail, fileRateFinding.Severity)
-	assert.Contains(t, fileRateFinding.Details, "High temp file creation rate")
-	assert.Contains(t, fileRateFinding.Details, "50.0 files/hour")
+	assert.Contains(t, fileRateFinding.Name, "50.0 files/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
@@ -245,8 +243,7 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 	volumeFinding := report.Results[1]
 	assert.Equal(t, "temp-volume-rate", volumeFinding.ID)
 	assert.Equal(t, check.SeverityWarn, volumeFinding.Severity)
-	assert.Contains(t, volumeFinding.Details, "High temp data volume")
-	assert.Contains(t, volumeFinding.Details, "2.0GiB/hour")
+	assert.Contains(t, volumeFinding.Name, "2.0GiB/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
@@ -276,8 +273,7 @@ func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
 	volumeFinding := report.Results[1]
 	assert.Equal(t, "temp-volume-rate", volumeFinding.ID)
 	assert.Equal(t, check.SeverityFail, volumeFinding.Severity)
-	assert.Contains(t, volumeFinding.Details, "High temp data volume")
-	assert.Contains(t, volumeFinding.Details, "8.0GiB/hour")
+	assert.Contains(t, volumeFinding.Name, "8.0GiB/hour")
 }
 
 func TestTempUsage_BothHighRates(t *testing.T) {
@@ -303,7 +299,7 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityFail, report.Severity)
-	assert.Len(t, report.Results, 3, "two rate findings plus the attribution finding")
+	assert.Len(t, report.Results, 2, "attribution is omitted when pg_stat_statements has nothing")
 
 	// Both should be FAIL
 	assert.Equal(t, check.SeverityFail, report.Results[0].Severity)
@@ -553,42 +549,32 @@ func TestTempUsage_AttributionTable(t *testing.T) {
 	require.Equal(t, check.SeverityFail, report.Severity)
 }
 
-func TestTempUsage_AttributionUnavailable(t *testing.T) {
+// With nothing attributable the check says nothing: the rate findings have already
+// reported the problem, and a line explaining that pg_stat_statements cannot name the
+// offender reads as a denial that any temp file was written.
+func TestTempUsage_NoAttributionFindingWhenNothingToShow(t *testing.T) {
 	t.Parallel()
 
 	const oneHourInSeconds = 3600.0
 	statsReset := time.Now().Add(-24 * time.Hour)
-
 	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
-	report, err := tempusage.New(&mockQueryer{row: row, pgssOK: false}).Check(context.Background())
-	require.NoError(t, err)
 
-	last := report.Results[len(report.Results)-1]
-	require.Equal(t, "temp-file-sources", last.ID)
-	require.Equal(t, check.SeverityInfo, last.Severity)
-	require.Contains(t, last.Details, "pg_stat_statements is unavailable")
-}
+	for _, tc := range []struct {
+		name    string
+		queryer *mockQueryer
+	}{
+		{"pg_stat_statements unavailable", &mockQueryer{row: row, pgssOK: false}},
+		{"no statement wrote temp files", &mockQueryer{row: row, pgssOK: true, statements: nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-// The rate finding above has already reported temp data, so the attribution finding
-// must never read as "nothing wrote temp files". pg_stat_statements is a separate
-// counter set: it resets independently and drops cancelled, untracked and evicted
-// statements, so an empty result is a gap in attribution, not an absence of temp I/O.
-func TestTempUsage_EmptyAttributionDoesNotContradictTheRate(t *testing.T) {
-	t.Parallel()
+			report, err := tempusage.New(tc.queryer).Check(context.Background())
+			require.NoError(t, err)
 
-	const oneHourInSeconds = 3600.0
-	statsReset := time.Now().Add(-24 * time.Hour)
-
-	row := makeTempUsageRow(12000, 500*1024*1024, oneHourInSeconds*24, 50.0, 20*1024*1024, &statsReset)
-	queryer := &mockQueryer{row: row, pgssOK: true, statements: nil}
-
-	report, err := tempusage.New(queryer).Check(context.Background())
-	require.NoError(t, err)
-
-	last := report.Results[len(report.Results)-1]
-	require.Equal(t, "temp-file-sources", last.ID)
-	require.Equal(t, check.SeverityInfo, last.Severity)
-	require.Contains(t, last.Details, "attributes none of it")
-	require.NotContains(t, last.Details, "No statement",
-		"must not deny temp files exist while the rate findings report them")
+			for _, result := range report.Results {
+				require.NotEqual(t, "temp-file-sources", result.ID, "no attribution finding expected")
+			}
+		})
+	}
 }
