@@ -113,14 +113,9 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report)
 		return fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
+	// Nothing to say without it, and saying why would just add a line to a report
+	// that already reported the problem.
 	if !available.Bool {
-		report.AddFinding(check.Finding{
-			ID:       "temp-file-sources",
-			Name:     "Temp File Sources",
-			Severity: check.SeverityInfo,
-			Details:  "pg_stat_statements is unavailable, so the statements writing this temp data cannot be identified.",
-		})
-
 		return nil
 	}
 
@@ -129,14 +124,10 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report)
 		return fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
+	// Nothing attributable. The rate findings have already reported the problem;
+	// a line explaining that pg_stat_statements cannot name the offender only
+	// contradicts them.
 	if len(statements) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "temp-file-sources",
-			Name:     "Temp File Sources",
-			Severity: check.SeverityInfo,
-			Details:  "pg_stat_statements attributes none of it: its counters reset independently of the rate above, and cancelled, untracked or evicted statements are never recorded.",
-		})
-
 		return nil
 	}
 
@@ -264,9 +255,8 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 	if rate < 5 {
 		report.AddFinding(check.Finding{
 			ID:       "temp-file-rate",
-			Name:     "Temp File Creation Rate",
+			Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
 			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Temp file creation rate is acceptable: %.1f files/hour", rate),
 		})
 
 		return check.SeverityPass
@@ -289,13 +279,12 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 
 	report.AddFinding(check.Finding{
 		ID:       "temp-file-rate",
-		Name:     "Temp File Creation Rate",
+		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
 		Severity: severity,
-		Details: fmt.Sprintf(
-			"High temp file creation rate: %.1f files/hour%s\n\nTotal temp files: %d\nTotal temp data: %s",
-			rate, statsResetInfo,
+		Details: fmt.Sprintf("%d files totalling %s%s.",
 			row.TempFiles.Int64,
 			check.FormatBytes(row.TempBytes.Int64),
+			statsResetInfo,
 		),
 	})
 
@@ -316,9 +305,8 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 	if bytesPerHour < oneGB {
 		report.AddFinding(check.Finding{
 			ID:       "temp-volume-rate",
-			Name:     "Temp Data Volume Rate",
+			Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
 			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Temp data volume is acceptable: %s/hour", check.FormatBytes(int64(bytesPerHour))),
 		})
 
 		return check.SeverityPass
@@ -334,12 +322,8 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 
 	report.AddFinding(check.Finding{
 		ID:       "temp-volume-rate",
-		Name:     "Temp Data Volume Rate",
+		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
 		Severity: severity,
-		Details: fmt.Sprintf(
-			"High temp data volume: %s/hour\n\nThis causes significant disk I/O and slows queries.",
-			check.FormatBytes(int64(bytesPerHour)),
-		),
 	})
 
 	return severity
