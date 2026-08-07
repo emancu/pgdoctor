@@ -113,7 +113,7 @@ SELECT pg_drop_replication_slot('one_slot');   -- forces a full CDC re-snapshot
 ROLLBACK PREPARED 'gid';
 ```
 
-Dropping a logical slot makes its consumer (Debezium or any other CDC reader) re-snapshot from scratch — a product decision to escalate, not a unilateral DBA action. Prefer restarting the consumer so the slot advances on its own. For the live half of the diagnosis — backends, idle-in-transaction sessions, lock waiters — run **`houston dba xmin`** ([houston#1839](https://github.com/fresha/houston/issues/1839)); those need luck in timing and are not health checks. While a pin sits at or past the trigger, vacuum tuning cannot help: every anti-wraparound vacuum completes without advancing past it and is re-queued within `autovacuum_naptime`.
+Dropping a logical slot makes its consumer (Debezium or any other CDC reader) re-snapshot from scratch — a product decision to escalate, not a unilateral DBA action. Prefer restarting the consumer so the slot advances on its own. For a physical slot, restore the standby's replay first, and only drop it once you have confirmed the standby is gone. For the live half of the diagnosis — backends, idle-in-transaction sessions, lock waiters — run **`houston dba xmin`** ([houston#1839](https://github.com/fresha/houston/issues/1839)); those need luck in timing and are not health checks. While a pin sits at or past the trigger, vacuum tuning cannot help: every anti-wraparound vacuum completes without advancing past it and is re-queued within `autovacuum_naptime`.
 
 ## Notes
 
