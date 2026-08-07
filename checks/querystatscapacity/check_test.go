@@ -458,3 +458,33 @@ func Test_Metadata(t *testing.T) {
 	assert.NotEmpty(t, m.SQL)
 	assert.NotEmpty(t, m.Readme)
 }
+
+// The printed number and the graded number are the same value, so the text cannot
+// land on the far side of the threshold from the severity.
+func Test_EvictionRate_DisplayAndGradeCannotDisagree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		row          db.QueryStatsCapacityRow
+		wantInName   string
+		wantSeverity check.Severity
+	}{
+		{"just under the threshold", capacityRow(4200, 10000, 299, 30*day), "0.4x", check.SeverityPass},
+		{"at the threshold", capacityRow(4200, 10000, 300, 30*day), "0.5x", check.SeverityWarn},
+		{"a few events over a long window still count as evictions",
+			capacityRow(4200, 10000, 3, 3000*day), "<0.1x", check.SeverityPass},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := finding(t, run(t, &mockQueryer{pgssOK: true, row: tt.row}), rateID)
+
+			assert.Equal(t, tt.wantSeverity, result.Severity)
+			assert.Contains(t, result.Name, tt.wantInName)
+			assert.NotContains(t, result.Name, "no evictions")
+		})
+	}
+}

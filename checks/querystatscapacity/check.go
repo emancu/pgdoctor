@@ -223,8 +223,11 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 		return
 	}
 
-	turnover := turnoverPerDay(row.EvictionEvents.Int64, row.MaxEntries.Int64, window)
-	if turnover == 0 {
+	// Grade the number that gets printed, not the raw one. Any display rounding can
+	// otherwise land on the far side of the threshold from the severity, and the
+	// finding then contradicts itself by a margin no reader can see.
+	turnover := displayedTurnover(turnoverPerDay(row.EvictionEvents.Int64, row.MaxEntries.Int64, window))
+	if row.EvictionEvents.Int64 == 0 {
 		report.AddFinding(check.Finding{
 			ID:       id,
 			Name:     name + ": no evictions",
@@ -251,17 +254,20 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	})
 }
 
-// formatTurnover renders the daily turnover, truncated rather than rounded to
-// one decimal. Rounding lets 0.498 print as "0.5x capacity/day" on a finding
-// that passed at a 0.5 threshold, so the text would contradict its own grade.
-// Truncation can only ever understate.
+// displayedTurnover truncates to the tenth that will be printed. Rounding would let
+// 0.498 print as "0.5x capacity/day" on a finding that passed at a 0.5 threshold.
+// The epsilon absorbs binary representation error before truncating: 0.7*10 is
+// 6.999999999999999 in float64 and would otherwise fall to 0.6.
+func displayedTurnover(turnover float64) float64 {
+	return math.Floor(turnover*10+turnoverDisplayEpsilon) / 10
+}
+
 func formatTurnover(turnover float64) string {
-	tenths := math.Floor(turnover*10 + turnoverDisplayEpsilon)
-	if tenths < 1 {
+	if turnover < 0.1 {
 		return "<0.1x capacity/day"
 	}
 
-	return fmt.Sprintf("%.1fx capacity/day", tenths/10)
+	return fmt.Sprintf("%.1fx capacity/day", turnover)
 }
 
 // evictionDetails carries what the rate alone cannot: the totals behind it, and
