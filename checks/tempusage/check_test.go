@@ -141,11 +141,11 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 	// Both subchecks should be OK
 	assert.Equal(t, "temp-file-rate", report.Results[0].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	assert.Contains(t, report.Results[0].Name, "files/hour")
+	assert.Contains(t, report.Results[0].Details, "acceptable")
 
 	assert.Equal(t, "temp-volume-rate", report.Results[1].ID)
 	assert.Equal(t, check.SeverityPass, report.Results[1].Severity)
-	assert.Contains(t, report.Results[1].Name, "/hour")
+	assert.Contains(t, report.Results[1].Details, "acceptable")
 }
 
 func TestTempUsage_HighFileRate_Warning(t *testing.T) {

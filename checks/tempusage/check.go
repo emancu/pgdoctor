@@ -159,8 +159,9 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 	if rate < 5 {
 		report.AddFinding(check.Finding{
 			ID:       "temp-file-rate",
-			Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
+			Name:     "Temp File Creation Rate",
 			Severity: check.SeverityPass,
+			Details:  fmt.Sprintf("Temp file creation rate is acceptable: %.1f files/hour", rate),
 		})
 		return
 	}
@@ -207,8 +208,9 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 	if bytesPerHour < oneGB {
 		report.AddFinding(check.Finding{
 			ID:       "temp-volume-rate",
-			Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
+			Name:     "Temp Data Volume Rate",
 			Severity: check.SeverityPass,
+			Details:  fmt.Sprintf("Temp data volume is acceptable: %s/hour", check.FormatBytes(int64(bytesPerHour))),
 		})
 		return
 	}
