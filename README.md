@@ -109,6 +109,7 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `replication-lag` | Active replication stream lag |
 | `temp-usage` | Temporary file creation indicating `work_mem` exhaustion |
 | `statistics-freshness` | Statistics maturity for usage-based analysis |
+| `query-stats-capacity` | `pg_stat_statements` entry usage and eviction rate |
 
 ### indexes
 | Check | Description |

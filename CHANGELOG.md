@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`query-stats-capacity`**: new check reporting `pg_stat_statements` entry usage against `pg_stat_statements.max`, and grading eviction volume as a daily multiple of capacity — WARN above 0.5x/day, the point where `partition-usage` and `temp-usage` are analysing a truncated sample. Rate-based, never the raw `dealloc` count ([#69](https://github.com/emancu/pgdoctor/pull/69)).
 - **`freeze-age`**: new `horizon-pin` finding — reports whether a replication slot's `xmin`/`catalog_xmin` or a prepared transaction is holding the xmin horizon, so a high freeze age tells you whether to drop one object or tune autovacuum ([#60](https://github.com/emancu/pgdoctor/pull/60)).
 - **`freeze-age`**: new `database-multixact-age` and `table-multixact-age` findings covering the MultiXact counter, which wraps independently of transaction IDs and has no RDS CloudWatch metric ([#60](https://github.com/emancu/pgdoctor/pull/60)).
 - **`extension-versions`**: new check inventorying installed extensions — `version-support` flags versions unsupported upstream (WARN deprecated, FAIL unsupported) against embedded floors for `pg_partman` and `postgis`, and `pending-update` warns when an installed version trails the version bundled on disk ([#46](https://github.com/emancu/pgdoctor/pull/46)).
