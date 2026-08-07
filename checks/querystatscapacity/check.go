@@ -141,11 +141,12 @@ const (
 	entryUsageName = "Entry Usage"
 )
 
-// reportEntryUsage states how much of the table is occupied, and grades it. This is
-// the only present-tense signal the check has: the eviction rate is cumulative since
-// stats_reset, so a spike that began an hour ago is averaged away by a year-long
-// window. A table at capacity is evicting continuously right now whatever that
-// average says, because every new statement displaces one.
+// reportEntryUsage states how much of the table is occupied, and grades nothing.
+// Occupancy is not a defect: a stable workload larger than max sits pinned there
+// indefinitely without losing anything, and below capacity there is headroom. Nor
+// can it stand in for current churn - dealloc is cumulative, so "full and has
+// evicted" stays true forever after the churn stops, and one snapshot cannot tell
+// that from a spike an hour old. Recency needs two samples; see the README.
 func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
 	// max is what "full" is relative to; without it there is nothing to grade.
 	if !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0 {
@@ -160,28 +161,13 @@ func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
 		return
 	}
 
-	// Occupancy alone is not a defect: a stable workload larger than max sits pinned
-	// there indefinitely, losing nothing. Below capacity there is headroom and
-	// nothing is displaced at all. What warrants a warning is both together - no
-	// headroom and evictions on record - because that is the state the lifetime rate
-	// understates when the churn started recently.
-	severity, details := check.SeverityPass, ""
-	if row.Entries.Int64 >= row.MaxEntries.Int64 && row.EvictionEvents.Int64 > 0 {
-		severity = check.SeverityWarn
-		details = fmt.Sprintf(
-			"No headroom, and %s eviction events on record, so statements are being displaced. "+
-				"The rate below averages those over the whole window and understates recent churn.",
-			check.FormatNumber(row.EvictionEvents.Int64))
-	}
-
 	name := fmt.Sprintf("%s: %s/%s entries",
 		entryUsageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
 
 	report.AddFinding(check.Finding{
 		ID:       entryUsageID,
 		Name:     name,
-		Severity: severity,
-		Details:  details,
+		Severity: check.SeverityPass,
 		Debug:    capacityDebug(row),
 	})
 }

@@ -14,13 +14,16 @@ every other check that reads that view is only as good as the sample left in it.
 Counts the entries currently held against `pg_stat_statements.max`. Both figures are cluster-wide, so the
 count is not filtered by database.
 
-**Severity**: WARN when the table is full **and** entries have been evicted, otherwise PASS. SKIP when
-`max` is unreadable, since there is nothing for "full" to be relative to.
+**Severity**: PASS, always. SKIP when `max` is unreadable, since there is nothing for "full" to be
+relative to.
 
-Occupancy on its own is not a defect. A stable workload with more distinct statements than `max` sits
-pinned there indefinitely and loses nothing, and below capacity there is headroom. The two together are
-what matters, because that is the state the rate below understates: it averages evictions over the whole
-window, so churn that began recently barely moves it while the table is actively losing entries.
+Occupancy is not a defect. A stable workload with more distinct statements than `max` sits pinned there
+indefinitely and loses nothing, and below capacity there is headroom.
+
+It cannot stand in for current churn either. `dealloc` is cumulative, so a table that filled, churned,
+then settled keeps both a full table and a nonzero count for the rest of the window, and a single
+snapshot cannot tell that from a spike an hour old. Establishing recency needs two samples: compare the
+eviction count between two runs over a known interval.
 
 The count comes from `pg_stat_statements(false)`, which skips the external query-text file. Reading that
 text is what makes the view expensive: it materialises the whole corpus into a `work_mem` tuplestore, and
