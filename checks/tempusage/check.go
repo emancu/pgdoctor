@@ -87,24 +87,38 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		maxSeverity = check.SeverityWarn
 	}
 
-	// The rates say a problem exists; only the statement list says what to do about
-	// it. So the rates report as context and the severity rides on the finding that
-	// names the offenders - graded by how bad the rates were.
-	rateSeverity := worst(
-		checkTempFileRate(row, report, maxSeverity),
-		checkTempVolumeRate(row, report, maxSeverity),
-	)
+	fileSeverity := tempFileRateSeverity(row, maxSeverity)
+	volumeSeverity := tempVolumeRateSeverity(row, maxSeverity)
+	rateSeverity := worst(fileSeverity, volumeSeverity)
 
 	// Naming the offenders only helps once there is something to chase, and reading
 	// pg_stat_statements materialises the whole query-text corpus into a work_mem
 	// tuplestore, so a healthy database does not pay for it.
+	attributed := false
 	if rateSeverity > check.SeverityPass {
-		if err := c.reportTopStatements(ctx, report, rateSeverity); err != nil {
+		var err error
+		if attributed, err = c.reportTopStatements(ctx, report, rateSeverity); err != nil {
 			return nil, err
 		}
 	}
 
+	// The rates say a problem exists; only the statement list says what to do about
+	// it, so when there is a list the severity rides on that and the rates become
+	// context. When there is not, an unattributable spill is not a quiet one - it is
+	// often the worst case, a statement expensive enough that statement_timeout kills
+	// it before pg_stat_statements can record it - so the rates keep the severity.
+	reportTempFileRate(row, report, displaySeverity(fileSeverity, attributed))
+	reportTempVolumeRate(row, report, displaySeverity(volumeSeverity, attributed), attributed)
+
 	return report, nil
+}
+
+func displaySeverity(severity check.Severity, attributed bool) check.Severity {
+	if attributed && severity > check.SeverityPass {
+		return check.SeverityInfo
+	}
+
+	return severity
 }
 
 func worst(a, b check.Severity) check.Severity {
@@ -119,28 +133,23 @@ func worst(a, b check.Severity) check.Severity {
 // figures rank offenders and must not be summed or compared against the rates above:
 // pg_stat_database measures the disk footprint of each temp file, while
 // pg_stat_statements counts write I/O, which a multi-pass external sort repeats.
-func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) error {
+func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) (bool, error) {
 	available, err := c.queries.HasPgStatStatements(ctx)
 	if err != nil {
-		return fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return false, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	// Nothing to say without it, and saying why would just add a line to a report
-	// that already reported the problem.
 	if !available.Bool {
-		return nil
+		return false, nil
 	}
 
 	statements, err := c.queries.TempUsageByStatement(ctx)
 	if err != nil {
-		return fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
+		return false, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	// Nothing attributable. The rate findings have already reported the problem;
-	// a line explaining that pg_stat_statements cannot name the offender only
-	// contradicts them.
 	if len(statements) == 0 {
-		return nil
+		return false, nil
 	}
 
 	rows := make([]check.TableRow, 0, len(statements))
@@ -170,7 +179,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 		},
 	})
 
-	return nil
+	return true, nil
 }
 
 // entrySince renders when pg_stat_statements started tracking an entry. It is not a
@@ -256,21 +265,15 @@ func getTempBytesPerHour(row db.TempUsageRow) float64 {
 	return f.Float64
 }
 
-// checkTempFileRate identifies high temp file creation rates.
+// tempFileRateSeverity grades the temp file creation rate.
 // Thresholds are tuned for production scale based on observed baselines (~0.3 files/hour).
 // These catch regressions (query plan changes, work_mem resets) rather than absolute badness.
-func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity check.Severity) check.Severity {
+func tempFileRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) check.Severity {
 	rate := getTempFilesPerHour(row)
 
 	// Threshold: 5 files/hour is ~20x typical production baseline
 	// Indicates: New inefficient queries, query plan regression, or work_mem issues
 	if rate < 5 {
-		report.AddFinding(check.Finding{
-			ID:       "temp-file-rate",
-			Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
-			Severity: check.SeverityPass,
-		})
-
 		return check.SeverityPass
 	}
 
@@ -280,33 +283,36 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 	if rate >= 20 {
 		severity = check.SeverityFail
 	}
-	severity = capSeverity(severity, maxSeverity)
 
-	// Only the exact window is worth naming inline. When it is anchored to uptime
-	// there is no date to give, and how that bound works belongs in the README.
-	var statsResetInfo string
-	if row.StatsReset.Valid {
-		statsResetInfo = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
-	}
-
-	report.AddFinding(check.Finding{
-		ID:       "temp-file-rate",
-		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
-		Severity: check.SeverityInfo,
-		Details: fmt.Sprintf("%d files totalling %s%s.",
-			row.TempFiles.Int64,
-			check.FormatBytes(row.TempBytes.Int64),
-			statsResetInfo,
-		),
-	})
-
-	return severity
+	return capSeverity(severity, maxSeverity)
 }
 
-// checkTempVolumeRate identifies high temp data volume.
+func reportTempFileRate(row db.TempUsageRow, report *check.Report, severity check.Severity) {
+	rate := getTempFilesPerHour(row)
+
+	finding := check.Finding{
+		ID:       "temp-file-rate",
+		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
+		Severity: severity,
+	}
+
+	if severity != check.SeverityPass {
+		var since string
+		if row.StatsReset.Valid {
+			since = fmt.Sprintf(" (since %s)", row.StatsReset.Time.Format("2006-01-02"))
+		}
+
+		finding.Details = fmt.Sprintf("%d files totalling %s%s.",
+			row.TempFiles.Int64, check.FormatBytes(row.TempBytes.Int64), since)
+	}
+
+	report.AddFinding(finding)
+}
+
+// tempVolumeRateSeverity grades the temp data volume.
 // Thresholds are tuned for production scale based on observed baselines (~124MB/hour).
 // These catch significant increases in disk spilling rather than absolute usage.
-func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity check.Severity) check.Severity {
+func tempVolumeRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) check.Severity {
 	const oneGB = float64(1024 * 1024 * 1024)
 	const fiveGB = float64(5 * 1024 * 1024 * 1024)
 
@@ -315,12 +321,6 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 	// Threshold: 1GB/hour is ~8x typical production baseline
 	// Indicates: Increased large sorts/hashes, possibly from new features or query changes
 	if bytesPerHour < oneGB {
-		report.AddFinding(check.Finding{
-			ID:       "temp-volume-rate",
-			Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
-			Severity: check.SeverityPass,
-		})
-
 		return check.SeverityPass
 	}
 
@@ -330,13 +330,23 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 	if bytesPerHour >= fiveGB {
 		severity = check.SeverityFail
 	}
-	severity = capSeverity(severity, maxSeverity)
 
-	report.AddFinding(check.Finding{
+	return capSeverity(severity, maxSeverity)
+}
+
+func reportTempVolumeRate(row db.TempUsageRow, report *check.Report, severity check.Severity, attributed bool) {
+	finding := check.Finding{
 		ID:       "temp-volume-rate",
-		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
-		Severity: check.SeverityInfo,
-	})
+		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(getTempBytesPerHour(row)))),
+		Severity: severity,
+	}
 
-	return severity
+	// Only worth saying when nothing named the offenders: pg_stat_statements records
+	// at ExecutorEnd, so a statement killed by statement_timeout never appears there
+	// even though its temp file is still counted here.
+	if severity > check.SeverityPass && !attributed {
+		finding.Details = "No statement accounts for this; check the server log (log_temp_files) - killed queries are never recorded in pg_stat_statements."
+	}
+
+	report.AddFinding(finding)
 }
