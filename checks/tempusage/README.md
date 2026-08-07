@@ -44,7 +44,7 @@ bounds**:
 The check reports SKIP only when the window is under an hour, where the denominator
 is small enough that a single query's temp file would dominate the rate.
 
-### Statements Spilling To Disk (`temp-file-sources`)
+### Top Spilling Statements (`temp-file-sources`)
 
 When the rate finding fires, the check lists the top statements by temp data
 written, from `pg_stat_statements`. It is skipped on a healthy database: reading that
