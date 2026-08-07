@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"math"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -26,16 +27,27 @@ const (
 
 	secondsPerDay = 86400
 
-	// deallocFraction is the share of pg_stat_statements.max discarded by one
-	// eviction event: USAGE_DEALLOC_PERCENT in pg_stat_statements.c, unchanged
-	// since the counter was introduced in PostgreSQL 14.
-	deallocFraction = 0.05
+	// deallocPercent and deallocMinBatch mirror entry_dealloc() in
+	// pg_stat_statements.c, unchanged since the counter arrived in PostgreSQL 14:
+	//
+	//   nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100);
+	//
+	// The floor is not decorative. pg_stat_statements.max bottoms out at 100,
+	// where 5% is 5 and the floor of 10 doubles the real batch, so a fixed 0.05
+	// would report half the true turnover and pass a saturated instance.
+	deallocPercent  = 5
+	deallocMinBatch = 10
 
 	// turnoverWarnPerDay is the daily eviction volume, as a multiple of capacity,
 	// at which the tracked set stops representing the workload. At half the table
 	// recycled per day, eviction is least-used-first, so anything but the hottest
 	// statements is gone within hours of running.
 	turnoverWarnPerDay = 0.5
+
+	// turnoverDisplayEpsilon absorbs binary representation error before the
+	// displayed value is truncated. 0.7*10 is 6.999999999999999 in float64, which
+	// would otherwise truncate to 0.6.
+	turnoverDisplayEpsilon = 1e-9
 )
 
 // QueryStatsCapacityQueries defines the database queries needed by this check.
@@ -83,10 +95,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// from a truncated sample and there is no capacity to report on.
 	if !available.Bool {
 		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
+			ID:       entryUsageID,
+			Name:     entryUsageName + ": pg_stat_statements not available",
 			Severity: check.SeverityPass,
-			Details:  "pg_stat_statements is not available.",
 		})
 
 		return report, nil
@@ -97,25 +108,33 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
 
-	reportEntryCapacity(row, report)
+	reportEntryUsage(row, report)
 	reportEvictionRate(row, report)
 
 	return report, nil
 }
 
-// reportEntryCapacity states how much of the table is occupied. A full table is
-// not a defect on its own - a stable workload larger than max sits pinned at max
+// The finding carries its own id and name rather than reusing the check's: the
+// renderer prints the report header and every finding, so a finding named after
+// the check prints the check name twice.
+const (
+	entryUsageID   = "entry-usage"
+	entryUsageName = "Entry Usage"
+)
+
+// reportEntryUsage states how much of the table is occupied. A full table is not
+// a defect on its own - a stable workload larger than max sits pinned at max
 // forever without losing anything - so this finding grades nothing. The eviction
 // rate below is what says whether entries are actually being lost.
-func reportEntryCapacity(row db.QueryStatsCapacityRow, report *check.Report) {
-	name := fmt.Sprintf("%s: %s entries", report.Name, check.FormatNumber(row.Entries.Int64))
+func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
+	name := fmt.Sprintf("%s: %s entries", entryUsageName, check.FormatNumber(row.Entries.Int64))
 	if row.MaxEntries.Valid && row.MaxEntries.Int64 > 0 {
 		name = fmt.Sprintf("%s: %s/%s entries",
-			report.Name, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
+			entryUsageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
 	}
 
 	report.AddFinding(check.Finding{
-		ID:       report.CheckID,
+		ID:       entryUsageID,
 		Name:     name,
 		Severity: check.SeverityPass,
 		Debug:    capacityDebug(row),
@@ -123,8 +142,9 @@ func reportEntryCapacity(row db.QueryStatsCapacityRow, report *check.Report) {
 }
 
 func capacityDebug(row db.QueryStatsCapacityRow) string {
-	return fmt.Sprintf("entries=%d max=%d dealloc=%d window=%s",
+	return fmt.Sprintf("entries=%d max=%d dealloc=%d batch=%d window=%s",
 		row.Entries.Int64, row.MaxEntries.Int64, row.EvictionEvents.Int64,
+		entriesPerEviction(row.MaxEntries.Int64),
 		check.FormatDurationSec(int64(row.SecondsSinceReset.Float64)))
 }
 
@@ -137,7 +157,9 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 
 	// The window is the only denominator available, and pg_stat_statements_info
 	// carries no other clock. Skip rather than pass: a bare PASS reads as "nothing
-	// is being evicted", which a window this short cannot establish.
+	// is being evicted", which a window this short cannot establish. The same goes
+	// for an unreadable max - the batch size and the capacity the turnover is a
+	// multiple of both derive from it.
 	window, ok := windowSeconds(row)
 	switch {
 	case !ok:
@@ -159,9 +181,18 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 		})
 
 		return
+	case !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0:
+		report.AddFinding(check.Finding{
+			ID:       id,
+			Name:     name,
+			Severity: check.SeveritySkip,
+			Details:  "pg_stat_statements.max is unreadable; turnover has no capacity to be a share of.",
+		})
+
+		return
 	}
 
-	turnover := turnoverPerDay(row.EvictionEvents.Int64, window)
+	turnover := turnoverPerDay(row.EvictionEvents.Int64, row.MaxEntries.Int64, window)
 	if turnover == 0 {
 		report.AddFinding(check.Finding{
 			ID:       id,
@@ -188,42 +219,60 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	})
 }
 
-// formatTurnover renders the daily turnover. Values under the display floor
-// collapse to "0.0" at one decimal, which reads as no eviction at all when some
-// did happen.
+// formatTurnover renders the daily turnover, truncated rather than rounded to
+// one decimal. Rounding lets 0.498 print as "0.5x capacity/day" on a finding
+// that passed at a 0.5 threshold, so the text would contradict its own grade.
+// Truncation can only ever understate.
 func formatTurnover(turnover float64) string {
-	if turnover < 0.1 {
+	tenths := math.Floor(turnover*10 + turnoverDisplayEpsilon)
+	if tenths < 1 {
 		return "<0.1x capacity/day"
 	}
 
-	return fmt.Sprintf("%.1fx capacity/day", turnover)
+	return fmt.Sprintf("%.1fx capacity/day", tenths/10)
 }
 
 // evictionDetails carries what the rate alone cannot: the totals behind it, and
-// which other checks are reading the sample it has been thinning.
+// which other checks are reading the sample it has been thinning. Only reached
+// once max is known, so the batch size is too.
 func evictionDetails(row db.QueryStatsCapacityRow) string {
-	since := row.StatsReset.Time.Format("2006-01-02")
-	events := check.FormatNumber(row.EvictionEvents.Int64)
+	discarded := row.EvictionEvents.Int64 * entriesPerEviction(row.MaxEntries.Int64)
 
-	totals := fmt.Sprintf("%s eviction events since %s.", events, since)
-	if row.MaxEntries.Valid && row.MaxEntries.Int64 > 0 {
-		discarded := int64(float64(row.EvictionEvents.Int64) * deallocFraction * float64(row.MaxEntries.Int64))
-		totals = fmt.Sprintf("%s eviction events since %s discarded ~%s entries against a capacity of %s.",
-			events, since, check.FormatNumber(discarded), check.FormatNumber(row.MaxEntries.Int64))
-	}
-
-	return totals + "\npartition-usage and temp-usage read what is left."
+	return fmt.Sprintf(
+		"%s eviction events since %s discarded ~%s entries against a capacity of %s."+
+			"\npartition-usage and temp-usage read what is left.",
+		check.FormatNumber(row.EvictionEvents.Int64),
+		row.StatsReset.Time.Format("2006-01-02"),
+		check.FormatNumber(discarded),
+		check.FormatNumber(row.MaxEntries.Int64))
 }
 
-// turnoverPerDay converts eviction events into the fraction of capacity lost per
-// day. Each event drops a fixed 5% of max, so the multiple of capacity is
-// independent of max and holds on instances where max is unreadable.
-func turnoverPerDay(events int64, window float64) float64 {
-	if events <= 0 || window <= 0 {
+// entriesPerEviction mirrors entry_dealloc() in pg_stat_statements.c:
+//
+//	nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100);
+//
+// Integer arithmetic, so the deliberate truncation is reproduced here. Callers
+// must have established max > 0.
+func entriesPerEviction(maxEntries int64) int64 {
+	batch := maxEntries * deallocPercent / 100
+	if batch < deallocMinBatch {
+		return deallocMinBatch
+	}
+
+	return batch
+}
+
+// turnoverPerDay converts eviction events into the share of capacity lost per
+// day. The batch is a fixed 5% of max only above max = 200; below that the
+// floor of 10 entries dominates and the share is larger than 5%.
+func turnoverPerDay(events, maxEntries int64, window float64) float64 {
+	if events <= 0 || maxEntries <= 0 || window <= 0 {
 		return 0
 	}
 
-	return float64(events) * deallocFraction / (window / secondsPerDay)
+	entriesPerDay := float64(events*entriesPerEviction(maxEntries)) / (window / secondsPerDay)
+
+	return entriesPerDay / float64(maxEntries)
 }
 
 // windowSeconds reports how long the counters have been accumulating, and whether

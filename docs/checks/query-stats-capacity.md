@@ -8,7 +8,7 @@ every other check that reads that view is only as good as the sample left in it.
 
 ## What It Checks
 
-### Entry Capacity (`query-stats-capacity`)
+### Entry Usage (`entry-usage`)
 
 Counts the entries currently held against `pg_stat_statements.max`. Both figures are cluster-wide, so the
 count is not filtered by database.
@@ -25,12 +25,27 @@ and a count does not need it.
 
 ### Statement Eviction Rate (`statement-eviction-rate`)
 
-`pg_stat_statements_info.dealloc` counts eviction *events*. Each event discards the least-recently-used
-5% of `max` (`USAGE_DEALLOC_PERCENT` in `pg_stat_statements.c`), so the entries lost are
-`dealloc × 0.05 × max`. Divided by the window since `pg_stat_statements_info.stats_reset`, that gives a
-daily turnover expressed as a multiple of capacity.
+`pg_stat_statements_info.dealloc` counts eviction *events*, not entries. `entry_dealloc()` in
+`pg_stat_statements.c` discards a fixed batch of least-recently-used entries per event:
+
+```c
+nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100);   /* USAGE_DEALLOC_PERCENT is 5 */
+```
+
+So the entries lost are `dealloc × Max(10, max × 5 / 100)`. **The floor is not a rounding detail.**
+`pg_stat_statements.max` bottoms out at 100, and below `max = 200` the floor of 10 exceeds 5% — at
+`max = 100` each event discards 10 entries, a tenth of capacity rather than a twentieth. Assuming a flat
+5% there would report half the real turnover and pass a saturated instance.
+
+Dividing the entries lost by the window since `pg_stat_statements_info.stats_reset`, and then by `max`,
+gives a daily turnover expressed as a multiple of capacity.
 
 **Severity**: WARN at or above **0.5x capacity per day**, otherwise PASS.
+
+The displayed figure is truncated to one decimal, not rounded, so it can only ever understate the
+measurement: 0.498x prints as `0.4x capacity/day` rather than showing `0.5x` on a finding that passed at
+a 0.5 threshold. A nonzero rate below the display floor prints as `<0.1x capacity/day` instead of
+collapsing to `0.0x`, which would read as no eviction at all.
 
 Half the table recycled daily is the point where the tracked set stops representing the workload.
 Eviction is least-used-first, not random, so the long tail dies far sooner than the average entry
@@ -50,9 +65,11 @@ initialisation — but the column is nullable, and `pg_stat_statements_reset()` 
 
 - **SKIP** when `stats_reset` is NULL: a rate over an unknown period is not a rate.
 - **SKIP** when the window is under an hour: one eviction event extrapolated across a day says nothing.
+- **SKIP** when `pg_stat_statements.max` is unreadable: both the batch size and the capacity the turnover
+  is a share of derive from it.
 
 SKIP rather than PASS, because a PASS here reads as "nothing is being evicted", which a window that short
-cannot establish. The entry capacity finding is unaffected — it needs no window.
+cannot establish. The entry usage finding is unaffected — it needs neither the window nor `max`.
 
 ## Why This Matters
 
@@ -81,14 +98,21 @@ times its own size every day.
 ### Confirm the numbers
 
 ```sql
+WITH cap AS (
+  SELECT (SELECT setting FROM pg_settings
+          WHERE name = 'pg_stat_statements.max')::bigint AS max_entries
+)
 SELECT
-  (SELECT count(*) FROM pg_stat_statements(false))                        AS entries,
-  (SELECT setting FROM pg_settings WHERE name = 'pg_stat_statements.max') AS max_entries,
-  dealloc                                                                 AS eviction_events,
-  stats_reset,
-  round(dealloc * 0.05 /
-        (extract(epoch FROM now() - stats_reset) / 86400)::numeric, 2)    AS turnover_per_day
-FROM pg_stat_statements_info;
+  (SELECT count(*) FROM pg_stat_statements(false))                    AS entries,
+  cap.max_entries,
+  i.dealloc                                                           AS eviction_events,
+  greatest(10, cap.max_entries * 5 / 100)                             AS entries_per_event,
+  i.stats_reset,
+  round((i.dealloc * greatest(10, cap.max_entries * 5 / 100))::numeric
+        / cap.max_entries
+        / (extract(epoch FROM now() - i.stats_reset) / 86400)::numeric, 2) AS turnover_per_day
+FROM pg_stat_statements_info AS i
+CROSS JOIN cap;
 ```
 
 ### Reduce the number of distinct statements
