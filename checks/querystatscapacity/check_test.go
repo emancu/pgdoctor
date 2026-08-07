@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	capacityID = "query-stats-capacity"
-	rateID     = "statement-eviction-rate"
+	usageID = "entry-usage"
+	rateID  = "statement-eviction-rate"
 
 	day = 86400.0
 )
@@ -73,7 +73,7 @@ func finding(t *testing.T, report *check.Report, id string) check.Finding {
 	return check.Finding{}
 }
 
-func Test_EntryCapacity(t *testing.T) {
+func Test_EntryUsage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -107,12 +107,27 @@ func Test_EntryCapacity(t *testing.T) {
 			t.Parallel()
 
 			report := run(t, &mockQueryer{pgssOK: true, row: tt.row})
-			result := finding(t, report, capacityID)
+			result := finding(t, report, usageID)
 
 			assert.Equal(t, check.SeverityPass, result.Severity)
 			assert.Contains(t, result.Name, tt.wantInName)
 		})
 	}
+}
+
+// The renderer prints the report header and then every finding, so a finding
+// named after the check prints the check name twice.
+func Test_EntryUsage_DoesNotRepeatTheCheckName(t *testing.T) {
+	t.Parallel()
+
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(9, 5000, 0, 30*day)})
+
+	for _, result := range report.Results {
+		assert.NotEqual(t, report.CheckID, result.ID)
+		assert.NotContains(t, result.Name, report.Name)
+	}
+
+	assert.Equal(t, "Entry Usage: 9/5.0K entries", finding(t, report, usageID).Name)
 }
 
 // A full table is a state, not a defect: a stable workload larger than max sits
@@ -170,11 +185,11 @@ func Test_EvictionRate(t *testing.T) {
 		},
 		{
 			// A counter that only grows: 4000 events over three years is 3.7/day,
-			// 0.2x capacity. Thresholding on dealloc itself would flag this.
+			// 0.18x capacity. Thresholding on dealloc itself would flag this.
 			name:         "large absolute count over a long window",
 			row:          capacityRow(10000, 10000, 4000, 1095*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "0.2x capacity/day",
+			wantInName:   "0.1x capacity/day",
 		},
 	}
 
@@ -188,6 +203,76 @@ func Test_EvictionRate(t *testing.T) {
 			assert.Equal(t, tt.wantSeverity, result.Severity)
 			assert.Contains(t, result.Name, tt.wantInName)
 			assert.Equal(t, tt.wantSeverity, report.Severity)
+		})
+	}
+}
+
+// entry_dealloc() discards Max(10, max * 5 / 100) entries per event. Below
+// max = 200 the floor of 10 dominates, and max bottoms out at 100 - so a fixed
+// 5% halves the reported turnover and passes a saturated instance.
+//
+// 60 events over 10 days at max = 100 is 6 events/day. The real batch is 10
+// entries, so 60 entries/day against a capacity of 100 is 0.6x - a WARN. Under
+// a fixed 5% the batch would be 5, giving 0.3x and a PASS.
+func Test_EvictionRate_SmallMaxUsesTheTenEntryBatchFloor(t *testing.T) {
+	t.Parallel()
+
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(100, 100, 60, 10*day)})
+	result := finding(t, report, rateID)
+
+	assert.Equal(t, check.SeverityWarn, result.Severity)
+	assert.Contains(t, result.Name, "0.6x capacity/day")
+	// 60 events * 10 entries, not 60 * 5.
+	assert.Contains(t, result.Details, "600 entries")
+}
+
+// The batch is a true 5% once max clears 200, where 5% of max exceeds the floor.
+func Test_EvictionRate_LargeMaxUsesThePercentBatch(t *testing.T) {
+	t.Parallel()
+
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 60, 10*day)})
+	result := finding(t, report, rateID)
+
+	// 6 events/day * 500 entries = 3000/day against 10000 = 0.3x.
+	assert.Equal(t, check.SeverityPass, result.Severity)
+	assert.Contains(t, result.Name, "0.3x capacity/day")
+}
+
+// The displayed value is truncated, not rounded: rounding would print "0.5x
+// capacity/day" on a finding that passed at a 0.5 threshold.
+func Test_EvictionRate_DisplayNeverOverstatesTheThreshold(t *testing.T) {
+	t.Parallel()
+
+	// 996 events over 100 days = 9.96/day * 500 entries = 4980/day against
+	// 10000 = 0.498x, just under the threshold.
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 996, 100*day)})
+	result := finding(t, report, rateID)
+
+	assert.Equal(t, check.SeverityPass, result.Severity)
+	assert.Contains(t, result.Name, "0.4x capacity/day")
+	assert.NotContains(t, result.Name, "0.5")
+	assert.Empty(t, result.Details)
+}
+
+// Truncation must not swallow a tenth that only looks short in binary:
+// 0.7*10 is 6.999999999999999 in float64.
+func Test_EvictionRate_DisplayIsExactAtTenths(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		events int64
+		want   string
+	}{
+		{events: 140, want: "0.7x capacity/day"}, // 14/day * 500 / 10000 = 0.7
+		{events: 580, want: "2.9x capacity/day"}, // 58/day * 500 / 10000 = 2.9
+		{events: 660, want: "3.3x capacity/day"}, // 66/day * 500 / 10000 = 3.3
+	} {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+
+			report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, tt.events, 10*day)})
+
+			assert.Contains(t, finding(t, report, rateID).Name, tt.want)
 		})
 	}
 }
@@ -243,6 +328,16 @@ func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {
 			name: "window under an hour",
 			row:  capacityRow(4200, 10000, 12, 600),
 		},
+		{
+			// The batch size and the capacity the turnover is a share of both
+			// derive from max, so an unreadable one leaves no rate to report.
+			name: "max unreadable",
+			row: func() db.QueryStatsCapacityRow {
+				row := capacityRow(4200, 0, 12, 30*day)
+				row.MaxEntries = pgtype.Int8{}
+				return row
+			}(),
+		},
 	}
 
 	for _, tt := range tests {
@@ -252,9 +347,10 @@ func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {
 			report := run(t, &mockQueryer{pgssOK: true, row: tt.row})
 
 			assert.Equal(t, check.SeveritySkip, finding(t, report, rateID).Severity)
-			// The capacity finding needs no window, so the report still has a result.
+			// The usage finding needs neither window nor max, so the report still
+			// has a result.
 			assert.Equal(t, check.SeverityPass, report.Severity)
-			assert.Equal(t, check.SeverityPass, finding(t, report, capacityID).Severity)
+			assert.Equal(t, check.SeverityPass, finding(t, report, usageID).Severity)
 		})
 	}
 }
@@ -268,8 +364,8 @@ func Test_ExtensionUnavailable(t *testing.T) {
 
 	assert.Equal(t, check.SeverityPass, report.Severity)
 	require.Len(t, report.Results, 1)
-	assert.Equal(t, capacityID, report.Results[0].ID)
-	assert.NotContains(t, report.Results[0].Details, "\n")
+	assert.Equal(t, usageID, report.Results[0].ID)
+	assert.Empty(t, report.Results[0].Details)
 }
 
 func Test_QueryError(t *testing.T) {

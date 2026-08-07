@@ -16,9 +16,11 @@ SELECT
     FROM pg_catalog.pg_settings AS s
     WHERE s.name = 'pg_stat_statements.max'
   )::bigint AS max_entries
-  -- dealloc counts eviction events, not entries. Each event discards the
-  -- least-recently-used 5% of max (USAGE_DEALLOC_PERCENT in
-  -- pg_stat_statements.c), so the entries lost are dealloc * 0.05 * max.
+  -- dealloc counts eviction events, not entries. entry_dealloc() in
+  -- pg_stat_statements.c discards Max(10, max * USAGE_DEALLOC_PERCENT / 100)
+  -- least-recently-used entries per event, so the entries lost are
+  -- dealloc * Max(10, max * 5 / 100). The floor matters: pg_stat_statements.max
+  -- bottoms out at 100, where 5% is 5 and the real batch is twice that.
   , i.dealloc AS eviction_events
   -- The counters are cumulative since this reset, so a rate needs it. Unlike
   -- pg_stat_database.stats_reset it is normally set, but it is nullable and a
