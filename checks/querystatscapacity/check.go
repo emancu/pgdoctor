@@ -44,12 +44,6 @@ const (
 	// statements is gone within hours of running.
 	turnoverWarnPerDay = 0.5
 
-	// entryUsageWarnFill is the occupancy at which the table is effectively full and
-	// every new statement displaces an existing one. Unlike the eviction rate this
-	// is a present-tense reading, so it catches churn that started too recently to
-	// move a lifetime average.
-	entryUsageWarnFill = 0.99
-
 	// turnoverDisplayEpsilon absorbs binary representation error before the
 	// displayed value is truncated. 0.7*10 is 6.999999999999999 in float64, which
 	// would otherwise truncate to 0.6.
@@ -166,11 +160,18 @@ func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
 		return
 	}
 
+	// Occupancy alone is not a defect: a stable workload larger than max sits pinned
+	// there indefinitely, losing nothing. Below capacity there is headroom and
+	// nothing is displaced at all. What warrants a warning is both together - no
+	// headroom and evictions on record - because that is the state the lifetime rate
+	// understates when the churn started recently.
 	severity, details := check.SeverityPass, ""
-	if float64(row.Entries.Int64)/float64(row.MaxEntries.Int64) >= entryUsageWarnFill {
+	if row.Entries.Int64 >= row.MaxEntries.Int64 && row.EvictionEvents.Int64 > 0 {
 		severity = check.SeverityWarn
-		details = "At capacity, so every new statement displaces an existing one. " +
-			"partition-usage and temp-usage read what is left."
+		details = fmt.Sprintf(
+			"No headroom, and %s eviction events on record, so statements are being displaced. "+
+				"The rate below averages those over the whole window and understates recent churn.",
+			check.FormatNumber(row.EvictionEvents.Int64))
 	}
 
 	name := fmt.Sprintf("%s: %s/%s entries",
