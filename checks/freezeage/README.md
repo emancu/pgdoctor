@@ -2,7 +2,7 @@
 
 Reports how far past their anti-wraparound trigger PostgreSQL's two 32-bit wraparound counters — transaction IDs and MultiXacts — have drifted, for the connected database and for every VACUUM target in it.
 
-## Background: age is a sawtooth, and its peak is the trigger
+## Background
 
 A low-churn relation accumulates no dead tuples, so nothing makes autovacuum visit it. Its `age(relfrozenxid)` climbs with cluster-wide XID consumption until it hits `autovacuum_freeze_max_age` (200M by default), which triggers a non-cancellable anti-wraparound autovacuum; that freezes the old rows, the age drops, and the climb starts again. **The peak of that cycle is the trigger**, so a relation at 199M against a 200M trigger is at the top of its normal sawtooth, not in trouble — and on a database with hundreds of low-churn relations, most of them sit there most of the time.
 
@@ -43,9 +43,13 @@ Rows are grouped by what the operator would actually run — `VACUUM (FREEZE) pu
 
 Scope is `relkind IN ('r','m','t')`, the exact set `vac_update_datfrozenxid()` counts (`'p'` has no storage), across all schemas: matviews, `pg_catalog` and orphaned `pg_temp_*` relations age independently of anything in `public`.
 
-### database-multixact-age / table-multixact-age
+### database-multixact-age
 
-The same two findings against `datminmxid` and `relminmxid`. Both queries guard with `<> '0'::xid`, because `mxid_age('0'::xid)` returns 2147483647 and would report an instant FAIL on a database that has never allocated a MultiXact.
+`mxid_age(datminmxid)` for the connected database, against `autovacuum_multixact_freeze_max_age`. Guarded with `<> '0'::xid`, because `mxid_age('0'::xid)` returns 2147483647 and would report an instant FAIL on a database that has never allocated a MultiXact.
+
+### table-multixact-age
+
+`mxid_age(relminmxid)` per VACUUM target, same guard, same grouping as `table-freeze-age`.
 
 ### horizon-pin
 
@@ -61,19 +65,29 @@ This finding exists to answer one question: **kill something, or tune something.
 
 A pin warns at `1×`, a full sawtooth period before the age itself warns, because from that point every anti-wraparound vacuum is guaranteed to complete without freezing past it. An **active** slot holding a recent xmin is normal and passes at any recency; an inactive one with invalidated WAL is pure liability, so its age stops mattering. Remediation is always single-object (`SELECT pg_drop_replication_slot('one_slot')`, `ROLLBACK PREPARED 'gid'`) — and dropping a logical slot forces its consumer (Debezium or any other CDC reader) to re-snapshot from scratch, which is a product decision to escalate, not a unilateral DBA action.
 
+## Statistics Requirements
+
+`Last Vacuum` comes from `pg_stat_all_tables`, so vacuum timestamps are only as trustworthy as the statistics window — run `statistics-freshness` before relying on them. The ages themselves come from `pg_class` and `pg_database` and are exact regardless of statistics state.
+
 ## How to Fix
 
-A high age means vacuum is not advancing `relfrozenxid`, and there are only two causes.
+A high age has only two causes: something pins the xmin horizon so vacuum runs and advances nothing, or vacuum cannot keep up. `horizon-pin` tells you which.
 
-**Something pins the xmin horizon.** Vacuum can only freeze rows older than the oldest snapshot in the system, so a long transaction, slot, or prepared transaction makes vacuum run, succeed, and advance nothing. The durable half of that — slots and prepared transactions — is `horizon-pin` above. The live half (backends, idle-in-transaction sessions, lock waiters) is a live investigation, not a health check: run **`houston dba xmin`** ([houston#1839](https://github.com/fresha/houston/issues/1839)). If a pin is at or past the trigger, every subsequent anti-wraparound vacuum is guaranteed to complete without advancing past it and to be re-queued within `autovacuum_naptime` — vacuum tuning cannot fix that.
+### For `database-freeze-age`
 
-**Vacuum cannot keep up.** Freeze the target directly, giving it room to work:
+The database age is the maximum over its relations, so fix the relations — see below. It cannot be vacuumed as a unit, and `VACUUM` at the database level just walks every relation.
+
+### For `table-freeze-age`
+
+Freeze the reported VACUUM target directly, giving it room to work:
 
 ```sql
 SET maintenance_work_mem = '2GB';
 SET max_parallel_maintenance_workers = 4;   -- indexes only, PG13+
 VACUUM (FREEZE, VERBOSE) public.bookings;   -- processes its TOAST relation too
 ```
+
+If many targets are listed, that is autovacuum throughput rather than a per-table problem, and tuning is the fix:
 
 ```sql
 ALTER SYSTEM SET autovacuum_max_workers = 6;
@@ -86,11 +100,25 @@ Lowering a relation's trigger makes freezing happen earlier and more often, but 
 
 Two behaviours make the trigger sharper than it looks: an anti-wraparound vacuum is **exempt from the lock-conflict auto-cancel** a normal autovacuum obeys, so a queued `ALTER TABLE` turns it into a full table lockout; and **`autovacuum_enabled = false` does not prevent it**.
 
+### For `database-multixact-age` and `table-multixact-age`
+
+Identical remediation — a `VACUUM (FREEZE)` advances both counters. Tune against `autovacuum_multixact_freeze_max_age` rather than the XID trigger, and reduce multixact *generation* by cutting concurrent `FOR KEY SHARE` lockers on one hot parent row.
+
+### For `horizon-pin`
+
+Advance or remove the single object named in the finding:
+
+```sql
+SELECT pg_drop_replication_slot('one_slot');   -- forces a full CDC re-snapshot
+ROLLBACK PREPARED 'gid';
+```
+
+Dropping a logical slot makes its consumer (Debezium or any other CDC reader) re-snapshot from scratch — a product decision to escalate, not a unilateral DBA action. Prefer restarting the consumer so the slot advances on its own. For the live half of the diagnosis — backends, idle-in-transaction sessions, lock waiters — run **`houston dba xmin`** ([houston#1839](https://github.com/fresha/houston/issues/1839)); those need luck in timing and are not health checks. While a pin sits at or past the trigger, vacuum tuning cannot help: every anti-wraparound vacuum completes without advancing past it and is re-queued within `autovacuum_naptime`.
+
 ## Notes
 
 - A PASS means no relation is more than 2× past its trigger *at this instant*. XID consumption is a property of the workload: a single PL/pgSQL loop was measured burning 80,001 XIDs in 0.4 seconds, so watch the multiple over time rather than treating one PASS as a forecast.
 - **`Size (est)` is a lock-free `relpages` estimate** (heap + TOAST + indexes × `block_size`), because `pg_total_relation_size()` takes an `AccessShareLock` that would queue behind a waiting `AccessExclusiveLock` and time this check out during a DDL pile-up. It is stale until the next `VACUUM`/`ANALYZE`, and `unknown` when `relpages` is 0.
-- **This check reads statistics.** `Last Vacuum` comes from `pg_stat_all_tables`; use `statistics-freshness` before trusting vacuum timestamps.
 - **PostgreSQL 14 is the floor**, because `vacuum_failsafe_age` and `vacuum_multixact_failsafe_age` were added there. `horizon-pin` reads `wal_status` (PG13+) and never `pg_replication_slots.inactive_since` (PG17+), so slot recency is the age of the pinned xid. Verified by running all three queries on 14.23, 13.23 and 17.10 — on 13 the GUCs are absent and the `COALESCE` supplies the documented 1.6B default, so an older major degrades instead of erroring.
 
 ## Related Checks
