@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -23,6 +22,7 @@ const (
 	lowUsageSizeFloorBytes = 500 * check.MiB
 	lowUsageWriteThreshold = 10000
 	lowUsageMinWindowDays  = 30
+	secondsPerDay          = 24 * 60 * 60
 )
 
 type IndexUsageQueries interface {
@@ -71,9 +71,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	statsReset := rows[0].StatsReset
-	checkUnusedIndexes(rows, statsReset, report)
-	checkLowUsageIndexes(rows, statsReset, report)
+	// Every row carries the same database-wide values, so the first one answers for the set.
+	checkUnusedIndexes(rows, rows[0].StatsReset, report)
+	checkLowUsageIndexes(rows, rows[0].StatsAgeSeconds, report)
 
 	return report, nil
 }
@@ -127,11 +127,16 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 	})
 }
 
-func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestamptz, report *check.Report) {
-	windowKnown := statsReset.Valid
+// checkLowUsageIndexes takes the window as a server-computed age rather than
+// re-deriving it from stats_reset here: the threshold below divides by it, so a CLI
+// host whose clock runs ahead of (or behind) the server would change which indexes
+// are reported. The server is the only clock that shares a frame of reference with
+// the counters.
+func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsAgeSeconds pgtype.Int8, report *check.Report) {
+	windowKnown := statsAgeSeconds.Valid
 	windowDays := 0
 	if windowKnown {
-		windowDays = int(time.Since(statsReset.Time).Hours() / 24)
+		windowDays = int(statsAgeSeconds.Int64 / secondsPerDay)
 	}
 
 	// A NULL stats_reset means counters run since creation: an old window that

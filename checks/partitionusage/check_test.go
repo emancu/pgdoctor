@@ -971,6 +971,50 @@ func Test_PartitionUsage_TableOutput(t *testing.T) {
 	require.Contains(t, result.Details, "public.orders (key: created_at, 12 partitions)")
 }
 
+// The reported window is the age the server measured, not the CLI host's idea of
+// how long ago the reset was. A host clock off by days would otherwise mislabel the
+// period the call counts cover.
+func Test_PartitionUsage_StatsWindowFromServerAge(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		age  pgtype.Int8
+		want string
+	}{
+		{
+			name: "server age is reported verbatim",
+			age:  pgtype.Int8{Int64: 30 * 24 * 60 * 60, Valid: true},
+			want: "not using the partition key on 1 partitioned table(s) over the last 30d",
+		},
+		{
+			name: "unknown reset says nothing about the period",
+			age:  pgtype.Int8{},
+			want: "not using the partition key on 1 partitioned table(s)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stats := makeQueryStats("SELECT * FROM orders WHERE customer_id = $1", 500, 400000)
+			stats.StatsAgeSeconds = tt.age
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable("public", "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{stats},
+			}
+
+			report, err := partitionusage.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+			require.Contains(t, keyFinding(t, report).Details, tt.want)
+		})
+	}
+}
+
 func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 	t.Parallel()
 

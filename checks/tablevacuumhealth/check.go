@@ -8,7 +8,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -35,8 +34,11 @@ const (
 	defaultVacuumScaleFactor = 0.2
 	defaultVacuumThreshold   = 50
 
-	staleVacuumWarnDays = 7
-	staleVacuumFailDays = 25
+	secondsPerDay = 24 * 60 * 60
+	secondsPerHr  = 60 * 60
+
+	staleVacuumWarnSeconds = 7 * secondsPerDay
+	staleVacuumFailSeconds = 25 * secondsPerDay
 
 	pendingWorkWarnFloor = 250_000
 	pendingWorkFailFloor = 500_000
@@ -126,8 +128,6 @@ type largeDefaultEntry struct {
 }
 
 func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Report) {
-	now := time.Now()
-
 	var entries []largeDefaultEntry
 	for _, row := range rows {
 		if row.EstimatedRows.Int64 >= largeTableMinRows && isUsingDefaultSettings(row.Reloptions.String) {
@@ -162,7 +162,7 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 				check.FormatBytes(e.row.TableSizeBytes.Int64),
 				check.FormatNumber(e.trigger),
 				check.FormatNumber(e.pending),
-				estNextVacuum(e.trigger, e.pending, getTimestamp(e.row.LastVacuumAny), now),
+				estNextVacuum(e.trigger, e.pending, e.row.LastVacuumAgeSeconds),
 			},
 			Severity: check.SeverityWarn,
 		})
@@ -185,30 +185,27 @@ func defaultVacuumTrigger(estimatedRows int64) int64 {
 	return int64(defaultVacuumScaleFactor*float64(estimatedRows)) + defaultVacuumThreshold
 }
 
-// estNextVacuum assumes dead tuples keep accumulating at their post-vacuum average rate.
-func estNextVacuum(trigger, pending int64, lastVacuum, now time.Time) string {
+// estNextVacuum assumes dead tuples keep accumulating at their post-vacuum average
+// rate. The elapsed time comes from the server, which measured it against the same
+// clock that stamped the last vacuum.
+func estNextVacuum(trigger, pending int64, lastVacuumAge pgtype.Int8) string {
 	if pending == 0 {
 		return noEstimate
 	}
 	if pending >= trigger {
 		return "overdue"
 	}
-	if lastVacuum.IsZero() {
+	if !lastVacuumAge.Valid || lastVacuumAge.Int64 <= 0 {
 		return noEstimate
 	}
 
-	seconds := now.Sub(lastVacuum).Seconds()
-	if seconds <= 0 {
-		return noEstimate
-	}
-
-	rate := float64(pending) / seconds
+	rate := float64(pending) / float64(lastVacuumAge.Int64)
 	estSeconds := float64(trigger-pending) / rate
 
-	if days := estSeconds / 86400; days >= 2 {
+	if days := estSeconds / secondsPerDay; days >= 2 {
 		return fmt.Sprintf("~%dd", int64(math.Round(days)))
 	}
-	if hours := estSeconds / 3600; hours >= 2 {
+	if hours := estSeconds / secondsPerHr; hours >= 2 {
 		return fmt.Sprintf("~%dh", int64(math.Round(hours)))
 	}
 	return "<1h"
@@ -217,38 +214,34 @@ func estNextVacuum(trigger, pending int64, lastVacuum, now time.Time) string {
 // staleEntry is a row that tripped a staleness tier, carrying the values needed
 // to render and sort it.
 type staleEntry struct {
-	row         db.TableVacuumHealthRow
-	severity    check.Severity
-	pendingWork int64
-	lastVacuum  time.Time
-	lastAnalyze time.Time
+	row            db.TableVacuumHealthRow
+	severity       check.Severity
+	pendingWork    int64
+	lastVacuumAge  pgtype.Int8
+	lastAnalyzeAge pgtype.Int8
 }
 
 // checkVacuumStale lists tables that are both overdue AND carry real pending work,
 // on either the vacuum arm (dead + inserts) or the analyze arm (mods since analyze).
+// Staleness is judged on server-measured ages: comparing the server's timestamps
+// against the CLI host's clock would let skew between the two decide the tier.
 func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
-	now := time.Now()
-	warnCutoff := now.Add(-staleVacuumWarnDays * 24 * time.Hour)
-	failCutoff := now.Add(-staleVacuumFailDays * 24 * time.Hour)
-
 	var entries []staleEntry
 	for _, row := range rows {
 		vacuumWork := row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64
 		analyzeWork := row.NModSinceAnalyze.Int64
-		lastVacuum := getTimestamp(row.LastVacuumAny)
-		lastAnalyze := getTimestamp(row.LastAnalyzeAny)
 
-		severity := staleSeverity(vacuumWork, analyzeWork, lastVacuum, lastAnalyze, warnCutoff, failCutoff)
+		severity := staleSeverity(vacuumWork, analyzeWork, row.LastVacuumAgeSeconds, row.LastAnalyzeAgeSeconds)
 		if severity == check.SeverityPass {
 			continue
 		}
 
 		entries = append(entries, staleEntry{
-			row:         row,
-			severity:    severity,
-			pendingWork: max(vacuumWork, analyzeWork),
-			lastVacuum:  lastVacuum,
-			lastAnalyze: lastAnalyze,
+			row:            row,
+			severity:       severity,
+			pendingWork:    max(vacuumWork, analyzeWork),
+			lastVacuumAge:  row.LastVacuumAgeSeconds,
+			lastAnalyzeAge: row.LastAnalyzeAgeSeconds,
 		})
 	}
 
@@ -277,8 +270,8 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 				check.FormatNumber(e.row.EstimatedRows.Int64),
 				check.FormatBytes(e.row.TableSizeBytes.Int64),
 				check.FormatNumber(e.pendingWork),
-				formatActivity(e.lastVacuum, e.row.VacuumCount.Int64+e.row.AutovacuumCount.Int64),
-				formatActivity(e.lastAnalyze, e.row.AnalyzeCount.Int64+e.row.AutoanalyzeCount.Int64),
+				formatActivity(e.lastVacuumAge, e.row.VacuumCount.Int64+e.row.AutovacuumCount.Int64),
+				formatActivity(e.lastAnalyzeAge, e.row.AnalyzeCount.Int64+e.row.AutoanalyzeCount.Int64),
 			},
 			Severity: e.severity,
 		})
@@ -297,25 +290,36 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 }
 
 // staleSeverity evaluates FAIL then WARN; either arm at a tier trips that tier,
-// and a zero timestamp (never vacuumed/analyzed) is treated as infinitely stale.
-func staleSeverity(vacuumWork, analyzeWork int64, lastVacuum, lastAnalyze, warnCutoff, failCutoff time.Time) check.Severity {
-	if (lastVacuum.Before(failCutoff) && vacuumWork >= pendingWorkFailFloor) ||
-		(lastAnalyze.Before(failCutoff) && analyzeWork >= pendingWorkFailFloor) {
+// and a table that was never vacuumed/analyzed is treated as infinitely stale.
+func staleSeverity(vacuumWork, analyzeWork int64, lastVacuumAge, lastAnalyzeAge pgtype.Int8) check.Severity {
+	vacuumAge := staleAge(lastVacuumAge)
+	analyzeAge := staleAge(lastAnalyzeAge)
+
+	if (vacuumAge > staleVacuumFailSeconds && vacuumWork >= pendingWorkFailFloor) ||
+		(analyzeAge > staleVacuumFailSeconds && analyzeWork >= pendingWorkFailFloor) {
 		return check.SeverityFail
 	}
-	if (lastVacuum.Before(warnCutoff) && vacuumWork >= pendingWorkWarnFloor) ||
-		(lastAnalyze.Before(warnCutoff) && analyzeWork >= pendingWorkWarnFloor) {
+	if (vacuumAge > staleVacuumWarnSeconds && vacuumWork >= pendingWorkWarnFloor) ||
+		(analyzeAge > staleVacuumWarnSeconds && analyzeWork >= pendingWorkWarnFloor) {
 		return check.SeverityWarn
 	}
 	return check.SeverityPass
 }
 
-// formatActivity renders "<age> (<lifetime count>)", or "never" when no timestamp exists.
-func formatActivity(t time.Time, count int64) string {
-	if t.IsZero() {
+// staleAge reads a server-measured age, treating "never ran" as infinitely stale.
+func staleAge(age pgtype.Int8) int64 {
+	if !age.Valid {
+		return math.MaxInt64
+	}
+	return age.Int64
+}
+
+// formatActivity renders "<age> (<lifetime count>)", or "never" when the action never ran.
+func formatActivity(age pgtype.Int8, count int64) string {
+	if !age.Valid {
 		return neverLabel
 	}
-	return fmt.Sprintf("%s (%d)", formatTimeSince(t), count)
+	return fmt.Sprintf("%s (%d)", formatAge(age.Int64), count)
 }
 
 // Helper functions.
@@ -331,22 +335,12 @@ func isUsingDefaultSettings(reloptions string) bool {
 	return !strings.Contains(strings.ToLower(reloptions), "autovacuum_vacuum_scale_factor")
 }
 
-func getTimestamp(ts pgtype.Timestamptz) time.Time {
-	if ts.Valid {
-		return ts.Time
-	}
-	return time.Time{}
-}
-
-func formatTimeSince(t time.Time) string {
-	if t.IsZero() {
-		return neverLabel
-	}
-	since := time.Since(t)
-	days := int(since.Hours() / 24)
+// formatAge renders a server-measured age in whole days, falling back to hours.
+func formatAge(seconds int64) string {
+	days := seconds / secondsPerDay
 	if days == 0 {
-		hours := int(since.Hours())
-		if hours == 0 {
+		hours := seconds / secondsPerHr
+		if hours <= 0 {
 			return "just now"
 		}
 		return fmt.Sprintf("%dh ago", hours)

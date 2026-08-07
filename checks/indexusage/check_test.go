@@ -29,23 +29,39 @@ func (m *mockQueryer) IndexUsageStats(context.Context) ([]db.IndexUsageStatsRow,
 func pgText(s string) pgtype.Text         { return pgtype.Text{String: s, Valid: true} }
 func pgInt8(i int64) pgtype.Int8          { return pgtype.Int8{Int64: i, Valid: true} }
 func pgTS(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
-func pgTSNull() pgtype.Timestamptz        { return pgtype.Timestamptz{Valid: false} }
 
 func mb(n int64) int64 { return n * 1024 * 1024 }
 
-// Exact-duration offset (not AddDate) so window boundaries don't drift across DST.
-func daysAgo(n int) pgtype.Timestamptz {
-	return pgTS(time.Now().Add(-time.Duration(n) * 24 * time.Hour))
+const secondsPerDay = 24 * 60 * 60
+
+// window is what the query reports about the counters: the reset timestamp, shown
+// as a date, and the age the server measured, which the rate threshold divides by.
+type window struct {
+	reset pgtype.Timestamptz
+	age   pgtype.Int8
 }
 
-func row(table, index string, scans, writes, sizeBytes int64, sr pgtype.Timestamptz) db.IndexUsageStatsRow {
+// daysAgo is a consistent window: the timestamp and the server-measured age agree.
+// Exact-duration offset (not AddDate) so window boundaries don't drift across DST.
+func daysAgo(n int) window {
+	return window{
+		reset: pgTS(time.Now().Add(-time.Duration(n) * 24 * time.Hour)),
+		age:   pgInt8(int64(n) * secondsPerDay),
+	}
+}
+
+// noReset is a database whose counters were never reset: no timestamp, no age.
+func noReset() window { return window{} }
+
+func row(table, index string, scans, writes, sizeBytes int64, w window) db.IndexUsageStatsRow {
 	return db.IndexUsageStatsRow{
-		TableName:      pgText(table),
-		IndexName:      pgText(index),
-		IdxScan:        pgInt8(scans),
-		TableWrites:    pgInt8(writes),
-		IndexSizeBytes: pgInt8(sizeBytes),
-		StatsReset:     sr,
+		TableName:       pgText(table),
+		IndexName:       pgText(index),
+		IdxScan:         pgInt8(scans),
+		TableWrites:     pgInt8(writes),
+		IndexSizeBytes:  pgInt8(sizeBytes),
+		StatsReset:      w.reset,
+		StatsAgeSeconds: w.age,
 	}
 }
 
@@ -138,7 +154,8 @@ func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 	t.Parallel()
 
 	reset := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), pgTS(reset))
+	w := window{reset: pgTS(reset), age: pgInt8(90 * secondsPerDay)}
+	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), w)
 
 	report := runCheck(t, []db.IndexUsageStatsRow{r})
 	unused := finding(t, report, "unused-indexes")
@@ -149,7 +166,7 @@ func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
 	t.Parallel()
 
-	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), pgTSNull())
+	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), noReset())
 
 	report := runCheck(t, []db.IndexUsageStatsRow{r})
 	unused := finding(t, report, "unused-indexes")
@@ -192,7 +209,7 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 		scans  int64
 		writes int64
 		size   int64
-		reset  pgtype.Timestamptz
+		reset  window
 		listed bool
 	}{
 		{"window 29d - not listed", 0, 50000, mb(600), daysAgo(29), false},
@@ -204,7 +221,7 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 		{"writes at floor (10000) - listed", 5, 10000, mb(600), daysAgo(90), true},
 		{"size below floor (499MB) - not listed", 5, 50000, mb(499), daysAgo(90), false},
 		{"size at floor (500MB) - listed", 5, 50000, mb(500), daysAgo(90), true},
-		{"null stats_reset qualifies window and rate", 5, 50000, mb(600), pgTSNull(), true},
+		{"null stats_reset qualifies window and rate", 5, 50000, mb(600), noReset(), true},
 	}
 
 	for _, tt := range tests {
@@ -222,6 +239,54 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 				require.Equal(t, check.SeverityPass, low.Severity)
 				require.Nil(t, low.Table)
 			}
+		})
+	}
+}
+
+// The window comes from the server, not from differencing stats_reset against this
+// host's clock. Both cases below hand the check a timestamp that implies the
+// opposite verdict from the server-measured age; the server has to win, otherwise a
+// CLI host whose clock is off decides which indexes get reported.
+func Test_LowUsageIndexes_WindowComesFromServerNotHostClock(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		w      window
+		listed bool
+	}{
+		{
+			// Host clock 2 days behind the server: the timestamp implies a 2-day
+			// window (below the 30-day gate), the server says 90 days.
+			name:   "host clock behind: server window opens the gate",
+			w:      window{reset: pgTS(time.Now().Add(-2 * 24 * time.Hour)), age: pgInt8(90 * secondsPerDay)},
+			listed: true,
+		},
+		{
+			// Host clock 90 days ahead: the timestamp implies a 90-day window, the
+			// server says 2 days, which is too short to judge a read rate.
+			name:   "host clock ahead: server window keeps the gate shut",
+			w:      window{reset: pgTS(time.Now().Add(-90 * 24 * time.Hour)), age: pgInt8(2 * secondsPerDay)},
+			listed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// 1 scan over 90 days is under 1/week; over 2 days it is not judged at all.
+			r := row("public.posts", "idx_posts_status", 1, 50000, mb(600), tt.w)
+			low := finding(t, runCheck(t, []db.IndexUsageStatsRow{r}), "low-usage-indexes")
+
+			if tt.listed {
+				require.Equal(t, check.SeverityInfo, low.Severity)
+				require.Len(t, low.Table.Rows, 1)
+				return
+			}
+
+			require.Equal(t, check.SeverityPass, low.Severity)
+			require.Nil(t, low.Table)
 		})
 	}
 }
