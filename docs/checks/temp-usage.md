@@ -7,16 +7,21 @@ Monitors PostgreSQL temporary file creation which indicates queries spilling to 
 ## What It Checks
 
 ### Temp File Creation Rate (`temp-file-rate`)
-Monitors the rate of temporary file creation:
-- **FAIL**: ≥20 files/hour (indicates serious regression or multiple problematic queries)
-- **WARN**: ≥5 files/hour (indicates new inefficient queries or query plan changes)
+The rate of temporary file creation, reported as context:
+- Above **20 files/hour**: serious regression or multiple problematic queries
+- Above **5 files/hour**: new inefficient queries or query plan changes
 - **Baseline**: Well-tuned production databases typically see <1 file/hour
 
 ### Temp Data Volume Rate (`temp-volume-rate`)
-Monitors the volume of temp data written:
-- **FAIL**: ≥5 GB/hour (major regression or multiple large queries spilling to disk)
-- **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
+The volume of temp data written, reported as context:
+- Above **5 GB/hour**: major regression or multiple large queries spilling to disk
+- Above **1 GB/hour**: increased large sorts/hashes from new features or query changes
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
+
+Both rates are informational. Crossing a threshold tells you a problem exists but not
+what to do about it, so the WARN or FAIL lands on `temp-file-sources` below — the
+finding that names the statements responsible. If nothing can be attributed, the check
+passes: there is no action to hand anyone.
 
 ### The Measurement Window
 

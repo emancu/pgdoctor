@@ -87,15 +87,19 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		maxSeverity = check.SeverityWarn
 	}
 
-	// Run all subchecks
-	fileSeverity := checkTempFileRate(row, report, maxSeverity)
-	volumeSeverity := checkTempVolumeRate(row, report, maxSeverity)
+	// The rates say a problem exists; only the statement list says what to do about
+	// it. So the rates report as context and the severity rides on the finding that
+	// names the offenders - graded by how bad the rates were.
+	rateSeverity := worst(
+		checkTempFileRate(row, report, maxSeverity),
+		checkTempVolumeRate(row, report, maxSeverity),
+	)
 
 	// Naming the offenders only helps once there is something to chase, and reading
 	// pg_stat_statements materialises the whole query-text corpus into a work_mem
 	// tuplestore, so a healthy database does not pay for it.
-	if fileSeverity > check.SeverityPass || volumeSeverity > check.SeverityPass {
-		if err := c.reportTopStatements(ctx, report); err != nil {
+	if rateSeverity > check.SeverityPass {
+		if err := c.reportTopStatements(ctx, report, rateSeverity); err != nil {
 			return nil, err
 		}
 	}
@@ -103,11 +107,19 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	return report, nil
 }
 
+func worst(a, b check.Severity) check.Severity {
+	if a > b {
+		return a
+	}
+
+	return b
+}
+
 // reportTopStatements attributes the temp writes to individual statements. The
 // figures rank offenders and must not be summed or compared against the rates above:
 // pg_stat_database measures the disk footprint of each temp file, while
 // pg_stat_statements counts write I/O, which a multi-pass external sort repeats.
-func (c *checker) reportTopStatements(ctx context.Context, report *check.Report) error {
+func (c *checker) reportTopStatements(ctx context.Context, report *check.Report, severity check.Severity) error {
 	available, err := c.queries.HasPgStatStatements(ctx)
 	if err != nil {
 		return fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
@@ -148,7 +160,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report)
 	report.AddFinding(check.Finding{
 		ID:       "temp-file-sources",
 		Name:     "Temp File Sources",
-		Severity: check.SeverityInfo,
+		Severity: severity,
 		Details: fmt.Sprintf(
 			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals above.",
 			len(rows)),
@@ -280,7 +292,7 @@ func checkTempFileRate(row db.TempUsageRow, report *check.Report, maxSeverity ch
 	report.AddFinding(check.Finding{
 		ID:       "temp-file-rate",
 		Name:     fmt.Sprintf("Temp File Creation Rate: %.1f files/hour", rate),
-		Severity: severity,
+		Severity: check.SeverityInfo,
 		Details: fmt.Sprintf("%d files totalling %s%s.",
 			row.TempFiles.Int64,
 			check.FormatBytes(row.TempBytes.Int64),
@@ -323,7 +335,7 @@ func checkTempVolumeRate(row db.TempUsageRow, report *check.Report, maxSeverity 
 	report.AddFinding(check.Finding{
 		ID:       "temp-volume-rate",
 		Name:     fmt.Sprintf("Temp Data Volume Rate: %s/hour", check.FormatBytes(int64(bytesPerHour))),
-		Severity: severity,
+		Severity: check.SeverityInfo,
 	})
 
 	return severity
