@@ -24,7 +24,10 @@ const (
 	findingTableFreeze       = "table-freeze-age"
 	findingDatabaseMultixact = "database-multixact-age"
 	findingTableMultixact    = "table-multixact-age"
+	findingHorizonPin        = "horizon-pin"
 )
+
+const nameHorizonPin = "Xmin Horizon Pin"
 
 const (
 	// age() and mxid_age() saturate at 2^31-1, so no threshold above this is meaningful.
@@ -45,6 +48,29 @@ const (
 	// anchor: the documented recovery from the hard stop is single-user mode, which
 	// does not exist on RDS.
 	failTriggerMultiplier = int64(4)
+
+	// A pin WARNs a full sawtooth period earlier than the age it causes: from the
+	// moment a pin sits at 1x the trigger, every anti-wraparound vacuum is
+	// guaranteed to complete without freezing past it and to be re-queued.
+	pinWarnTriggerMultiplier = int64(1)
+
+	// An inactive slot never advances on its own, so its pin ends only when someone
+	// drops it — but a consumer restarting is normal churn, so the rule needs a
+	// floor before it fires on a slot that will be picked up again in seconds.
+	inactiveSlotPinFloor = int64(1_000_000)
+
+	// A pin explains the freeze age only when the two are level: vacuum cannot
+	// freeze past the pin, so datfrozenxid trails it. The tolerance absorbs the
+	// transactions burned between the pin and this read.
+	pinCoincidenceFloor   = int64(10_000_000)
+	pinCoincidencePercent = int64(5)
+)
+
+// Pin sources, as returned by HorizonPins.
+const (
+	sourceLogicalSlot  = "logical_slot"
+	sourcePhysicalSlot = "physical_slot"
+	sourcePreparedXact = "prepared_xact"
 )
 
 // Documented GUC defaults, used when a value is missing from pg_settings.
@@ -60,6 +86,7 @@ const unknownSize = "unknown"
 type FreezeAgeQueries interface {
 	DatabaseFreezeAge(context.Context) (db.DatabaseFreezeAgeRow, error)
 	TableFreezeAge(context.Context) ([]db.TableFreezeAgeRow, error)
+	HorizonPins(context.Context) ([]db.HorizonPinsRow, error)
 }
 
 type checker struct {
@@ -100,12 +127,18 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s (tables): %w", check.CategoryVacuum, report.CheckID, err)
 	}
 
+	pinRows, err := c.queries.HorizonPins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("running %s/%s (horizon pins): %w", check.CategoryVacuum, report.CheckID, err)
+	}
+
 	gucs := settingsFrom(dbRow)
 
 	checkDatabaseAge(dbRow, gucs, report, xidCounter)
 	checkDatabaseAge(dbRow, gucs, report, multixactCounter)
 	checkTableAge(tableRows, report, xidCounter)
 	checkTableAge(tableRows, report, multixactCounter)
+	checkHorizonPin(pinRows, dbRow.FreezeAge, gucs, report)
 
 	return report, nil
 }
@@ -400,6 +433,202 @@ func formatSizeEstimate(row db.TableFreezeAgeRow) string {
 		return unknownSize
 	}
 	return check.FormatBytes(row.SizeBytesEst)
+}
+
+// pin is one durable holder of the xmin horizon — a replication slot's xmin or
+// catalog_xmin, or a prepared transaction — normalized out of the nullable types
+// the UNION in HorizonPins produces.
+type pin struct {
+	source    string
+	object    string
+	detail    string
+	age       int64
+	active    bool
+	walStatus string
+	severity  check.Severity
+}
+
+// checkHorizonPin answers "kill something or tune something": a high freeze age
+// with a coincident durable pin is resolved by advancing or dropping that pin, and
+// one without is autovacuum throughput.
+func checkHorizonPin(rows []db.HorizonPinsRow, dbAge int64, s settings, report *check.Report) {
+	trigger := s.freezeMaxAge
+	limits := deriveThresholds(trigger, s.failsafeAge)
+	pinLimits := thresholds{warn: clampAge(trigger * pinWarnTriggerMultiplier), fail: limits.fail}
+
+	if len(rows) == 0 {
+		report.AddFinding(check.Finding{
+			ID:       findingHorizonPin,
+			Name:     nameHorizonPin,
+			Severity: check.SeverityPass,
+			Details: "No replication slot or prepared transaction is pinning the xmin horizon; " +
+				ageVerdict(dbAge, limits.warn, false),
+		})
+		return
+	}
+
+	pins := make([]pin, 0, len(rows))
+	severity, oldest := check.SeverityPass, int64(0)
+	for _, row := range rows {
+		item := pinFrom(row)
+		item.severity = max(severityFor(item.age, pinLimits), inactiveSlotSeverity(item))
+		pins = append(pins, item)
+		severity = max(severity, item.severity)
+		oldest = max(oldest, item.age)
+	}
+
+	// The database age only escalates the finding when a pin is level with it.
+	// Otherwise the age has another cause and killing a pin would not move it.
+	coincident := dbAge-oldest <= pinCoincidenceTolerance(trigger)
+	if coincident {
+		severity = max(severity, severityFor(dbAge, limits))
+	}
+
+	finding := check.Finding{
+		ID:       findingHorizonPin,
+		Name:     nameHorizonPin,
+		Severity: severity,
+		// A pin level with a healthy age is the normal state right after a freeze
+		// cycle, so a PASS must not read as an instruction to drop anything.
+		Details: fmt.Sprintf("%d durable pin(s) on the xmin horizon, oldest %s transactions; %s",
+			len(pins), check.FormatNumber(oldest), ageVerdict(dbAge, limits.warn, coincident)),
+		Debug: fmt.Sprintf("pins=%d oldest=%d dbAge=%d trigger=%d pinWarn=%d fail=%d coincident=%t",
+			len(pins), oldest, dbAge, trigger, pinLimits.warn, pinLimits.fail, coincident),
+	}
+
+	if severity > check.SeverityPass {
+		worst := worstPin(pins)
+		finding.Details = fmt.Sprintf("%s pins the xmin horizon at %s transactions: %s. %s",
+			worst.detail, check.FormatNumber(worst.age), pinCause(dbAge, coincident), pinRemediation(worst))
+		finding.Table = &check.Table{
+			Headers:      []string{"Source", "Object", "Pin Age (transactions)", "Status"},
+			Rows:         pinTableRows(pins),
+			MaxRowsBrief: 3,
+		}
+	}
+
+	report.AddFinding(finding)
+}
+
+func pinTableRows(pins []pin) []check.TableRow {
+	rows := make([]check.TableRow, 0, len(pins))
+	for _, item := range pins {
+		rows = append(rows, check.TableRow{
+			Cells:    []string{pinSourceLabel(item.source), item.object, check.FormatNumber(item.age), pinStatus(item)},
+			Severity: item.severity,
+		})
+	}
+
+	return rows
+}
+
+func pinFrom(row db.HorizonPinsRow) pin {
+	return pin{
+		source:    row.Source.String,
+		object:    row.ObjectName.String,
+		detail:    row.Detail.String,
+		age:       row.PinAge.Int64,
+		active:    row.Active.Bool,
+		walStatus: row.WalStatus.String,
+	}
+}
+
+// inactiveSlotSeverity is age-independent for an invalidated slot: unreserved or
+// lost means the slot can no longer serve its consumer, so it is pure liability
+// and the pin it holds will never be released by anything but a DROP.
+func inactiveSlotSeverity(item pin) check.Severity {
+	if item.source == sourcePreparedXact || item.active {
+		return check.SeverityPass
+	}
+
+	switch item.walStatus {
+	case "unreserved", "lost":
+		return check.SeverityFail
+	case "reserved", "extended":
+		if item.age >= inactiveSlotPinFloor {
+			return check.SeverityWarn
+		}
+	}
+
+	return check.SeverityPass
+}
+
+func pinCoincidenceTolerance(trigger int64) int64 {
+	return max(pinCoincidenceFloor, trigger*pinCoincidencePercent/100)
+}
+
+// ageVerdict names the cause of the freeze age when no pin is worth escalating:
+// "tune it" only when the age is already high AND nothing durable is level with it.
+func ageVerdict(dbAge, warn int64, coincident bool) string {
+	if coincident || dbAge < warn {
+		return fmt.Sprintf("database freeze age is %s transactions", check.FormatNumber(dbAge))
+	}
+	return fmt.Sprintf("no durable pin explains the database freeze age of %s transactions — "+
+		"this is autovacuum throughput, tune it", check.FormatNumber(dbAge))
+}
+
+// pinCause is the discriminator this finding exists for: kill something, or tune
+// something.
+func pinCause(dbAge int64, coincident bool) string {
+	if coincident {
+		return "this pin is holding the horizon — advance or drop it"
+	}
+	return fmt.Sprintf("no durable pin explains the database freeze age of %s transactions; "+
+		"that part is autovacuum throughput — tune it", check.FormatNumber(dbAge))
+}
+
+// worstPin drives the Details line: severity first, because an invalidated slot
+// outranks an older but healthy pin.
+func worstPin(pins []pin) pin {
+	worst := pins[0]
+	for _, item := range pins[1:] {
+		if item.severity > worst.severity || (item.severity == worst.severity && item.age > worst.age) {
+			worst = item
+		}
+	}
+	return worst
+}
+
+// pinRemediation is deliberately single-object: a set-valued command over slots or
+// prepared transactions is how an incident becomes an outage.
+func pinRemediation(item pin) string {
+	switch item.source {
+	case sourcePreparedXact:
+		return fmt.Sprintf(
+			"Resolve it through the transaction manager that prepared it, or `ROLLBACK PREPARED '%s'`", item.object)
+	case sourceLogicalSlot:
+		return fmt.Sprintf(
+			"Make its consumer read again, or `SELECT pg_drop_replication_slot('%s')` — dropping a logical slot "+
+				"forces its consumer (Debezium or any other CDC reader) to re-snapshot from scratch, so that is a "+
+				"product decision to escalate, not a unilateral DBA action", item.object)
+	default:
+		return fmt.Sprintf(
+			"Restore the standby's replay, or `SELECT pg_drop_replication_slot('%s')` once you have confirmed "+
+				"the standby is gone", item.object)
+	}
+}
+
+func pinSourceLabel(source string) string {
+	switch source {
+	case sourceLogicalSlot:
+		return "logical slot"
+	case sourcePhysicalSlot:
+		return "physical slot"
+	case sourcePreparedXact:
+		return "prepared transaction"
+	default:
+		return source
+	}
+}
+
+func pinStatus(item pin) string {
+	if item.source == sourcePreparedXact {
+		return "prepared, uncommitted"
+	}
+	if item.active {
+		return "active, WAL " + item.walStatus
+	}
+	return "inactive, WAL " + item.walStatus
 }
 
 func formatVacuumTime(row db.TableFreezeAgeRow) string {
