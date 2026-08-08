@@ -202,7 +202,7 @@ func formatRecycle(hours float64) string {
 
 func evictionDetails(row db.QueryStatsCapacityRow) string {
 	return fmt.Sprintf(
-		"%s entries discarded since %s from a table holding %s.\npartition-usage and temp-usage read this table, so a PASS from either covers only the statements that were not evicted.",
+		"%s entries discarded since %s from a table capped at pg_stat_statements.max = %s.\nInfrequent statements are dropped first, so partition-usage and temp-usage may not see them at all.",
 		check.FormatNumber(row.EntriesDiscarded.Int64),
 		row.StatsReset.Time.Format("2006-01-02"),
 		check.FormatNumber(row.MaxEntries.Int64))
