@@ -20,22 +20,14 @@ var querySQL string
 var readme string
 
 const (
-	// Floor for the window below, and the point at which a rate means anything.
-	minWindowFloorSeconds = 3600
+	// The threshold as hours to recycle the table once. query.sql states it as
+	// turnover per day, 0.5, when it sizes the minimum window.
+	warnRecycleHours = 48
 
-	secondsPerDay = 86400
-
-	// entry_dealloc(): nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100).
-	// The floor doubles the batch at max=100, the minimum the GUC allows.
-	deallocPercent  = 5
-	deallocMinBatch = 10
-
-	// Eviction is least-used-first, so at half the table per day only the hottest
-	// statements survive.
-	turnoverWarnPerDay = 0.5
-
-	// 0.7*10 is 6.999999999999999 in float64 and would truncate to 0.6.
-	turnoverDisplayEpsilon = 1e-9
+	usageID   = "entry-usage"
+	usageName = "Entry Usage"
+	rateID    = "statement-eviction-rate"
+	rateName  = "Statement Eviction Rate"
 )
 
 // QueryStatsCapacityQueries defines the database queries needed by this check.
@@ -82,8 +74,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// Cluster-wide, so absence here says nothing about the shared hash.
 	if !available.Bool {
 		report.AddFinding(check.Finding{
-			ID:       entryUsageID,
-			Name:     entryUsageName + ": pg_stat_statements not available",
+			ID:       usageID,
+			Name:     usageName + ": pg_stat_statements not available",
 			Severity: check.SeveritySkip,
 			Details:  "pg_stat_statements is not available, so its capacity cannot be inspected.",
 		})
@@ -118,175 +110,100 @@ func allSkipped(report *check.Report) bool {
 	return len(report.Results) > 0
 }
 
-const (
-	entryUsageID   = "entry-usage"
-	entryUsageName = "Entry Usage"
-)
-
 // reportEntryUsage grades nothing: occupancy is not a defect, and dealloc is
 // cumulative so it cannot stand in for current churn either. See the README.
 func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
-	if !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0 {
+	if row.UsageSkipReason.Valid {
 		report.AddFinding(check.Finding{
-			ID: entryUsageID,
-			Name: fmt.Sprintf("%s: %s entries, capacity unreadable",
-				entryUsageName, check.FormatNumber(row.Entries.Int64)),
+			ID:       usageID,
+			Name:     fmt.Sprintf("%s: %s entries, capacity unreadable", usageName, check.FormatNumber(row.Entries.Int64)),
 			Severity: check.SeveritySkip,
-			Debug:    capacityDebug(row),
+			Details:  row.UsageSkipReason.String,
 		})
 
 		return
 	}
 
-	name := fmt.Sprintf("%s: %s/%s entries",
-		entryUsageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64))
-
 	report.AddFinding(check.Finding{
-		ID:       entryUsageID,
-		Name:     name,
+		ID: usageID,
+		Name: fmt.Sprintf("%s: %s/%s entries",
+			usageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64)),
 		Severity: check.SeverityPass,
-		Debug:    capacityDebug(row),
 	})
 }
 
-func capacityDebug(row db.QueryStatsCapacityRow) string {
-	return fmt.Sprintf("entries=%d max=%d dealloc=%d batch=%d window=%s",
-		row.Entries.Int64, row.MaxEntries.Int64, row.EvictionEvents.Int64,
-		entriesPerEviction(row.MaxEntries.Int64),
-		check.FormatDurationSec(int64(row.SecondsSinceReset.Float64)))
-}
-
-// reportEvictionRate grades a rate, never the raw dealloc count: that only grows.
+// reportEvictionRate grades how long the table takes to recycle once. The query
+// decides whether that is computable at all.
 func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
-	const id = "statement-eviction-rate"
-	const name = "Statement Eviction Rate"
-
-	// Skip rather than pass: PASS would read as "nothing is being evicted", which
-	// none of these states can establish.
-	window, ok := windowSeconds(row)
-	switch {
-	case !row.MaxEntries.Valid || row.MaxEntries.Int64 <= 0:
+	if row.RateSkipReason.Valid {
 		report.AddFinding(check.Finding{
-			ID:       id,
-			Name:     name,
+			ID:       rateID,
+			Name:     rateName,
 			Severity: check.SeveritySkip,
-			Details:  "pg_stat_statements.max is unreadable; turnover has no capacity to be a share of.",
-		})
-
-		return
-	case !ok:
-		report.AddFinding(check.Finding{
-			ID:       id,
-			Name:     name,
-			Severity: check.SeveritySkip,
-			Details:  "Counter window unknown; the eviction rate cannot be computed.",
-		})
-
-		return
-	case window < minWindowSeconds(row.MaxEntries.Int64):
-		report.AddFinding(check.Finding{
-			ID:       id,
-			Name:     name,
-			Severity: check.SeveritySkip,
-			Details: fmt.Sprintf("Counters cover only %s, too short to distinguish a rate from a single eviction.",
-				check.FormatDurationSec(int64(window))),
+			Details:  row.RateSkipReason.String,
 		})
 
 		return
 	}
 
-	// Grade the printed number so rounding cannot put text and severity on
-	// opposite sides of the threshold.
-	turnover := displayedTurnover(turnoverPerDay(row.EvictionEvents.Int64, row.MaxEntries.Int64, window))
-	if row.EvictionEvents.Int64 == 0 {
+	if !row.RecycleHours.Valid {
 		report.AddFinding(check.Finding{
-			ID:       id,
-			Name:     name + ": no evictions",
+			ID:       rateID,
+			Name:     rateName + ": no evictions",
 			Severity: check.SeverityPass,
 		})
 
 		return
 	}
 
+	// Grade the printed figure so rounding cannot put text and severity on
+	// opposite sides of the threshold.
+	hours := displayedRecycleHours(row.RecycleHours.Float64)
+
 	severity, details := check.SeverityPass, ""
-	// Degrades observability, not the database. WARN is the ceiling.
-	if turnover >= turnoverWarnPerDay {
+	if hours <= warnRecycleHours {
 		severity = check.SeverityWarn
 		details = evictionDetails(row)
 	}
 
 	report.AddFinding(check.Finding{
-		ID: id,
-		Name: fmt.Sprintf("%s: %s averaged over %s",
-			name, formatTurnover(turnover), check.FormatDurationSec(int64(window))),
+		ID: rateID,
+		Name: fmt.Sprintf("%s: %s (%s average)", rateName, formatRecycle(hours),
+			check.FormatDurationSec(int64(row.WindowSeconds.Float64))),
 		Severity: severity,
 		Details:  details,
 	})
 }
 
-// displayedTurnover truncates to the printed tenth; rounding would let 0.498 show
-// as "0.5x" on a finding that passed at 0.5.
-func displayedTurnover(turnover float64) float64 {
-	return math.Floor(turnover*10+turnoverDisplayEpsilon) / 10
-}
-
-func formatTurnover(turnover float64) string {
-	if turnover < 0.1 {
-		return "<0.1x capacity/day"
+// displayedRecycleHours rounds to the precision that gets printed.
+func displayedRecycleHours(hours float64) float64 {
+	switch {
+	case hours < 1:
+		return math.Round(hours*60) / 60
+	case hours < 48:
+		return math.Round(hours*10) / 10
+	default:
+		return math.Round(hours/24*10) / 10 * 24
 	}
-
-	return fmt.Sprintf("%.1fx capacity/day", turnover)
 }
 
-// evictionDetails carries the totals behind the rate. Only reached once max is known.
+// formatRecycle states how long the table takes to recycle rather than how many
+// times a day it does. Both are the same figure; only one reads without arithmetic.
+func formatRecycle(hours float64) string {
+	switch {
+	case hours < 1:
+		return fmt.Sprintf("table recycled every %.0fm", hours*60)
+	case hours < 48:
+		return fmt.Sprintf("table recycled every %.1fh", hours)
+	default:
+		return fmt.Sprintf("table recycled every %.1fd", hours/24)
+	}
+}
+
 func evictionDetails(row db.QueryStatsCapacityRow) string {
-	discarded := row.EvictionEvents.Int64 * entriesPerEviction(row.MaxEntries.Int64)
-
 	return fmt.Sprintf(
-		"%s eviction events since %s discarded ~%s entries against a capacity of %s."+
-			"\npartition-usage and temp-usage read what is left.",
-		check.FormatNumber(row.EvictionEvents.Int64),
+		"%s entries discarded since %s from a table holding %s.\npartition-usage and temp-usage only see what survived.",
+		check.FormatNumber(row.EntriesDiscarded.Int64),
 		row.StatsReset.Time.Format("2006-01-02"),
-		check.FormatNumber(discarded),
 		check.FormatNumber(row.MaxEntries.Int64))
-}
-
-// entriesPerEviction mirrors entry_dealloc(), integer truncation included.
-// Callers must have established max > 0.
-func entriesPerEviction(maxEntries int64) int64 {
-	batch := maxEntries * deallocPercent / 100
-	if batch < deallocMinBatch {
-		return deallocMinBatch
-	}
-
-	return batch
-}
-
-// minWindowSeconds is short enough to be useful but long enough that one eviction
-// cannot reach the threshold by itself. pgdoctor's own availability probe can
-// trigger one against a full table, and a self-inflicted WARN is the worst kind.
-func minWindowSeconds(maxEntries int64) float64 {
-	share := float64(entriesPerEviction(maxEntries)) / float64(maxEntries)
-
-	return math.Max(minWindowFloorSeconds, share/turnoverWarnPerDay*secondsPerDay)
-}
-
-// turnoverPerDay converts eviction events into the share of capacity lost per day.
-func turnoverPerDay(events, maxEntries int64, window float64) float64 {
-	if events <= 0 || maxEntries <= 0 || window <= 0 {
-		return 0
-	}
-
-	entriesPerDay := float64(events*entriesPerEviction(maxEntries)) / (window / secondsPerDay)
-
-	return entriesPerDay / float64(maxEntries)
-}
-
-// windowSeconds reports the accumulation period, and whether it is known at all.
-func windowSeconds(row db.QueryStatsCapacityRow) (float64, bool) {
-	if !row.SecondsSinceReset.Valid || !row.StatsReset.Valid {
-		return 0, false
-	}
-
-	return row.SecondsSinceReset.Float64, true
 }
