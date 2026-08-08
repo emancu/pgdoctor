@@ -11,51 +11,44 @@ every other check that reads that view is only as good as the sample left in it.
 
 ### Entry Usage (`entry-usage`)
 
-Counts the entries currently held against `pg_stat_statements.max`. Both figures are cluster-wide, so the
-count is not filtered by database.
+Prints the entries currently held against `pg_stat_statements.max`, as `9.9K/10.0K entries`. Both figures
+are cluster-wide, so neither is filtered by database.
 
-**Severity**: PASS, always. SKIP when `max` is unreadable, since there is nothing for "full" to be
-relative to.
+**Severity**: PASS, always. SKIP when `pg_stat_statements` cannot be read at all.
 
-Occupancy is not a defect. A stable workload with more distinct statements than `max` sits pinned there
-indefinitely and loses nothing, and below capacity there is headroom.
-
-It cannot stand in for current churn either. `dealloc` is cumulative, so a table that filled, churned,
-then settled keeps both a full table and a nonzero count for the rest of the window, and a single
-snapshot cannot tell that from a spike an hour old. Establishing recency needs two samples: compare the
-eviction count between two runs over a known interval.
+Occupancy is reported, not graded. A full table is the normal steady state for any workload with more
+distinct statements than `max`, and on its own it says nothing about whether entries are still being
+lost — that is what `statement-eviction-rate` measures.
 
 The count comes from `pg_stat_statements(false)`, which skips the external query-text file. Reading that
 text is what makes the view expensive: it materialises the whole corpus into a `work_mem` tuplestore, and
-and a count does not need it.
+a count does not need it.
 
 ### Statement Eviction Rate (`statement-eviction-rate`)
 
+Prints how long the table takes to turn over once, and the window that average is drawn from, as
+`table recycled every 1.9h (78d average)`.
+
 `pg_stat_statements_info.dealloc` counts eviction *events*, not entries. `entry_dealloc()` in
-`pg_stat_statements.c` discards a fixed batch of least-recently-used entries per event:
+`pg_stat_statements.c` discards a fixed batch per event:
 
 ```c
 nvictims = Max(10, pgss_max * USAGE_DEALLOC_PERCENT / 100);   /* USAGE_DEALLOC_PERCENT is 5 */
 ```
 
-So the entries lost are `dealloc × Max(10, max × 5 / 100)`. **The floor is not a rounding detail.**
-`pg_stat_statements.max` bottoms out at 100, and below `max = 200` the floor of 10 exceeds 5%. At
-`max = 100` each event discards 10 entries, a tenth of capacity rather than a twentieth. Assuming a flat
-5% there would report half the real turnover and pass a saturated instance.
+So the entries lost are `dealloc × Max(10, max × 5 / 100)`, and capacity divided by that rate is the
+recycle time. **The floor is not a rounding detail.** `pg_stat_statements.max` bottoms out at 100, and
+below `max = 200` the floor of 10 exceeds 5%. At `max = 100` each event discards a tenth of capacity
+rather than a twentieth; assuming a flat 5% there would report half the real turnover and pass a
+saturated instance.
 
-Dividing the entries lost by the window since `pg_stat_statements_info.stats_reset`, and then by `max`,
-gives a daily turnover expressed as a multiple of capacity.
+**Severity**: WARN when the table recycles in **48 hours or less**, otherwise PASS. SKIP when the window
+is too short to distinguish a real rate from a single eviction event.
 
-**Severity**: WARN at or above **0.5x capacity per day**, otherwise PASS.
-
-The displayed figure is truncated to one decimal, not rounded, so it can only ever understate the
-measurement: 0.498x prints as `0.4x capacity/day` rather than showing `0.5x` on a finding that passed at
-a 0.5 threshold. A nonzero rate below the display floor prints as `<0.1x capacity/day` instead of
-collapsing to `0.0x`, which would read as no eviction at all.
-
-Half the table recycled daily is the point where the tracked set stops representing the workload.
-Eviction is least-used-first, not random, so the long tail dies far sooner than the average entry
-lifetime suggests: at 0.5x, anything but the hottest statements is gone within hours of running.
+Recycling the whole table in under two days is where the tracked set stops representing the workload.
+Eviction is not age-based: entries are ranked by a usage counter that gains 1.0 per execution and decays
+by 1% each pass, so the *least frequently executed* statements are dropped first regardless of how
+recently they ran. The tail therefore dies far sooner than the average recycle time suggests.
 
 The grade is capped at WARN. Eviction costs nothing at runtime and degrades no query. It degrades
 *observability*, and the fix requires a restart. That belongs in a sprint, not in a pager.
@@ -63,39 +56,47 @@ The grade is capped at WARN. Eviction costs nothing at runtime and degrades no q
 **Threshold on the rate, never on `dealloc` itself.** The counter only grows. A three-year-old instance
 carrying `dealloc = 4000` from a bad deploy that was reverted in 2023 is perfectly healthy.
 
-
 ## Why This Matters
 
 `pg_stat_statements` is a fixed-size hash table. Once it is full, recording a new statement means
 discarding an old one, and the view gives no indication that it happened. Consequences:
 
 - **Other checks silently analyse a fraction of the workload.** In pgdoctor that is `partition-usage`
-  and `temp-usage`. A statement that is not extremely frequent is evicted before either check ever reads
-  it, so both can report a confident PASS on a truncated sample.
+  and `temp-usage`. A statement that is not run frequently is evicted before either check ever reads it,
+  so both can report a confident PASS on a truncated sample.
 - **Rates and totals are understated.** Cumulative counters live on the entry. Evicting it zeroes its
   history; when the statement reappears it starts from zero, and the calls, time and temp bytes it
-  accumulated before are gone for good.
-- **The worst offenders are the most likely to vanish.** Eviction is least-used-first. An expensive query
-  that runs a few times an hour is exactly the profile that gets dropped, while a trivial one running
-  thousands of times a second survives forever.
+  accumulated before are gone for good. A surviving entry can therefore still be undercounted.
+- **The worst offenders are the most likely to vanish.** Ranking is by execution count, so an expensive
+  query that runs a few times an hour is exactly the profile that gets dropped, while a trivial one
+  running thousands of times a second survives forever.
 - **High turnover is itself a workload signal.** Sustained eviction means the working set of *distinct*
   normalised statements exceeds capacity: usually unparameterised SQL, variable-length `IN` lists, or
   generated DDL. Raising `max` treats the symptom.
 
 A measured example: `dealloc = 19688` against `max = 10000` over 78 days is roughly 9.8M entries
-discarded, about 126,000 per day against a capacity of 10,000. The table turned over more than twelve
-times its own size every day.
+discarded, about 126,000 per day against a capacity of 10,000 — the table turning over more than twelve
+times its own size daily, or once every 1.9 hours.
 
 ## How to Fix
 
-### For `statement-eviction-rate`
+### For `entry-usage`
 
-`entry-usage` never warns, so this is the only finding here that needs acting on.
+PASS is informational and never needs action. A SKIP does: it means `pg_stat_statements` could not be
+read, so `partition-usage` and `temp-usage` are running blind too. Install the extension and confirm the
+library is preloaded — being installed is not sufficient, because `CREATE EXTENSION` succeeds without
+`shared_preload_libraries` and every subsequent read then errors.
+
+```sql
+SHOW shared_preload_libraries;          -- must list pg_stat_statements
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+### For `statement-eviction-rate`
 
 #### Confirm the numbers
 
-`pgdoctor explain query-stats-capacity` prints the query, which derives every figure
-in the finding.
+`pgdoctor explain query-stats-capacity` prints the query, which derives every figure in the finding.
 
 #### Reduce the number of distinct statements
 
@@ -143,6 +144,9 @@ behaviour instead of averaging it with the old. It also deletes every entry, whi
   clears this window and leaves `pg_stat_database` untouched; `pg_stat_reset()` does the opposite.
 - **`dealloc` needs PostgreSQL 14+** (`pg_stat_statements` 1.9), which is also the floor for
   `pg_stat_statements_info` itself.
+- **The rate is an average over the whole window.** A burst of eviction that stopped a month ago still
+  reports as steady turnover, because `dealloc` is cumulative and a single snapshot cannot date it.
+  Comparing the count between two runs over a known interval establishes recency.
 - **Zero evictions does not mean zero blind spots.** `pg_stat_statements.track = 'none'`,
   `track_utility = off`, and statements killed by `statement_timeout` all keep work out of the view
   regardless of capacity. This check measures capacity only.

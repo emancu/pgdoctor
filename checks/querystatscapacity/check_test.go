@@ -388,7 +388,8 @@ func Test_EvictionRate_Details(t *testing.T) {
 
 	// 19688 events x 500 per event = 9,844,000 entries discarded.
 	assert.Contains(t, result.Details, "9.8M entries discarded")
-	assert.Contains(t, result.Details, "a table holding 10.0K")
+	assert.Contains(t, result.Details, "pg_stat_statements.max = 10.0K")
+	assert.Contains(t, result.Details, "Infrequent statements are dropped first")
 	assert.Contains(t, result.Details, "partition-usage")
 	assert.LessOrEqual(t, strings.Count(result.Details, "\n"), 1, "details must stay short")
 }
