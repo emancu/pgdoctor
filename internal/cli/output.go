@@ -36,13 +36,18 @@ func printCheckSummary(w io.Writer, report *check.Report, opts *runOptions) {
 		return
 	}
 
-	okCount := 0
+	// Informational findings leave the tally on both sides: they have nothing to
+	// pass or fail, so counting them made a healthy check read "(1/3)".
+	okCount, total := 0, 0
 	for _, result := range report.Results {
+		if result.Severity == check.SeverityInfo {
+			continue
+		}
+		total++
 		if result.Severity == check.SeverityPass {
 			okCount++
 		}
 	}
-	total := len(report.Results)
 
 	fmt.Fprintf(w, "%s %s %s %s%s\n",
 		colorFunc(fmt.Sprintf("[%s]", label)),
@@ -216,6 +221,15 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 	}
 }
 
+func hasInfoFinding(report *check.Report) bool {
+	for _, result := range report.Results {
+		if result.Severity == check.SeverityInfo {
+			return true
+		}
+	}
+	return false
+}
+
 func printSummary(w io.Writer, reports []*check.Report) {
 	okCount, warnCount, failCount, skipCount, infoCount := 0, 0, 0, 0, 0
 	var totalDuration time.Duration
@@ -223,7 +237,13 @@ func printSummary(w io.Writer, reports []*check.Report) {
 		totalDuration += report.Duration
 		switch report.Severity {
 		case check.SeverityPass:
-			okCount++
+			// A report starts at PASS and an INFO finding never raises it, so the
+			// info tally has to come from the findings.
+			if hasInfoFinding(report) {
+				infoCount++
+			} else {
+				okCount++
+			}
 		case check.SeverityWarn:
 			warnCount++
 		case check.SeverityFail:
