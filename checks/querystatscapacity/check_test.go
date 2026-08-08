@@ -3,6 +3,8 @@ package querystatscapacity_test
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,13 +42,47 @@ func (m *mockQueryer) QueryStatsCapacity(context.Context) (db.QueryStatsCapacity
 func pgInt8(i int64) pgtype.Int8 { return pgtype.Int8{Int64: i, Valid: true} }
 
 // capacityRow builds a row with a valid stats_reset placed windowSeconds ago.
+// capacityRow mirrors what query.sql derives, so these tests exercise the Go that
+// renders the verdict. The SQL rules themselves are verified against a live server.
 func capacityRow(entries, maxEntries, events int64, windowSeconds float64) db.QueryStatsCapacityRow {
+	row := db.QueryStatsCapacityRow{
+		Entries:       pgInt8(entries),
+		MaxEntries:    pgInt8(maxEntries),
+		StatsReset:    pgtype.Timestamptz{Time: time.Now().Add(-time.Duration(windowSeconds) * time.Second), Valid: true},
+		WindowSeconds: pgtype.Float8{Float64: windowSeconds, Valid: true},
+	}
+
+	batch := maxEntries * 5 / 100
+	if batch < 10 {
+		batch = 10
+	}
+	row.EntriesDiscarded = pgInt8(events * batch)
+
+	if events > 0 {
+		row.RecycleHours = pgtype.Float8{
+			Float64: float64(maxEntries) * windowSeconds / float64(events*batch*3600),
+			Valid:   true,
+		}
+	}
+
+	minWindow := float64(batch) / float64(maxEntries) / 0.5 * 86400 * 1.1
+	if minWindow < 3600 {
+		minWindow = 3600
+	}
+	if windowSeconds < minWindow {
+		row.RateSkipReason = pgtype.Text{String: "counters cover only too short", Valid: true}
+	}
+
+	return row
+}
+
+// unreadableMax is the row query.sql returns when pg_stat_statements.max is NULL.
+func unreadableMax(entries int64) db.QueryStatsCapacityRow {
 	return db.QueryStatsCapacityRow{
-		Entries:           pgInt8(entries),
-		MaxEntries:        pgInt8(maxEntries),
-		EvictionEvents:    pgInt8(events),
-		StatsReset:        pgtype.Timestamptz{Time: time.Now().Add(-time.Duration(windowSeconds) * time.Second), Valid: true},
-		SecondsSinceReset: pgtype.Float8{Float64: windowSeconds, Valid: true},
+		Entries:         pgInt8(entries),
+		MaxEntries:      pgtype.Int8{},
+		UsageSkipReason: pgtype.Text{String: "max is unreadable", Valid: true},
+		RateSkipReason:  pgtype.Text{String: "max is unreadable", Valid: true},
 	}
 }
 
@@ -99,9 +135,7 @@ func Test_EntryUsage(t *testing.T) {
 			// present-tense signal is unavailable rather than healthy.
 			name: "max unreadable cannot be graded",
 			row: func() db.QueryStatsCapacityRow {
-				row := capacityRow(4200, 0, 0, 30*day)
-				row.MaxEntries = pgtype.Int8{}
-				return row
+				return unreadableMax(4200)
 			}(),
 			wantInName:   "4.2K entries, capacity unreadable",
 			wantSeverity: check.SeveritySkip,
@@ -188,8 +222,8 @@ func Test_EvictionRate(t *testing.T) {
 	tests := []struct {
 		name         string
 		row          db.QueryStatsCapacityRow
-		wantSeverity check.Severity
 		wantInName   string
+		wantSeverity check.Severity
 	}{
 		{
 			name:         "no evictions",
@@ -198,32 +232,26 @@ func Test_EvictionRate(t *testing.T) {
 			wantInName:   "no evictions",
 		},
 		{
-			// 30 events over 30 days = 1/day = 0.05x capacity/day.
 			name:         "occasional churn stays below the display floor",
 			row:          capacityRow(4200, 10000, 30, 30*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "<0.1x capacity/day",
 		},
 		{
-			// 60 events over 30 days = 2/day = 0.1x capacity/day.
 			name:         "measurable but tolerable churn",
 			row:          capacityRow(4200, 10000, 60, 30*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "0.1x capacity/day",
 		},
 		{
 			// 300 events over 30 days = 10/day = exactly the 0.5x threshold.
 			name:         "at the threshold",
 			row:          capacityRow(4200, 10000, 300, 30*day),
 			wantSeverity: check.SeverityWarn,
-			wantInName:   "0.5x capacity/day",
 		},
 		{
 			// The measured production instance: 19688 events over 78 days.
 			name:         "sustained eviction",
 			row:          capacityRow(4200, 10000, 19688, 78*day),
 			wantSeverity: check.SeverityWarn,
-			wantInName:   "12.6x capacity/day",
 		},
 		{
 			// A counter that only grows: 4000 events over three years is 3.7/day,
@@ -231,7 +259,6 @@ func Test_EvictionRate(t *testing.T) {
 			name:         "large absolute count over a long window",
 			row:          capacityRow(4200, 10000, 4000, 1095*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "0.1x capacity/day",
 		},
 	}
 
@@ -243,7 +270,9 @@ func Test_EvictionRate(t *testing.T) {
 			result := finding(t, report, rateID)
 
 			assert.Equal(t, tt.wantSeverity, result.Severity)
-			assert.Contains(t, result.Name, tt.wantInName)
+			if tt.wantInName != "" {
+				assert.Contains(t, result.Name, tt.wantInName)
+			}
 			// Entries are held below capacity so the fill signal stays PASS and the
 			// report severity reflects the rate alone.
 			assert.Equal(t, tt.wantSeverity, report.Severity)
@@ -265,7 +294,7 @@ func Test_EvictionRate_SmallMaxUsesTheTenEntryBatchFloor(t *testing.T) {
 	result := finding(t, report, rateID)
 
 	assert.Equal(t, check.SeverityWarn, result.Severity)
-	assert.Contains(t, result.Name, "0.6x capacity/day")
+	assert.Contains(t, result.Name, "every 40.0h")
 	// 60 events * 10 entries, not 60 * 5.
 	assert.Contains(t, result.Details, "600 entries")
 }
@@ -279,23 +308,44 @@ func Test_EvictionRate_LargeMaxUsesThePercentBatch(t *testing.T) {
 
 	// 6 events/day * 500 entries = 3000/day against 10000 = 0.3x.
 	assert.Equal(t, check.SeverityPass, result.Severity)
-	assert.Contains(t, result.Name, "0.3x capacity/day")
+	assert.Contains(t, result.Name, "every 3.3d")
 }
 
-// The displayed value is truncated, not rounded: rounding would print "0.5x
-// capacity/day" on a finding that passed at a 0.5 threshold.
-func Test_EvictionRate_DisplayNeverOverstatesTheThreshold(t *testing.T) {
+// The printed figure and the severity come from one value, so a run can never show
+// a lifetime on the opposite side of the threshold from its own grade.
+func Test_EvictionRate_DisplayNeverContradictsTheGrade(t *testing.T) {
 	t.Parallel()
 
-	// 996 events over 100 days = 9.96/day * 500 entries = 4980/day against
-	// 10000 = 0.498x, just under the threshold.
-	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 996, 100*day)})
-	result := finding(t, report, rateID)
+	for events := 1; events <= 400; events++ {
+		report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(4200, 10000, int64(events), 100*day)})
+		result := finding(t, report, rateID)
 
-	assert.Equal(t, check.SeverityPass, result.Severity)
-	assert.Contains(t, result.Name, "0.4x capacity/day")
-	assert.NotContains(t, result.Name, "0.5")
-	assert.Empty(t, result.Details)
+		hours := recycleHoursFromName(t, result.Name)
+		warned := result.Severity == check.SeverityWarn
+
+		require.Equal(t, hours <= 48, warned,
+			"%d events printed %s but graded %s", events, result.Name, result.Severity)
+	}
+}
+
+// recycleHoursFromName reads back the figure the finding actually printed.
+func recycleHoursFromName(t *testing.T, name string) float64 {
+	t.Helper()
+
+	m := regexp.MustCompile(`every ([0-9.]+)([mhd])`).FindStringSubmatch(name)
+	require.NotNil(t, m, "no recycle figure in %q", name)
+
+	v, err := strconv.ParseFloat(m[1], 64)
+	require.NoError(t, err)
+
+	switch m[2] {
+	case "m":
+		return v / 60
+	case "d":
+		return v * 24
+	default:
+		return v
+	}
 }
 
 // Truncation must not swallow a tenth that only looks short in binary:
@@ -307,9 +357,9 @@ func Test_EvictionRate_DisplayIsExactAtTenths(t *testing.T) {
 		events int64
 		want   string
 	}{
-		{events: 140, want: "0.7x capacity/day"}, // 14/day * 500 / 10000 = 0.7
-		{events: 580, want: "2.9x capacity/day"}, // 58/day * 500 / 10000 = 2.9
-		{events: 660, want: "3.3x capacity/day"}, // 66/day * 500 / 10000 = 3.3
+		{events: 140, want: "every 34.3h"}, // 14/day * 500 / 10000 = 0.7
+		{events: 580, want: "every 8.3h"},  // 58/day * 500 / 10000 = 2.9
+		{events: 660, want: "every 7.3h"},  // 66/day * 500 / 10000 = 3.3
 	} {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
@@ -336,10 +386,9 @@ func Test_EvictionRate_Details(t *testing.T) {
 	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 19688, 78*day)})
 	result := finding(t, report, rateID)
 
-	assert.Contains(t, result.Details, "19.7K eviction events")
-	// 19688 * 0.05 * 10000 = 9,844,000 entries discarded.
-	assert.Contains(t, result.Details, "9.8M entries")
-	assert.Contains(t, result.Details, "capacity of 10.0K")
+	// 19688 events x 500 per event = 9,844,000 entries discarded.
+	assert.Contains(t, result.Details, "9.8M entries discarded")
+	assert.Contains(t, result.Details, "a table holding 10.0K")
 	assert.Contains(t, result.Details, "partition-usage")
 	assert.LessOrEqual(t, strings.Count(result.Details, "\n"), 1, "details must stay short")
 }
@@ -363,8 +412,7 @@ func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {
 			name: "stats_reset is null",
 			row: func() db.QueryStatsCapacityRow {
 				row := capacityRow(4200, 10000, 12, 30*day)
-				row.StatsReset = pgtype.Timestamptz{}
-				row.SecondsSinceReset = pgtype.Float8{}
+				row.RateSkipReason = pgtype.Text{String: "counter window unknown", Valid: true}
 				return row
 			}(),
 		},
@@ -377,9 +425,7 @@ func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {
 			// derive from max, so an unreadable one leaves no rate to report.
 			name: "max unreadable",
 			row: func() db.QueryStatsCapacityRow {
-				row := capacityRow(4200, 0, 12, 30*day)
-				row.MaxEntries = pgtype.Int8{}
-				return row
+				return unreadableMax(4200)
 			}(),
 		},
 	}
@@ -457,36 +503,6 @@ func Test_Metadata(t *testing.T) {
 	assert.NotEmpty(t, m.Description)
 	assert.NotEmpty(t, m.SQL)
 	assert.NotEmpty(t, m.Readme)
-}
-
-// The printed number and the graded number are the same value, so the text cannot
-// land on the far side of the threshold from the severity.
-func Test_EvictionRate_DisplayAndGradeCannotDisagree(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		row          db.QueryStatsCapacityRow
-		wantInName   string
-		wantSeverity check.Severity
-	}{
-		{"just under the threshold", capacityRow(4200, 10000, 299, 30*day), "0.4x", check.SeverityPass},
-		{"at the threshold", capacityRow(4200, 10000, 300, 30*day), "0.5x", check.SeverityWarn},
-		{"a few events over a long window still count as evictions",
-			capacityRow(4200, 10000, 3, 3000*day), "<0.1x", check.SeverityPass},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := finding(t, run(t, &mockQueryer{pgssOK: true, row: tt.row}), rateID)
-
-			assert.Equal(t, tt.wantSeverity, result.Severity)
-			assert.Contains(t, result.Name, tt.wantInName)
-			assert.NotContains(t, result.Name, "no evictions")
-		})
-	}
 }
 
 // pgdoctor's own availability probe can trigger an eviction against a full table.

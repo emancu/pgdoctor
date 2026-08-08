@@ -63,19 +63,6 @@ The grade is capped at WARN. Eviction costs nothing at runtime and degrades no q
 **Threshold on the rate, never on `dealloc` itself.** The counter only grows. A three-year-old instance
 carrying `dealloc = 4000` from a bad deploy that was reverted in 2023 is perfectly healthy.
 
-### The Measurement Window
-
-The rate is divided by the time since `pg_stat_statements_info.stats_reset`. Unlike
-`pg_stat_database.stats_reset` this is normally set, since the extension stamps it at shared-memory
-initialisation, but the column is nullable and `pg_stat_statements_reset()` restarts it.
-
-- **SKIP** when `stats_reset` is NULL: a rate over an unknown period is not a rate.
-- **SKIP** when the window is under an hour: one eviction event extrapolated across a day says nothing.
-- **SKIP** when `pg_stat_statements.max` is unreadable: both the batch size and the capacity the turnover
-  is a share of derive from it.
-
-SKIP rather than PASS, because a PASS here reads as "nothing is being evicted", which a window that short
-cannot establish. The entry usage finding is unaffected, since it needs neither the window nor `max`.
 
 ## Why This Matters
 
@@ -107,23 +94,8 @@ times its own size every day.
 
 #### Confirm the numbers
 
-```sql
-WITH cap AS (
-  SELECT (SELECT setting FROM pg_settings
-          WHERE name = 'pg_stat_statements.max')::bigint AS max_entries
-)
-SELECT
-  (SELECT count(*) FROM pg_stat_statements(false))                    AS entries,
-  cap.max_entries,
-  i.dealloc                                                           AS eviction_events,
-  greatest(10, cap.max_entries * 5 / 100)                             AS entries_per_event,
-  i.stats_reset,
-  round((i.dealloc * greatest(10, cap.max_entries * 5 / 100))::numeric
-        / cap.max_entries
-        / (extract(epoch FROM now() - i.stats_reset) / 86400)::numeric, 2) AS turnover_per_day
-FROM pg_stat_statements_info AS i
-CROSS JOIN cap;
-```
+`pgdoctor explain query-stats-capacity` prints the query, which derives every figure
+in the finding.
 
 #### Reduce the number of distinct statements
 
