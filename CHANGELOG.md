@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli**: the summary's `N info` tally counts again. It switched on report severity, which a `SeverityInfo` finding never raises above PASS, so the branch was unreachable and information-only checks were tallied as passing ([#72](https://github.com/emancu/pgdoctor/pull/72)).
+- **cli**: informational findings leave the per-check `(passed/total)` counter on both sides — they have nothing to pass or fail, so a healthy `cache-efficiency` read `(1/3)` ([#72](https://github.com/emancu/pgdoctor/pull/72)).
+
 ## [0.4.0] - 2026-08-08
 
 Breaking for library consumers: `SeverityOK` is renamed `SeverityPass`, and several finding IDs are retired (`connection-efficiency/busy-ratio`, `index-usage/index-cache-ratio`, `table-bloat/stale-vacuum`, `table-vacuum-health/analyze-needed`, `toast-storage/large-toast`, `toast-storage/wide-columns`, `temp-usage/temp-file-rate`, `temp-usage/temp-volume-rate`, `index-bloat/high-bloat`, `index-bloat/large-bloat`).
