@@ -189,6 +189,19 @@ func Test_UnusedIndexes_SortedBySizeDesc(t *testing.T) {
 	require.Equal(t, "idx_small", unused.Table.Rows[1].Cells[1])
 }
 
+func Test_UnusedIndexes_SameNameInTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	a := row("tenant_a.users", "idx_users_status", 0, 50000, mb(600), daysAgo(90))
+	b := row("tenant_b.users", "idx_users_status", 0, 50000, mb(600), daysAgo(90))
+
+	report := runCheck(t, []db.IndexUsageStatsRow{a, b})
+	unused := finding(t, report, "unused-indexes")
+	require.Len(t, unused.Table.Rows, 2)
+	require.Equal(t, []string{"tenant_a.users", "idx_users_status", "600.0MiB"}, unused.Table.Rows[0].Cells)
+	require.Equal(t, []string{"tenant_b.users", "idx_users_status", "600.0MiB"}, unused.Table.Rows[1].Cells)
+}
+
 func Test_UnusedIndexes_SkipPrimaryAndUnique(t *testing.T) {
 	t.Parallel()
 

@@ -57,7 +57,7 @@ Unused indexes waste disk space and slow down writes.
 
 ```sql
 -- Verify usage on all instances
-SELECT idx_scan FROM pg_stat_user_indexes WHERE indexrelname = 'index_name';
+SELECT schemaname, relname, idx_scan FROM pg_stat_user_indexes WHERE indexrelname = 'index_name';
 
 -- Drop unused index
 DROP INDEX CONCURRENTLY schema.index_name;
