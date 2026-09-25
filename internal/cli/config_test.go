@@ -61,8 +61,29 @@ func TestLoadConfig(t *testing.T) {
 			wantSkipped: []string{"config: skipping session-settings: not a mapping"},
 		},
 		{
-			name:        "non-scalar value",
-			content:     "session-settings:\n  roles: [app_ro, app_rw]\n  timeout: 1000\n",
+			name:    "list of scalars",
+			content: "session-settings:\n  roles:\n    - app_ro\n    - app_rw\n",
+			want:    check.Config{"session-settings": {"roles": "app_ro,app_rw"}},
+		},
+		{
+			name:    "flow list of scalars",
+			content: "session-settings:\n  roles: [app_ro, 42]\n",
+			want:    check.Config{"session-settings": {"roles": "app_ro,42"}},
+		},
+		{
+			name:    "empty list",
+			content: "session-settings:\n  roles: []\n",
+			want:    check.Config{"session-settings": {"roles": ""}},
+		},
+		{
+			name:        "list with a nested item",
+			content:     "session-settings:\n  roles: [app_ro, [app_rw]]\n  timeout: 1000\n",
+			want:        check.Config{"session-settings": {"timeout": "1000"}},
+			wantSkipped: []string{"config: skipping session-settings.roles: not a scalar value"},
+		},
+		{
+			name:        "mapping value",
+			content:     "session-settings:\n  roles: {app_ro: true}\n  timeout: 1000\n",
 			want:        check.Config{"session-settings": {"timeout": "1000"}},
 			wantSkipped: []string{"config: skipping session-settings.roles: not a scalar value"},
 		},

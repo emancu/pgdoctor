@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -39,12 +40,30 @@ func loadConfig(path string, checks []check.Package) (check.Config, []string, er
 		}
 		cfg[checkID] = map[string]string{}
 		for key, node := range settings {
-			if node.Kind != yaml.ScalarNode {
+			value, ok := settingValue(node)
+			if !ok {
 				skipped = append(skipped, fmt.Sprintf("config: skipping %s.%s: not a scalar value", checkID, key))
 				continue
 			}
-			cfg[checkID][key] = node.Value
+			cfg[checkID][key] = value
 		}
 	}
 	return cfg, skipped, nil
+}
+
+func settingValue(node yaml.Node) (string, bool) {
+	if node.Kind == yaml.ScalarNode {
+		return node.Value, true
+	}
+	if node.Kind != yaml.SequenceNode {
+		return "", false
+	}
+	items := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		if item.Kind != yaml.ScalarNode {
+			return "", false
+		}
+		items = append(items, item.Value)
+	}
+	return strings.Join(items, ","), true
 }

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`session-settings`**: new `timeout.<role>` config key sets the timeout threshold for one role ([#98](https://github.com/emancu/pgdoctor/pull/98)).
 - **CLI**: `pgdoctor run --config <file>` reads per-check settings from a YAML file ([#99](https://github.com/emancu/pgdoctor/pull/99)).
 - **`table-vacuum-health`**: new `autovacuum_disabled_exclude` config key stops `autovacuum-disabled` from reporting tables whose schema-qualified names start with the given prefixes ([#100](https://github.com/emancu/pgdoctor/pull/100)).
+- **CLI**: a `--config` setting value can be a YAML list of scalars, which pgdoctor joins with commas ([#102](https://github.com/emancu/pgdoctor/pull/102)).
 
 ### Changed
 

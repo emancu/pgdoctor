@@ -74,7 +74,9 @@ session-settings:
   timeout: 5000
 ```
 
-pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar. It prints each skipped entry to stderr at `--detail debug`.
+A setting value can also be a list of scalars. pgdoctor joins the items with commas, so `roles: [app_rw, dba_ro]` is the same as `roles: "app_rw,dba_ro"`.
+
+pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar or a list of scalars. It prints each skipped entry to stderr at `--detail debug`.
 
 Exit codes: `0` = all checks pass, `1` = failures found, `2` = connection error.
 
