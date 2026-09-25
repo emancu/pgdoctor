@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/uuidtypes"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +43,7 @@ func Test_UUIDTypes_NoIssues(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "No UUID columns")
@@ -60,6 +62,7 @@ func Test_UUIDTypes_SingleColumn(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "Found 1 UUID column(s)")
@@ -82,6 +85,7 @@ func Test_UUIDTypes_MultipleColumns(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, check.SeverityWarn, report.Severity)
 	require.Equal(t, 1, len(report.Results))
 	require.Contains(t, report.Results[0].Details, "Found 3 UUID column(s)")
@@ -130,6 +134,7 @@ func Test_UUIDTypes_PrescriptionContent(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, 1, len(report.Results))
 }
 
@@ -147,6 +152,7 @@ func Test_UUIDTypes_TableFormatting(t *testing.T) {
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
 	require.Equal(t, 1, len(report.Results))
 	require.NotNil(t, report.Results[0].Table)
 
@@ -158,13 +164,13 @@ func Test_UUIDTypes_TableFormatting(t *testing.T) {
 	require.Equal(t, "user_uuid", table.Rows[0].Cells[1])
 	require.Equal(t, "varchar", table.Rows[0].Cells[2])
 	require.NotEmpty(t, table.Rows[0].Cells[3])
-	require.Equal(t, check.SeverityFail, table.Rows[0].Severity)
+	require.Equal(t, check.SeverityWarn, table.Rows[0].Severity)
 
 	require.Equal(t, "public.orders", table.Rows[1].Cells[0])
 	require.Equal(t, "order_uuid", table.Rows[1].Cells[1])
 	require.Equal(t, "text", table.Rows[1].Cells[2])
 	require.NotEmpty(t, table.Rows[1].Cells[3])
-	require.Equal(t, check.SeverityFail, table.Rows[1].Severity)
+	require.Equal(t, check.SeverityWarn, table.Rows[1].Severity)
 }
 
 func Test_UUIDTypes_DifferentColumnTypes(t *testing.T) {
@@ -194,6 +200,7 @@ func Test_UUIDTypes_DifferentColumnTypes(t *testing.T) {
 			report, err := checker.Check(context.Background())
 
 			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
 			require.Equal(t, check.SeverityWarn, report.Severity)
 			require.Equal(t, 1, len(report.Results[0].Table.Rows))
 			require.Equal(t, tt.columnType, report.Results[0].Table.Rows[0].Cells[2])
