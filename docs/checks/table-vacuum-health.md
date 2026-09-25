@@ -176,7 +176,9 @@ A partition leaf matches only when its name starts with the prefix. `public.outb
 
 ```yaml
 table-vacuum-health:
-  autovacuum_disabled_exclude: "public.outbox_events,public.audit_logs"
+  autovacuum_disabled_exclude:
+    - public.outbox_events
+    - public.audit_logs
 ```
 
 As a library, pass the same key in `check.Config`:
