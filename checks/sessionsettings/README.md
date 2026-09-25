@@ -109,7 +109,9 @@ A role without a `timeout.<role>` key uses `timeout`. A value that is not an int
 
 ```yaml
 session-settings:
-  roles: "app_rw,dba_ro"
+  roles:
+    - app_rw
+    - dba_ro
   timeout: "2000"
   timeout.dba_ro: "300000"
 ```
