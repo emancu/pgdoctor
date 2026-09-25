@@ -621,3 +621,96 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 	// Only api_user is checked (which has good settings), worker_user is ignored
 	require.Equal(t, check.SeverityPass, results[0].Severity, "Should only check configured roles")
 }
+
+func Test_SessionSettings_RoleTimeout(t *testing.T) {
+	t.Parallel()
+
+	settings := map[string]map[string]string{
+		"app_rw": {
+			"statement_timeout":                   "3000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "3000",
+			"log_min_duration_statement":          "2000",
+		},
+		"dba_ro": {
+			"statement_timeout":                   "300000",
+			"idle_in_transaction_session_timeout": "60000",
+			"transaction_timeout":                 "300000",
+			"log_min_duration_statement":          "2000",
+		},
+	}
+
+	testCases := []struct {
+		Name     string
+		Cfg      check.Config
+		Severity check.Severity
+		Expected map[string]string
+	}{
+		{
+			Name:     "no config grades every role on the default",
+			Cfg:      nil,
+			Severity: check.SeverityWarn,
+			Expected: map[string]string{
+				"dba_ro/statement_timeout":   "≤ 5000ms",
+				"dba_ro/transaction_timeout": "≤ 5000ms",
+			},
+		},
+		{
+			Name: "override for one role, default for the other",
+			Cfg: check.Config{"session-settings": {
+				"timeout.dba_ro": "300000",
+			}},
+			Severity: check.SeverityPass,
+		},
+		{
+			Name: "override below the role value warns with the role threshold",
+			Cfg: check.Config{"session-settings": {
+				"timeout":        "2000",
+				"timeout.dba_ro": "60000",
+			}},
+			Severity: check.SeverityWarn,
+			Expected: map[string]string{
+				"app_rw/statement_timeout":   "≤ 2000ms",
+				"app_rw/transaction_timeout": "≤ 2000ms",
+				"dba_ro/statement_timeout":   "≤ 60000ms",
+				"dba_ro/transaction_timeout": "≤ 60000ms",
+			},
+		},
+		{
+			Name: "invalid override falls back to timeout",
+			Cfg: check.Config{"session-settings": {
+				"timeout.dba_ro": "5m",
+			}},
+			Severity: check.SeverityWarn,
+			Expected: map[string]string{
+				"dba_ro/statement_timeout":   "≤ 5000ms",
+				"dba_ro/transaction_timeout": "≤ 5000ms",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
+			checker := sessionsettings.New(queryer, tc.Cfg)
+			report, err := checker.Check(context.Background())
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			result := report.Results[0]
+			require.Equal(t, tc.Severity, result.Severity)
+			if tc.Severity == check.SeverityPass {
+				return
+			}
+
+			got := map[string]string{}
+			for _, row := range result.Table.Rows {
+				require.Equal(t, "Too high", row.Cells[4])
+				got[row.Cells[0]+"/"+row.Cells[1]] = row.Cells[3]
+			}
+			require.Equal(t, tc.Expected, got)
+		})
+	}
+}
