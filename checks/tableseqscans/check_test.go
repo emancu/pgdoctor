@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/tableseqscans"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
@@ -198,6 +199,36 @@ func Test_TableSeqScans_HighSeqScans(t *testing.T) {
 	require.Contains(t, highSeqResult.Details, "seq: 10000")
 	require.Contains(t, highSeqResult.Details, "idx: 100")
 	require.Contains(t, highSeqResult.Details, "ratio: 100.0")
+}
+
+func Test_TableSeqScans_SameNameInTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	tenantTable := func(name string) db.HighSeqScanTablesRow {
+		return db.HighSeqScanTablesRow{
+			TableName:      pgtype.Text{String: name, Valid: true},
+			SeqScan:        pgtype.Int8{Int64: 10000, Valid: true},
+			IdxScan:        pgtype.Int8{Int64: 100, Valid: true},
+			SeqToIdxRatio:  makeNumeric(100.0),
+			EstimatedRows:  pgtype.Int8{Int64: 75000, Valid: true},
+			TableSizeBytes: pgtype.Int8{Int64: 78643200, Valid: true},
+			IndexCount:     pgtype.Int8{Int64: 3, Valid: true},
+		}
+	}
+
+	queryer := newMockQueryer([]db.HighSeqScanTablesRow{tenantTable("tenant_a.orders"), tenantTable("tenant_b.orders")})
+
+	report, err := tableseqscans.New(queryer).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+
+	require.Len(t, report.Results, 1)
+	result := report.Results[0]
+	require.Equal(t, highSeqScansID, result.ID)
+	require.Equal(t, check.SeverityFail, result.Severity)
+	require.Contains(t, result.Details, "2 tables")
+	require.Contains(t, result.Details, "tenant_a.orders (seq: 10000")
+	require.Contains(t, result.Details, "tenant_b.orders (seq: 10000")
 }
 
 func Test_TableSeqScans_ModerateSeqScans(t *testing.T) {

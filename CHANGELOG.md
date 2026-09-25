@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`uuid-defaults`**: a partitioned table reports once instead of once per partition, and a column in several indexes reports once ([#91](https://github.com/emancu/pgdoctor/pull/91)).
 - **`index-usage`**: reads indexes in every non-system schema, not only `public` ([#93](https://github.com/emancu/pgdoctor/pull/93)).
 - **`cache-efficiency`**: reads tables and indexes in every non-system schema, not only `public` ([#94](https://github.com/emancu/pgdoctor/pull/94)).
+- **`table-seq-scans`**: reads tables in every non-system schema, not only `public` ([#95](https://github.com/emancu/pgdoctor/pull/95)).
 
 ## [0.5.0] - 2026-08-14
 
