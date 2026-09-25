@@ -803,8 +803,10 @@ SELECT
   END AS cache_hit_ratio
 FROM pg_statio_user_indexes AS psio
 INNER JOIN ranked ON psio.indexrelid = ranked.indexrelid
+INNER JOIN pg_class AS c ON psio.indexrelid = c.oid
 WHERE
-  psio.schemaname = 'public'
+  psio.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND c.relpersistence <> 't'
   -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
   AND (pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024 OR ranked.scan_rank <= 20)
 ORDER BY pg_relation_size(psio.indexrelid) DESC
@@ -2391,8 +2393,10 @@ SELECT
   END AS cache_hit_ratio
 FROM pg_statio_user_tables AS psio
 INNER JOIN ranked ON psio.relid = ranked.relid
+INNER JOIN pg_class AS c ON psio.relid = c.oid
 WHERE
-  psio.schemaname = 'public'
+  psio.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND c.relpersistence <> 't'
   -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
   AND (pg_relation_size(psio.relid) >= 500 * 1024 * 1024 OR ranked.read_rank <= 20)
 ORDER BY pg_relation_size(psio.relid) DESC
