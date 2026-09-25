@@ -2703,7 +2703,6 @@ func (q *Queries) TableFreezeAge(ctx context.Context) ([]TableFreezeAgeRow, erro
 const tableVacuumHealth = `-- name: TableVacuumHealth :many
 SELECT
   (n.nspname || '.' || c.relname)::text AS table_name
-  , c.relname::text AS relname
   , s.last_autovacuum
   , COALESCE(s.n_live_tup, c.reltuples::bigint) AS estimated_rows
   -- Lock-free size estimate from pg_class instead of PG_TOTAL_RELATION_SIZE(),
@@ -2744,7 +2743,6 @@ ORDER BY COALESCE(s.n_live_tup, c.reltuples::bigint) DESC
 
 type TableVacuumHealthRow struct {
 	TableName             pgtype.Text
-	Relname               pgtype.Text
 	LastAutovacuum        pgtype.Timestamptz
 	EstimatedRows         pgtype.Int8
 	TableSizeBytes        pgtype.Int8
@@ -2773,7 +2771,6 @@ func (q *Queries) TableVacuumHealth(ctx context.Context) ([]TableVacuumHealthRow
 		var i TableVacuumHealthRow
 		if err := rows.Scan(
 			&i.TableName,
-			&i.Relname,
 			&i.LastAutovacuum,
 			&i.EstimatedRows,
 			&i.TableSizeBytes,

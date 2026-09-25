@@ -170,13 +170,13 @@ When the analyze arm is the one tripping, run `ANALYZE schema.table_name` (or lo
 |-----|-------------|---------|
 | `autovacuum_disabled_exclude` | Comma-separated table-name prefixes that `autovacuum-disabled` does not report | None |
 
-A prefix matches the table name without its schema, so one entry covers the table in every schema. A prefix matches every name that starts with it: `outbox` also matches `outbox_archive`. The match is case-sensitive, so write the name as `pg_class.relname` stores it. Empty entries are ignored. The key changes only the `autovacuum-disabled` finding: the other findings still report an excluded table.
+A prefix matches the schema-qualified table name (`schema.table`). A prefix matches every name that starts with it: `public.outbox` also matches `public.outbox_archive`. The match is case-sensitive. Empty entries are ignored. The key changes only the `autovacuum-disabled` finding: the other findings still report an excluded table.
 
-A partition leaf matches only when its name starts with the prefix. `outbox_events` matches `outbox_events_p20260101`, but not a leaf with a different name.
+A partition leaf matches only when its name starts with the prefix. `public.outbox_events` matches `public.outbox_events_p20260101`, but not a leaf with a different name or in another schema.
 
 ```yaml
 table-vacuum-health:
-  autovacuum_disabled_exclude: "outbox_events,audit_logs"
+  autovacuum_disabled_exclude: "public.outbox_events,public.audit_logs"
 ```
 
 As a library, pass the same key in `check.Config`:
@@ -184,7 +184,7 @@ As a library, pass the same key in `check.Config`:
 ```go
 cfg := check.Config{
     "table-vacuum-health": {
-        "autovacuum_disabled_exclude": "outbox_events,audit_logs",
+        "autovacuum_disabled_exclude": "public.outbox_events,public.audit_logs",
     },
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{

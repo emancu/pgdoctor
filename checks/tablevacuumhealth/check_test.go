@@ -41,11 +41,9 @@ type rowBuilder struct {
 }
 
 func makeRow(tableName string) *rowBuilder {
-	_, relname, _ := strings.Cut(tableName, ".")
 	return &rowBuilder{
 		row: db.TableVacuumHealthRow{
 			TableName:        pgtype.Text{String: tableName, Valid: true},
-			Relname:          pgtype.Text{String: relname, Valid: true},
 			EstimatedRows:    pgtype.Int8{Int64: 0, Valid: true},
 			TableSizeBytes:   pgtype.Int8{Int64: 0, Valid: true},
 			NDeadTup:         pgtype.Int8{Int64: 0, Valid: true},
@@ -58,11 +56,6 @@ func makeRow(tableName string) *rowBuilder {
 			NInsSinceVacuum:  pgtype.Int8{Int64: 0, Valid: true},
 		},
 	}
-}
-
-func (b *rowBuilder) withRelname(relname string) *rowBuilder {
-	b.row.Relname = pgtype.Text{String: relname, Valid: true}
-	return b
 }
 
 func (b *rowBuilder) withRows(rows int64) *rowBuilder {
@@ -235,8 +228,6 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 		makeRow("public.audit_logs").withReloptions("autovacuum_enabled=false").build(),
 		makeRow("public.staging").withReloptions("autovacuum_enabled=false").build(),
 		makeRow("audit_logs.orders").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("tenant.eu.outbox_events").withRelname("outbox_events").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("tenant.outbox_events.orders").withRelname("orders").withReloptions("autovacuum_enabled=false").build(),
 	}
 
 	tests := []struct {
@@ -247,22 +238,22 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 		{
 			name:     "no config reports every table",
 			cfg:      nil,
-			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders", "tenant.eu.outbox_events", "tenant.outbox_events.orders"},
+			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders"},
 		},
 		{
-			name:     "prefix excludes plain tables and partition leaves in every schema",
-			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events,audit_logs"}},
-			expected: []string{"public.staging", "audit_logs.orders", "tenant.outbox_events.orders"},
+			name:     "prefix excludes a table and its partition leaves by schema-qualified name",
+			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events,tenant_1.outbox_events,public.audit_logs"}},
+			expected: []string{"public.staging", "audit_logs.orders"},
 		},
 		{
 			name:     "empty entries and spaces are ignored",
-			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ",outbox_events, ,audit_logs ,"}},
-			expected: []string{"public.staging", "audit_logs.orders", "tenant.outbox_events.orders"},
+			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ",public.outbox_events, ,public.audit_logs ,"}},
+			expected: []string{"tenant_1.outbox_events_p20260101", "public.staging", "audit_logs.orders"},
 		},
 		{
 			name:     "empty value reports every table",
 			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ""}},
-			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders", "tenant.eu.outbox_events", "tenant.outbox_events.orders"},
+			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders"},
 		},
 	}
 
@@ -289,7 +280,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 	t.Parallel()
 
-	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events"}}
+	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").withReloptions("autovacuum_enabled=false").build(),
 	}
@@ -306,7 +297,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testing.T) {
 	t.Parallel()
 
-	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events"}}
+	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").
 			withReloptions("autovacuum_enabled=false").

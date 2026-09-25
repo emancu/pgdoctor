@@ -114,7 +114,7 @@ func maxRowSeverity(rows []check.TableRow) check.Severity {
 func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, excludes []string, report *check.Report) {
 	var disabled []db.TableVacuumHealthRow
 	for _, row := range rows {
-		if hasAutovacuumDisabled(row.Reloptions.String) && !isExcluded(row.Relname.String, excludes) {
+		if hasAutovacuumDisabled(row.Reloptions.String) && !isExcluded(row.TableName.String, excludes) {
 			disabled = append(disabled, row)
 		}
 	}
