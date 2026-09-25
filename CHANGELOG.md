@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`invalid-indexes`**: the table shows one schema-qualified `Table` column (`schema.table`) instead of separate `Schema` and `Table` columns, like the other checks. `db.BrokenIndexesRow` loses its `SchemaName` field. ([#PR](PRLINK))
+- **`invalid-indexes`**: the table shows one schema-qualified `Table` column (`schema.table`) instead of separate `Schema` and `Table` columns, like the other checks. `db.BrokenIndexesRow` loses its `SchemaName` field. ([#89](https://github.com/emancu/pgdoctor/pull/89))
 
 ## [0.5.0] - 2026-08-14
 
