@@ -1,4 +1,4 @@
-# Statistics Freshness
+# DB Statistics
 
 Validates that PostgreSQL runtime statistics are mature enough for accurate usage-based analysis.
 
@@ -69,7 +69,7 @@ Fresh statistics can cause:
 
 ## How to Fix
 
-### For `statistics-freshness`
+### For `db-statistics`
 
 Statistics-based checks require at least 7 days of accumulated data to reflect typical workload patterns.
 

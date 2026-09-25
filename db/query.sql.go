@@ -211,6 +211,31 @@ func (q *Queries) DatabaseFreezeAge(ctx context.Context) (DatabaseFreezeAgeRow, 
 	return i, err
 }
 
+const databaseStatistics = `-- name: DatabaseStatistics :one
+SELECT
+  stats_reset
+  , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
+  , extract(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint AS uptime_seconds
+FROM pg_stat_database
+WHERE datname = current_database()
+`
+
+type DatabaseStatisticsRow struct {
+	StatsReset    pgtype.Timestamptz
+	AgeSeconds    pgtype.Int8
+	UptimeSeconds pgtype.Int8
+}
+
+// Returns statistics age for the current database.
+// Only pg_stat_reset() records a timestamp; a crash or rebuilt replica zeroes the
+// counters silently, so uptime is the lower bound when stats_reset is NULL.
+func (q *Queries) DatabaseStatistics(ctx context.Context) (DatabaseStatisticsRow, error) {
+	row := q.db.QueryRow(ctx, databaseStatistics)
+	var i DatabaseStatisticsRow
+	err := row.Scan(&i.StatsReset, &i.AgeSeconds, &i.UptimeSeconds)
+	return i, err
+}
+
 const duplicateIndexes = `-- name: DuplicateIndexes :many
 WITH index_columns AS (
   SELECT
@@ -2210,31 +2235,6 @@ func (q *Queries) SessionStatistics(ctx context.Context) (SessionStatisticsRow, 
 		&i.SessionsFatal,
 		&i.SessionsKilled,
 	)
-	return i, err
-}
-
-const statisticsFreshness = `-- name: StatisticsFreshness :one
-SELECT
-  stats_reset
-  , extract(EPOCH FROM (now() - stats_reset))::bigint AS age_seconds
-  , extract(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint AS uptime_seconds
-FROM pg_stat_database
-WHERE datname = current_database()
-`
-
-type StatisticsFreshnessRow struct {
-	StatsReset    pgtype.Timestamptz
-	AgeSeconds    pgtype.Int8
-	UptimeSeconds pgtype.Int8
-}
-
-// Returns statistics age for the current database.
-// Only pg_stat_reset() records a timestamp; a crash or rebuilt replica zeroes the
-// counters silently, so uptime is the lower bound when stats_reset is NULL.
-func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessRow, error) {
-	row := q.db.QueryRow(ctx, statisticsFreshness)
-	var i StatisticsFreshnessRow
-	err := row.Scan(&i.StatsReset, &i.AgeSeconds, &i.UptimeSeconds)
 	return i, err
 }
 

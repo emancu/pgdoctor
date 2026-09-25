@@ -167,4 +167,4 @@ When the analyze arm is the one tripping, run `ANALYZE schema.table_name` (or lo
 - `freeze-age`: Monitors transaction ID age at database and table level
 - `vacuum-settings`: Validates global vacuum configuration
 - `table-bloat`: Detects tables with excessive dead tuple bloat
-- `statistics-freshness`: Validates database-level statistics maturity
+- `db-statistics`: Validates database-level statistics maturity
