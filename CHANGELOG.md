@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`table-vacuum-health`**: `autovacuum-disabled` reports one table row per table (Table, Rows, Size, Dead Tuples, Last Vacuum), sorted by dead tuples, instead of one comma-separated list in `Details` ([#88](https://github.com/emancu/pgdoctor/pull/88)).
+
 ### Fixed
 
 - **uuid-types**: table rows report WARN instead of FAIL, so they no longer exceed the WARN finding that holds them. ([#87](https://github.com/emancu/pgdoctor/pull/87))

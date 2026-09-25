@@ -45,6 +45,10 @@ const (
 
 	neverLabel = "never"
 	noEstimate = "-"
+
+	colTable = "Table"
+	colRows  = "Rows"
+	colSize  = "Size"
 )
 
 func Metadata() check.Metadata {
@@ -95,14 +99,14 @@ func maxRowSeverity(rows []check.TableRow) check.Severity {
 }
 
 func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Report) {
-	var tableNames []string
+	var disabled []db.TableVacuumHealthRow
 	for _, row := range rows {
 		if hasAutovacuumDisabled(row.Reloptions.String) {
-			tableNames = append(tableNames, row.TableName.String)
+			disabled = append(disabled, row)
 		}
 	}
 
-	if len(tableNames) == 0 {
+	if len(disabled) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "autovacuum-disabled",
 			Name:     "Autovacuum Disabled Tables",
@@ -112,11 +116,33 @@ func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Repor
 		return
 	}
 
+	sort.SliceStable(disabled, func(i, j int) bool {
+		return disabled[i].NDeadTup.Int64 > disabled[j].NDeadTup.Int64
+	})
+
+	tableRows := make([]check.TableRow, 0, len(disabled))
+	for _, row := range disabled {
+		tableRows = append(tableRows, check.TableRow{
+			Cells: []string{
+				row.TableName.String,
+				check.FormatNumber(row.EstimatedRows.Int64),
+				check.FormatBytes(row.TableSizeBytes.Int64),
+				check.FormatNumber(row.NDeadTup.Int64),
+				formatActivity(row.LastVacuumAgeSeconds, row.VacuumCount.Int64+row.AutovacuumCount.Int64),
+			},
+			Severity: check.SeverityWarn,
+		})
+	}
+
 	report.AddFinding(check.Finding{
 		ID:       "autovacuum-disabled",
 		Name:     "Autovacuum Disabled Tables",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d table(s) with autovacuum disabled: %s", len(tableNames), strings.Join(tableNames, ", ")),
+		Details:  fmt.Sprintf("Found %d table(s) with autovacuum disabled", len(disabled)),
+		Table: &check.Table{
+			Headers: []string{colTable, colRows, colSize, "Dead Tuples", "Last Vacuum"},
+			Rows:    tableRows,
+		},
 	})
 }
 
@@ -174,7 +200,7 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("Found %d large table(s) using default autovacuum settings", len(entries)),
 		Table: &check.Table{
-			Headers: []string{"Table", "Rows", "Size", "Trigger At", "Pending", "Est. Next Vacuum"},
+			Headers: []string{colTable, colRows, colSize, "Trigger At", "Pending", "Est. Next Vacuum"},
 			Rows:    tableRows,
 		},
 	})
@@ -279,7 +305,7 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 		Severity: maxRowSeverity(tableRows),
 		Details:  fmt.Sprintf("Found %d table(s) overdue for vacuum or analyze with significant pending work", len(tableRows)),
 		Table: &check.Table{
-			Headers: []string{"Table", "Rows", "Size", "Pending Work", "Last Vacuum", "Last Analyze"},
+			Headers: []string{colTable, colRows, colSize, "Pending Work", "Last Vacuum", "Last Analyze"},
 			Rows:    tableRows,
 		},
 	})

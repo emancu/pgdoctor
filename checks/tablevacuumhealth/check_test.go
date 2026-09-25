@@ -196,7 +196,27 @@ func TestTableVacuumHealth_AutovacuumDisabled_Found(t *testing.T) {
 
 	disabled := findingByID(t, report, findingIDAutovacuumDisabled)
 	assert.Equal(t, check.SeverityWarn, disabled.Severity)
-	assert.Contains(t, disabled.Details, "public.staging_table")
+	assert.Equal(t, "Found 1 table(s) with autovacuum disabled", disabled.Details)
+	require.NotNil(t, disabled.Table)
+	require.Len(t, disabled.Table.Rows, 1)
+	assert.Equal(t, "public.staging_table", disabled.Table.Rows[0].Cells[0])
+	assert.Equal(t, check.SeverityWarn, disabled.Table.Rows[0].Severity)
+}
+
+func TestTableVacuumHealth_AutovacuumDisabled_OneRowPerTableSortedByDeadTuples(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, []db.TableVacuumHealthRow{
+		makeRow("public.quiet").withReloptions("autovacuum_enabled=false").withDeadTuples(10).build(),
+		makeRow("public.busy").withReloptions("autovacuum_enabled=false").withDeadTuples(5_000).build(),
+		makeRow("public.normal").withLastVacuumAge(recent).withLastAnalyzeAge(recent).build(),
+	})
+
+	disabled := findingByID(t, report, findingIDAutovacuumDisabled)
+	require.NotNil(t, disabled.Table)
+	require.Len(t, disabled.Table.Rows, 2)
+	assert.Equal(t, "public.busy", disabled.Table.Rows[0].Cells[0])
+	assert.Equal(t, "public.quiet", disabled.Table.Rows[1].Cells[0])
 }
 
 // Column indices for the large-table-defaults table:
