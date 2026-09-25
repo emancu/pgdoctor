@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`table-vacuum-health`**: `autovacuum-disabled` reports one table row per table (Table, Rows, Size, Dead Tuples, Last Vacuum), sorted by dead tuples, instead of one comma-separated list in `Details` ([#88](https://github.com/emancu/pgdoctor/pull/88)).
+- **`invalid-indexes`**: the table shows one schema-qualified `Table` column. Breaking for library consumers: `db.BrokenIndexesRow` drops `SchemaName` ([#89](https://github.com/emancu/pgdoctor/pull/89)).
 - **`table-activity`**: both findings show one schema-qualified `Table` column. Breaking for library consumers: `db.TableActivityRow` replaces `Schemaname` and `Relname` with `TableName` ([#90](https://github.com/emancu/pgdoctor/pull/90)).
 
 ### Fixed

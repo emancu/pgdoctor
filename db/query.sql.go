@@ -13,8 +13,7 @@ import (
 
 const brokenIndexes = `-- name: BrokenIndexes :many
 SELECT
-  n.nspname::text AS schema_name
-  , tbl.relname::text AS table_name
+  (n.nspname || '.' || tbl.relname)::text AS table_name
   , idx.relname::text AS index_name
   , (idx.relname ~ '_cc(new|old)[0-9]*$') AS is_leftover
 FROM pg_index AS i
@@ -31,7 +30,6 @@ ORDER BY is_leftover, n.nspname, tbl.relname, idx.relname
 `
 
 type BrokenIndexesRow struct {
-	SchemaName pgtype.Text
 	TableName  pgtype.Text
 	IndexName  pgtype.Text
 	IsLeftover pgtype.Bool
@@ -49,12 +47,7 @@ func (q *Queries) BrokenIndexes(ctx context.Context) ([]BrokenIndexesRow, error)
 	var items []BrokenIndexesRow
 	for rows.Next() {
 		var i BrokenIndexesRow
-		if err := rows.Scan(
-			&i.SchemaName,
-			&i.TableName,
-			&i.IndexName,
-			&i.IsLeftover,
-		); err != nil {
+		if err := rows.Scan(&i.TableName, &i.IndexName, &i.IsLeftover); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

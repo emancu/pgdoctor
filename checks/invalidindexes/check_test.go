@@ -33,17 +33,16 @@ func newMockQueryerWithError(err error) *mockInvalidIndexesQueryer {
 	return &mockInvalidIndexesQueryer{err: err}
 }
 
-func brokenIndex(schema, table, index string) db.BrokenIndexesRow {
-	return indexRow(schema, table, index, false)
+func brokenIndex(table, index string) db.BrokenIndexesRow {
+	return indexRow(table, index, false)
 }
 
-func leftoverIndex(schema, table, index string) db.BrokenIndexesRow {
-	return indexRow(schema, table, index, true)
+func leftoverIndex(table, index string) db.BrokenIndexesRow {
+	return indexRow(table, index, true)
 }
 
-func indexRow(schema, table, index string, leftover bool) db.BrokenIndexesRow {
+func indexRow(table, index string, leftover bool) db.BrokenIndexesRow {
 	return db.BrokenIndexesRow{
-		SchemaName: pgtype.Text{String: schema, Valid: true},
 		TableName:  pgtype.Text{String: table, Valid: true},
 		IndexName:  pgtype.Text{String: index, Valid: true},
 		IsLeftover: pgtype.Bool{Bool: leftover, Valid: true},
@@ -72,19 +71,19 @@ func Test_InvalidIndexes_Severity(t *testing.T) {
 		},
 		{
 			Name:     "broken index - WARN",
-			Indexes:  []db.BrokenIndexesRow{brokenIndex("public", "users", "idx_users_email")},
+			Indexes:  []db.BrokenIndexesRow{brokenIndex("public.users", "idx_users_email")},
 			Severity: check.SeverityWarn,
 		},
 		{
 			Name:     "abandoned leftover - WARN",
-			Indexes:  []db.BrokenIndexesRow{leftoverIndex("public", "users", "idx_users_email_ccnew")},
+			Indexes:  []db.BrokenIndexesRow{leftoverIndex("public.users", "idx_users_email_ccnew")},
 			Severity: check.SeverityWarn,
 		},
 		{
 			Name: "mixed - WARN",
 			Indexes: []db.BrokenIndexesRow{
-				brokenIndex("public", "users", "idx_users_email"),
-				leftoverIndex("app", "orders", "idx_orders_status_ccnew"),
+				brokenIndex("public.users", "idx_users_email"),
+				leftoverIndex("app.orders", "idx_orders_status_ccnew"),
 			},
 			Severity: check.SeverityWarn,
 		},
@@ -126,9 +125,9 @@ func Test_InvalidIndexes_ClassifiesRowsByType(t *testing.T) {
 	t.Parallel()
 
 	indexes := []db.BrokenIndexesRow{
-		brokenIndex("public", "users", "idx_users_email"),
-		brokenIndex("public", "orders", "idx_orders_status"),
-		leftoverIndex("app", "posts", "idx_posts_created_at_ccnew"),
+		brokenIndex("public.users", "idx_users_email"),
+		brokenIndex("public.orders", "idx_orders_status"),
+		leftoverIndex("app.posts", "idx_posts_created_at_ccnew"),
 	}
 
 	checker := invalidindexes.New(newMockQueryer(indexes))
@@ -148,10 +147,10 @@ func Test_InvalidIndexes_ClassifiesRowsByType(t *testing.T) {
 
 	// Table carries the broken/leftover distinction in a Type column.
 	require.NotNil(t, finding.Table)
-	require.Equal(t, []string{"Schema", "Table", "Index", "Type"}, finding.Table.Headers)
+	require.Equal(t, []string{"Table", "Index", "Type"}, finding.Table.Headers)
 	require.Len(t, finding.Table.Rows, 3)
-	require.Equal(t, []string{"public", "users", "idx_users_email", "broken"}, finding.Table.Rows[0].Cells)
-	require.Equal(t, []string{"app", "posts", "idx_posts_created_at_ccnew", "leftover"}, finding.Table.Rows[2].Cells)
+	require.Equal(t, []string{"public.users", "idx_users_email", "broken"}, finding.Table.Rows[0].Cells)
+	require.Equal(t, []string{"app.posts", "idx_posts_created_at_ccnew", "leftover"}, finding.Table.Rows[2].Cells)
 	for _, row := range finding.Table.Rows {
 		require.Equal(t, check.SeverityWarn, row.Severity)
 	}
@@ -161,7 +160,7 @@ func Test_InvalidIndexes_SingularPhrasing(t *testing.T) {
 	t.Parallel()
 
 	checker := invalidindexes.New(newMockQueryer([]db.BrokenIndexesRow{
-		leftoverIndex("public", "users", "idx_users_email_ccnew"),
+		leftoverIndex("public.users", "idx_users_email_ccnew"),
 	}))
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
