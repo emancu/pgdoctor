@@ -65,6 +65,16 @@ Run health checks against a PostgreSQL database. The DSN can be passed as a posi
 | `--detail` | Detail level: `summary`, `brief` (default), `verbose`, `debug` |
 | `--output` | Output format: `text` (default), `json` |
 | `--hide-passing` | Hide passing checks |
+| `--config` | YAML file with per-check settings, keyed by check ID |
+
+A config file changes the settings of a check. Each check README lists the keys it reads. A key that is not in the file keeps its default value:
+
+```yaml
+session-settings:
+  timeout: 5000
+```
+
+pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar. It prints each skipped entry to stderr at `--detail debug`.
 
 Exit codes: `0` = all checks pass, `1` = failures found, `2` = connection error.
 
