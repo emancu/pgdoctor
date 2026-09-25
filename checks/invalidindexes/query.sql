@@ -3,8 +3,7 @@
 -- is_leftover. Excludes indexes a concurrent build is still working on (their
 -- index_relid is in pg_stat_progress_create_index): in flight, not broken.
 SELECT
-  n.nspname::text AS schema_name
-  , tbl.relname::text AS table_name
+  (n.nspname || '.' || tbl.relname)::text AS table_name
   , idx.relname::text AS index_name
   , (idx.relname ~ '_cc(new|old)[0-9]*$') AS is_leftover
 FROM pg_index AS i

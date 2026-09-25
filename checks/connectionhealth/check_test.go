@@ -2,6 +2,7 @@ package connectionhealth_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -744,6 +745,126 @@ func Test_ConnectionHealth_ReportSeverity(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedSeverity, report.Severity)
+		})
+	}
+}
+
+func Test_ConnectionHealth_StatsRestricted(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		total              int64
+		hidden             int64
+		expectedSeverity   check.Severity
+		expectedSaturation check.Severity
+	}{
+		{
+			name:               "hidden connections report stats-restricted",
+			total:              50,
+			hidden:             45,
+			expectedSeverity:   check.SeverityWarn,
+			expectedSaturation: check.SeverityPass,
+		},
+		{
+			name:               "saturation is still graded when stats are restricted",
+			total:              90,
+			hidden:             85,
+			expectedSeverity:   check.SeverityFail,
+			expectedSaturation: check.SeverityFail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stats := healthyStats()
+			stats.TotalConnections = int64Val(tt.total)
+			stats.ActiveConnections = int64Val(0)
+			stats.IdleConnections = int64Val(0)
+			stats.HiddenConnections = int64Val(tt.hidden)
+			mock := &mockQueries{stats: stats}
+
+			report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+			require.NoError(t, err)
+
+			require.Len(t, report.Results, 2)
+			require.True(t, hasResult(report.Results, "connection-saturation", tt.expectedSaturation))
+			require.True(t, hasResult(report.Results, "stats-restricted", check.SeverityWarn))
+			require.Contains(t, getFinding(report.Results, "stats-restricted").Details, fmt.Sprintf("%d connections from other roles", tt.hidden))
+			require.Equal(t, tt.expectedSeverity, report.Severity)
+			checktest.AssertSeverityInvariant(t, report)
+		})
+	}
+
+	t.Run("visible problems are still reported when stats are restricted", func(t *testing.T) {
+		t.Parallel()
+
+		stats := healthyStats()
+		stats.HiddenConnections = int64Val(10)
+		mock := &mockQueries{
+			stats: stats,
+			idleTxns: []db.IdleInTransactionRow{
+				{
+					Pid:                        int32Val(1234),
+					Username:                   textVal("app_rw"),
+					State:                      textVal("idle in transaction"),
+					TransactionDurationSeconds: int64Val(400),
+					TimeoutMs:                  int64Val(0),
+				},
+			},
+			longIdle: makeLongIdleRows(150),
+		}
+
+		report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+		require.NoError(t, err)
+
+		require.Len(t, report.Results, 4)
+		require.True(t, hasResult(report.Results, "stats-restricted", check.SeverityWarn))
+		require.True(t, hasResult(report.Results, "idle-in-transaction", check.SeverityFail))
+		require.True(t, hasResult(report.Results, "long-idle", check.SeverityWarn))
+		require.Equal(t, check.SeverityFail, report.Severity)
+		checktest.AssertSeverityInvariant(t, report)
+	})
+
+	t.Run("no hidden connections runs every subcheck", func(t *testing.T) {
+		t.Parallel()
+
+		stats := healthyStats()
+		stats.HiddenConnections = int64Val(0)
+		mock := &mockQueries{stats: stats}
+
+		report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+		require.NoError(t, err)
+
+		require.Len(t, report.Results, 6)
+		require.Nil(t, getFinding(report.Results, "stats-restricted"))
+	})
+}
+
+func Test_ConnectionHealth_QueryErrors(t *testing.T) {
+	t.Parallel()
+
+	queryErr := errors.New("connection refused")
+
+	tests := []struct {
+		name string
+		mock *mockQueries
+	}{
+		{name: "stats", mock: &mockQueries{statsErr: queryErr}},
+		{name: "idle-txn", mock: &mockQueries{stats: healthyStats(), idleTxnsErr: queryErr}},
+		{name: "long-idle", mock: &mockQueries{stats: healthyStats(), longIdleErr: queryErr}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := connectionhealth.New(tt.mock).Check(ctxWithPgVersion(17))
+			require.ErrorIs(t, err, queryErr)
+			require.Contains(t, err.Error(), tt.name)
+			require.Nil(t, report)
 		})
 	}
 }

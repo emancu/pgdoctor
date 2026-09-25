@@ -93,15 +93,14 @@ func checkHighChurnTables(rows []db.TableActivityRow, report *check.Report) {
 		return
 	}
 
-	headers := []string{"Schema", "Table", "Inserts", "Updates", "Deletes", "Total Writes", "Size"}
+	headers := []string{"Table", "Inserts", "Updates", "Deletes", "Total Writes", "Size"}
 	var tableRows []check.TableRow
 
 	for _, row := range highChurn {
 		totalWrites := check.Int8ToInt64(row.NTupIns) + check.Int8ToInt64(row.NTupUpd) + check.Int8ToInt64(row.NTupDel)
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.Schemaname.String,
-				row.Relname.String,
+				row.TableName.String,
 				check.FormatNumber(check.Int8ToInt64(row.NTupIns)),
 				check.FormatNumber(check.Int8ToInt64(row.NTupUpd)),
 				check.FormatNumber(check.Int8ToInt64(row.NTupDel)),
@@ -157,15 +156,14 @@ func checkLowHOTRatio(rows []db.TableActivityRow, report *check.Report) {
 		return
 	}
 
-	headers := []string{"Schema", "Table", "HOT Ratio", "Updates", "HOT Updates", "Live Rows"}
+	headers := []string{"Table", "HOT Ratio", "Updates", "HOT Updates", "Live Rows"}
 	var tableRows []check.TableRow
 
 	for _, row := range lowHOT {
 		hotRatio := calculateHOTRatio(row)
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
-				row.Schemaname.String,
-				row.Relname.String,
+				row.TableName.String,
 				fmt.Sprintf("%.1f%%", hotRatio),
 				check.FormatNumber(check.Int8ToInt64(row.NTupUpd)),
 				check.FormatNumber(check.Int8ToInt64(row.NTupHotUpd)),

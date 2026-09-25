@@ -7,13 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`connection-health`**: new `stats-restricted` WARN when the role cannot see other roles' connections, instead of a false PASS ([#92](https://github.com/emancu/pgdoctor/pull/92)).
+
 ### Changed
 
 - **`table-vacuum-health`**: `autovacuum-disabled` reports one table row per table (Table, Rows, Size, Dead Tuples, Last Vacuum), sorted by dead tuples, instead of one comma-separated list in `Details` ([#88](https://github.com/emancu/pgdoctor/pull/88)).
+- **`invalid-indexes`**: the table shows one schema-qualified `Table` column. Breaking for library consumers: `db.BrokenIndexesRow` drops `SchemaName` ([#89](https://github.com/emancu/pgdoctor/pull/89)).
+- **`table-activity`**: both findings show one schema-qualified `Table` column. Breaking for library consumers: `db.TableActivityRow` replaces `Schemaname` and `Relname` with `TableName` ([#90](https://github.com/emancu/pgdoctor/pull/90)).
 
 ### Fixed
 
 - **uuid-types**: table rows report WARN instead of FAIL, so they no longer exceed the WARN finding that holds them. ([#87](https://github.com/emancu/pgdoctor/pull/87))
+- **`uuid-defaults`**: a partitioned table reports once instead of once per partition, and a column in several indexes reports once ([#91](https://github.com/emancu/pgdoctor/pull/91)).
+- **`index-usage`**: reads indexes in every non-system schema, not only `public` ([#93](https://github.com/emancu/pgdoctor/pull/93)).
 - **`cache-efficiency`**: reads tables and indexes in every non-system schema, not only `public` ([#94](https://github.com/emancu/pgdoctor/pull/94)).
 
 ## [0.5.0] - 2026-08-14
