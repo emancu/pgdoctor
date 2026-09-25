@@ -1,5 +1,5 @@
 -- name: IndexUsageStats :many
--- Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
+-- Excludes: system schemas and temporary tables. Returns data for subchecks: unused-indexes, low-usage-indexes.
 SELECT
   (n.nspname || '.' || tbl.relname)::text AS table_name
   , psai.indexrelname::text AS index_name
@@ -19,6 +19,7 @@ INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
 WHERE
-  n.nspname = 'public'
+  n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND tbl.relpersistence <> 't'
 ORDER BY
   pg_relation_size(psai.indexrelid) DESC;
