@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`connection-health`**: new `stats-restricted` WARN when the role cannot see other roles' connections, instead of a false PASS ([#92](https://github.com/emancu/pgdoctor/pull/92)).
+
 ### Changed
 
 - **`table-vacuum-health`**: `autovacuum-disabled` reports one table row per table (Table, Rows, Size, Dead Tuples, Last Vacuum), sorted by dead tuples, instead of one comma-separated list in `Details` ([#88](https://github.com/emancu/pgdoctor/pull/88)).
