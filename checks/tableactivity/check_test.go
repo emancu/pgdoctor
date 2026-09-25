@@ -26,15 +26,14 @@ func pgInt8(i int64) pgtype.Int8  { return pgtype.Int8{Int64: i, Valid: true} }
 func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 
 type activity struct {
-	schema, table         string
+	table                 string
 	ins, upd, del         int64
 	hotUpd, liveTup, size int64
 }
 
 func mkRow(a activity) db.TableActivityRow {
 	return db.TableActivityRow{
-		Schemaname:     pgText(a.schema),
-		Relname:        pgText(a.table),
+		TableName:      pgText(a.table),
 		NTupIns:        pgInt8(a.ins),
 		NTupUpd:        pgInt8(a.upd),
 		NTupDel:        pgInt8(a.del),
@@ -98,13 +97,15 @@ func Test_HighChurn_Informational(t *testing.T) {
 
 	// >1M writes; too few live rows for the HOT finding to fire.
 	report := runCheck(t, []db.TableActivityRow{
-		mkRow(activity{schema: "public", table: "events", ins: 2_000_000, liveTup: 500_000}),
+		mkRow(activity{table: "public.events", ins: 2_000_000, liveTup: 500_000}),
 	})
 
 	high := finding(t, report, "high-churn-tables")
 	require.Equal(t, check.SeverityInfo, high.Severity)
 	require.Len(t, high.Table.Rows, 1)
 	require.Equal(t, check.SeverityInfo, high.Table.Rows[0].Severity)
+	require.Equal(t, "Table", high.Table.Headers[0])
+	require.Equal(t, "public.events", high.Table.Rows[0].Cells[0])
 
 	require.Equal(t, check.SeverityPass, report.Severity)
 }
@@ -114,13 +115,15 @@ func Test_LowHOT_Informational(t *testing.T) {
 
 	// >1M live rows, enough updates, 1% HOT ratio; total writes stay under the churn threshold.
 	report := runCheck(t, []db.TableActivityRow{
-		mkRow(activity{schema: "public", table: "orders", upd: 100_000, hotUpd: 1_000, liveTup: 2_000_000}),
+		mkRow(activity{table: "public.orders", upd: 100_000, hotUpd: 1_000, liveTup: 2_000_000}),
 	})
 
 	low := finding(t, report, "low-hot-ratio")
 	require.Equal(t, check.SeverityInfo, low.Severity)
 	require.Len(t, low.Table.Rows, 1)
 	require.Equal(t, check.SeverityInfo, low.Table.Rows[0].Severity)
+	require.Equal(t, "Table", low.Table.Headers[0])
+	require.Equal(t, "public.orders", low.Table.Rows[0].Cells[0])
 
 	require.Equal(t, check.SeverityPass, report.Severity)
 }
@@ -129,7 +132,7 @@ func Test_BothFindings_NeverEscalate(t *testing.T) {
 	t.Parallel()
 
 	report := runCheck(t, []db.TableActivityRow{
-		mkRow(activity{schema: "public", table: "big", ins: 2_000_000, upd: 100_000, hotUpd: 1_000, liveTup: 2_000_000}),
+		mkRow(activity{table: "public.big", ins: 2_000_000, upd: 100_000, hotUpd: 1_000, liveTup: 2_000_000}),
 	})
 
 	require.Equal(t, check.SeverityInfo, finding(t, report, "high-churn-tables").Severity)
