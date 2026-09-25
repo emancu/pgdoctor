@@ -13,8 +13,7 @@ import (
 
 const brokenIndexes = `-- name: BrokenIndexes :many
 SELECT
-  n.nspname::text AS schema_name
-  , tbl.relname::text AS table_name
+  (n.nspname || '.' || tbl.relname)::text AS table_name
   , idx.relname::text AS index_name
   , (idx.relname ~ '_cc(new|old)[0-9]*$') AS is_leftover
 FROM pg_index AS i
@@ -31,7 +30,6 @@ ORDER BY is_leftover, n.nspname, tbl.relname, idx.relname
 `
 
 type BrokenIndexesRow struct {
-	SchemaName pgtype.Text
 	TableName  pgtype.Text
 	IndexName  pgtype.Text
 	IsLeftover pgtype.Bool
@@ -49,12 +47,7 @@ func (q *Queries) BrokenIndexes(ctx context.Context) ([]BrokenIndexesRow, error)
 	var items []BrokenIndexesRow
 	for rows.Next() {
 		var i BrokenIndexesRow
-		if err := rows.Scan(
-			&i.SchemaName,
-			&i.TableName,
-			&i.IndexName,
-			&i.IsLeftover,
-		); err != nil {
+		if err := rows.Scan(&i.TableName, &i.IndexName, &i.IsLeftover); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2243,8 +2236,7 @@ func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessR
 
 const tableActivity = `-- name: TableActivity :many
 SELECT
-  schemaname
-  , relname
+  (schemaname || '.' || relname)::text AS table_name
   , n_tup_ins
   , n_tup_upd
   , n_tup_del
@@ -2257,8 +2249,7 @@ ORDER BY n_tup_ins + n_tup_upd + n_tup_del DESC
 `
 
 type TableActivityRow struct {
-	Schemaname     pgtype.Text
-	Relname        pgtype.Text
+	TableName      pgtype.Text
 	NTupIns        pgtype.Int8
 	NTupUpd        pgtype.Int8
 	NTupDel        pgtype.Int8
@@ -2279,8 +2270,7 @@ func (q *Queries) TableActivity(ctx context.Context) ([]TableActivityRow, error)
 	for rows.Next() {
 		var i TableActivityRow
 		if err := rows.Scan(
-			&i.Schemaname,
-			&i.Relname,
+			&i.TableName,
 			&i.NTupIns,
 			&i.NTupUpd,
 			&i.NTupDel,
@@ -3150,30 +3140,48 @@ func (q *Queries) ToastStorage(ctx context.Context) ([]ToastStorageRow, error) {
 }
 
 const uuidColumnDefaults = `-- name: UuidColumnDefaults :many
-WITH indexed_columns AS (
+WITH RECURSIVE tree AS (
   SELECT
-    i.indrelid AS table_oid
-    , unnest(i.indkey) AS column_num
-  FROM pg_index AS i
+    c.oid AS root
+    , c.oid AS relid
+  FROM pg_class AS c
+  WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
+  UNION ALL
+  SELECT
+    tree.root
+    , inh.inhrelid
+  FROM tree
+  INNER JOIN pg_inherits AS inh ON tree.relid = inh.inhparent
+  INNER JOIN pg_class AS pc ON inh.inhrelid = pc.oid AND pc.relispartition
+)
+
+, indexed AS (
+  SELECT DISTINCT
+    tree.root
+    , ia.attname
+  FROM tree
+  INNER JOIN pg_index AS i ON tree.relid = i.indrelid
+  INNER JOIN pg_attribute AS ia
+    ON i.indrelid = ia.attrelid AND ia.attnum = ANY(i.indkey)
 )
 
 SELECT
   (n.nspname || '.' || c.relname)::text AS table_name
   , a.attname::text AS column_name
   , pg_get_expr(d.adbin, d.adrelid)::text AS default_expr
-  , (idx.column_num IS NOT NULL) AS has_index
+  , (ix.root IS NOT NULL) AS has_index
 FROM pg_attribute AS a
 INNER JOIN pg_class AS c ON a.attrelid = c.oid
 INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
 INNER JOIN pg_type AS t ON a.atttypid = t.oid
 LEFT JOIN pg_attrdef AS d ON c.oid = d.adrelid AND a.attnum = d.adnum
-LEFT JOIN indexed_columns AS idx
-  ON c.oid = idx.table_oid AND a.attnum = idx.column_num
+LEFT JOIN indexed AS ix ON c.oid = ix.root AND a.attname = ix.attname
 WHERE
   a.attnum > 0
   AND NOT a.attisdropped
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.relkind IN ('r', 'p')
+  AND NOT c.relispartition
   AND t.typname = 'uuid'
   AND d.adbin IS NOT NULL
 `
@@ -3186,6 +3194,8 @@ type UuidColumnDefaultsRow struct {
 }
 
 // Find UUID columns with their DEFAULT expressions to detect random UUID usage.
+// A partitioned table reports once, indexed if an index on the root or any partition covers the column.
+// pg_inherits instead of pg_partition_tree(), which locks every partition.
 func (q *Queries) UuidColumnDefaults(ctx context.Context) ([]UuidColumnDefaultsRow, error) {
 	rows, err := q.db.Query(ctx, uuidColumnDefaults)
 	if err != nil {

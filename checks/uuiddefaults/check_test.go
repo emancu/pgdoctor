@@ -284,3 +284,25 @@ func Test_UUIDDefaults_FilteringLogic(t *testing.T) {
 		})
 	}
 }
+
+func Test_UUIDDefaults_PartitionedTable(t *testing.T) {
+	t.Parallel()
+
+	sql := uuiddefaults.Metadata().SQL
+	require.Contains(t, sql, "AND NOT c.relispartition", "partition leaves must not report their own row")
+	require.Contains(t, sql, "INNER JOIN pg_inherits", "an index on any partition must mark the root indexed")
+
+	// The query returns the root of events (3 leaves) once, even when only the leaves carry the index.
+	rows := []db.UuidColumnDefaultsRow{
+		makeUUIDDefault("public.events", "id", "gen_random_uuid()", true),
+	}
+
+	report, err := uuiddefaults.New(&mockQueryer{rows: rows}).Check(context.Background())
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+	require.Equal(t, check.SeverityWarn, report.Severity)
+	require.Contains(t, report.Results[0].Details, "Found 1 indexed UUID column")
+	require.Equal(t, 1, len(report.Results[0].Table.Rows))
+	require.Equal(t, "public.events", report.Results[0].Table.Rows[0].Cells[0])
+}
