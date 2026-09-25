@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`connection-health`**: new `stats-restricted` WARN when the role cannot see other roles' connections, instead of a false PASS ([#92](https://github.com/emancu/pgdoctor/pull/92)).
 - **`session-settings`**: new `timeout.<role>` config key sets the timeout threshold for one role ([#98](https://github.com/emancu/pgdoctor/pull/98)).
+- **CLI**: `pgdoctor run --config <file>` reads per-check settings from a YAML file ([#99](https://github.com/emancu/pgdoctor/pull/99)).
 - **`table-vacuum-health`**: new `autovacuum_disabled_exclude` config key stops `autovacuum-disabled` from reporting tables whose schema-qualified names start with the given prefixes ([#100](https://github.com/emancu/pgdoctor/pull/100)).
 
 ### Changed
