@@ -9,15 +9,15 @@ import (
 	"github.com/emancu/pgdoctor/check"
 )
 
-func loadConfig(path string, checks []check.Package) (check.Config, error) {
+func loadConfig(path string, checks []check.Package) (check.Config, []string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading config: %w", err)
+		return nil, nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	var raw map[string]map[string]yaml.Node
+	var raw map[string]yaml.Node
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
 	known := map[string]struct{}{}
@@ -26,17 +26,25 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 	}
 
 	cfg := check.Config{}
-	for checkID, settings := range raw {
+	var skipped []string
+	for checkID, node := range raw {
 		if _, ok := known[checkID]; !ok {
-			return nil, fmt.Errorf("config %s: unknown check %q", path, checkID)
+			skipped = append(skipped, fmt.Sprintf("config: skipping unknown check %q", checkID))
+			continue
+		}
+		var settings map[string]yaml.Node
+		if node.Kind != yaml.MappingNode || node.Decode(&settings) != nil {
+			skipped = append(skipped, fmt.Sprintf("config: skipping %s: not a mapping", checkID))
+			continue
 		}
 		cfg[checkID] = map[string]string{}
 		for key, node := range settings {
 			if node.Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("config %s: %s.%s must be a scalar value", path, checkID, key)
+				skipped = append(skipped, fmt.Sprintf("config: skipping %s.%s: not a scalar value", checkID, key))
+				continue
 			}
 			cfg[checkID][key] = node.Value
 		}
 	}
-	return cfg, nil
+	return cfg, skipped, nil
 }

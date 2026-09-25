@@ -27,10 +27,10 @@ func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		content string
-		want    check.Config
-		wantErr string
+		name        string
+		content     string
+		want        check.Config
+		wantSkipped []string
 	}{
 		{
 			name:    "valid",
@@ -43,14 +43,28 @@ func TestLoadConfig(t *testing.T) {
 			want:    check.Config{},
 		},
 		{
-			name:    "unknown check",
-			content: "no-such-check:\n  timeout: 1000\n",
-			wantErr: `unknown check "no-such-check"`,
+			name:        "unknown check",
+			content:     "no-such-check:\n  timeout: 1000\nsession-settings:\n  timeout: 1000\n",
+			want:        check.Config{"session-settings": {"timeout": "1000"}},
+			wantSkipped: []string{`config: skipping unknown check "no-such-check"`},
 		},
 		{
-			name:    "non-scalar value",
-			content: "session-settings:\n  roles: [app_ro, app_rw]\n",
-			wantErr: "session-settings.roles must be a scalar value",
+			name:        "unknown check with non-mapping value",
+			content:     "no-such-check: [a, b]\nsession-settings:\n  timeout: 1000\n",
+			want:        check.Config{"session-settings": {"timeout": "1000"}},
+			wantSkipped: []string{`config: skipping unknown check "no-such-check"`},
+		},
+		{
+			name:        "non-mapping check settings",
+			content:     "session-settings: 1000\n",
+			want:        check.Config{},
+			wantSkipped: []string{"config: skipping session-settings: not a mapping"},
+		},
+		{
+			name:        "non-scalar value",
+			content:     "session-settings:\n  roles: [app_ro, app_rw]\n  timeout: 1000\n",
+			want:        check.Config{"session-settings": {"timeout": "1000"}},
+			wantSkipped: []string{"config: skipping session-settings.roles: not a scalar value"},
 		},
 	}
 
@@ -58,14 +72,11 @@ func TestLoadConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
+			cfg, skipped, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
 
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-				return
-			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, cfg)
+			assert.Equal(t, tt.wantSkipped, skipped)
 		})
 	}
 }
@@ -73,9 +84,17 @@ func TestLoadConfig(t *testing.T) {
 func TestLoadConfigMissingFile(t *testing.T) {
 	t.Parallel()
 
-	_, err := loadConfig(filepath.Join(t.TempDir(), "missing.yml"), pgdoctor.AllChecks())
+	_, _, err := loadConfig(filepath.Join(t.TempDir(), "missing.yml"), pgdoctor.AllChecks())
 
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLoadConfigInvalidYAML(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := loadConfig(writeConfig(t, "session-settings: [\n"), pgdoctor.AllChecks())
+
+	require.ErrorContains(t, err, "parsing config")
 }
 
 type sessionSettingsQueryer []db.SessionSettingsRow
@@ -105,7 +124,7 @@ func TestLoadConfigReachesCheck(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, check.SeverityPass, report.Severity)
 
-	cfg, err := loadConfig(writeConfig(t, "session-settings:\n  timeout: 1000\n"), pgdoctor.AllChecks())
+	cfg, _, err := loadConfig(writeConfig(t, "session-settings:\n  timeout: 1000\n"), pgdoctor.AllChecks())
 	require.NoError(t, err)
 
 	report, err = sessionsettings.New(rows, cfg).Check(context.Background())

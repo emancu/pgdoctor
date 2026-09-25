@@ -74,6 +74,8 @@ session-settings:
   timeout: 5000
 ```
 
+pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar. It prints each skipped entry to stderr at `--detail debug`.
+
 Exit codes: `0` = all checks pass, `1` = failures found, `2` = connection error.
 
 ### `pgdoctor list`
