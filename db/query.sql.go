@@ -869,7 +869,8 @@ INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
 WHERE
-  n.nspname = 'public'
+  n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND tbl.relpersistence <> 't'
 ORDER BY
   pg_relation_size(psai.indexrelid) DESC
 `
@@ -886,7 +887,7 @@ type IndexUsageStatsRow struct {
 	StatsAgeSeconds pgtype.Int8
 }
 
-// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
+// Excludes: system schemas and temporary tables. Returns data for subchecks: unused-indexes, low-usage-indexes.
 func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, error) {
 	rows, err := q.db.Query(ctx, indexUsageStats)
 	if err != nil {
