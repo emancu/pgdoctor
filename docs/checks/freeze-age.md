@@ -46,7 +46,7 @@ A pin warns at `1x`, one sawtooth period before the age itself warns, because fr
 
 ## Statistics Requirements
 
-`Last Vacuum` comes from `pg_stat_all_tables`, so it is only as trustworthy as the statistics window; run `statistics-freshness` before relying on it. The ages come from `pg_class` and `pg_database` and are exact.
+`Last Vacuum` comes from `pg_stat_all_tables`, so it is only as trustworthy as the statistics window; run `db-statistics` before relying on it. The ages come from `pg_class` and `pg_database` and are exact.
 
 ## How to Fix
 

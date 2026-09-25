@@ -1,4 +1,4 @@
-package statisticsfreshness_test
+package dbstatistics_test
 
 import (
 	"context"
@@ -7,30 +7,30 @@ import (
 	"time"
 
 	"github.com/emancu/pgdoctor/check"
-	"github.com/emancu/pgdoctor/checks/statisticsfreshness"
+	"github.com/emancu/pgdoctor/checks/dbstatistics"
 	"github.com/emancu/pgdoctor/db"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
-type mockStatisticsFreshnessQueryer struct {
-	row db.StatisticsFreshnessRow
+type mockDBStatisticsQueryer struct {
+	row db.DatabaseStatisticsRow
 	err error
 }
 
-func (m *mockStatisticsFreshnessQueryer) StatisticsFreshness(context.Context) (db.StatisticsFreshnessRow, error) {
+func (m *mockDBStatisticsQueryer) DatabaseStatistics(context.Context) (db.DatabaseStatisticsRow, error) {
 	if m.err != nil {
-		return db.StatisticsFreshnessRow{}, m.err
+		return db.DatabaseStatisticsRow{}, m.err
 	}
 	return m.row, nil
 }
 
-func newMockQueryer(row db.StatisticsFreshnessRow) *mockStatisticsFreshnessQueryer {
-	return &mockStatisticsFreshnessQueryer{row: row}
+func newMockQueryer(row db.DatabaseStatisticsRow) *mockDBStatisticsQueryer {
+	return &mockDBStatisticsQueryer{row: row}
 }
 
-func newMockQueryerWithError(err error) *mockStatisticsFreshnessQueryer {
-	return &mockStatisticsFreshnessQueryer{err: err}
+func newMockQueryerWithError(err error) *mockDBStatisticsQueryer {
+	return &mockDBStatisticsQueryer{err: err}
 }
 
 func makeTimestamp(daysAgo int) pgtype.Timestamptz {
@@ -43,8 +43,8 @@ func makeAgeSeconds(daysAgo int) pgtype.Int8 {
 }
 
 // resetAgo: an explicit reset, so the window is exact.
-func resetAgo(days int) db.StatisticsFreshnessRow {
-	return db.StatisticsFreshnessRow{
+func resetAgo(days int) db.DatabaseStatisticsRow {
+	return db.DatabaseStatisticsRow{
 		StatsReset:    makeTimestamp(days),
 		AgeSeconds:    makeAgeSeconds(days),
 		UptimeSeconds: makeAgeSeconds(days),
@@ -52,20 +52,20 @@ func resetAgo(days int) db.StatisticsFreshnessRow {
 }
 
 // noResetUptime: nothing recorded, so the window is only known to be >= uptime.
-func noResetUptime(days int) db.StatisticsFreshnessRow {
-	return db.StatisticsFreshnessRow{
+func noResetUptime(days int) db.DatabaseStatisticsRow {
+	return db.DatabaseStatisticsRow{
 		StatsReset:    pgtype.Timestamptz{Valid: false},
 		AgeSeconds:    pgtype.Int8{Valid: false},
 		UptimeSeconds: makeAgeSeconds(days),
 	}
 }
 
-func Test_StatisticsFreshness(t *testing.T) {
+func Test_DBStatistics(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
 		Name             string
-		Row              db.StatisticsFreshnessRow
+		Row              db.DatabaseStatisticsRow
 		ExpectedSeverity check.Severity
 		ExpectedID       string
 	}
@@ -73,45 +73,45 @@ func Test_StatisticsFreshness(t *testing.T) {
 	testCases := []testCase{
 		{
 			Name: "mature statistics (>7 days) - OK",
-			Row: db.StatisticsFreshnessRow{
+			Row: db.DatabaseStatisticsRow{
 				StatsReset: makeTimestamp(10),
 				AgeSeconds: makeAgeSeconds(int(10)), UptimeSeconds: makeAgeSeconds(10),
 			},
 			ExpectedSeverity: check.SeverityPass,
-			ExpectedID:       "statistics-freshness",
+			ExpectedID:       "db-statistics",
 		},
 		{
 			Name: "exactly 7 days - OK",
-			Row: db.StatisticsFreshnessRow{
+			Row: db.DatabaseStatisticsRow{
 				StatsReset: makeTimestamp(7),
 				AgeSeconds: makeAgeSeconds(int(7)), UptimeSeconds: makeAgeSeconds(7),
 			},
 			ExpectedSeverity: check.SeverityPass,
-			ExpectedID:       "statistics-freshness",
+			ExpectedID:       "db-statistics",
 		},
 		{
 			Name: "immature statistics (<7 days) - WARN",
-			Row: db.StatisticsFreshnessRow{
+			Row: db.DatabaseStatisticsRow{
 				StatsReset: makeTimestamp(3),
 				AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 			},
 			ExpectedSeverity: check.SeverityWarn,
-			ExpectedID:       "statistics-freshness",
+			ExpectedID:       "db-statistics",
 		},
 		{
 			Name: "fresh statistics (1 day) - WARN",
-			Row: db.StatisticsFreshnessRow{
+			Row: db.DatabaseStatisticsRow{
 				StatsReset: makeTimestamp(1),
 				AgeSeconds: makeAgeSeconds(int(1)), UptimeSeconds: makeAgeSeconds(1),
 			},
 			ExpectedSeverity: check.SeverityWarn,
-			ExpectedID:       "statistics-freshness",
+			ExpectedID:       "db-statistics",
 		},
 		{
 			Name:             "stats never reset (default) - OK",
 			Row:              noResetUptime(300),
 			ExpectedSeverity: check.SeverityPass,
-			ExpectedID:       "statistics-freshness",
+			ExpectedID:       "db-statistics",
 		},
 	}
 
@@ -121,7 +121,7 @@ func Test_StatisticsFreshness(t *testing.T) {
 
 			queryer := newMockQueryer(tc.Row)
 
-			checker := statisticsfreshness.New(queryer)
+			checker := dbstatistics.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
@@ -136,17 +136,17 @@ func Test_StatisticsFreshness(t *testing.T) {
 	}
 }
 
-func Test_StatisticsFreshness_MatureStats(t *testing.T) {
+func Test_DBStatistics_MatureStats(t *testing.T) {
 	t.Parallel()
 
-	row := db.StatisticsFreshnessRow{
+	row := db.DatabaseStatisticsRow{
 		StatsReset: makeTimestamp(14),
 		AgeSeconds: makeAgeSeconds(int(14)),
 	}
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -158,17 +158,17 @@ func Test_StatisticsFreshness_MatureStats(t *testing.T) {
 	require.Contains(t, result.Details, "Counters cover 14d")
 }
 
-func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
+func Test_DBStatistics_ImmatureStats(t *testing.T) {
 	t.Parallel()
 
-	row := db.StatisticsFreshnessRow{
+	row := db.DatabaseStatisticsRow{
 		StatsReset: makeTimestamp(3),
 		AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 	}
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -184,7 +184,7 @@ func Test_StatisticsFreshness_ImmatureStats(t *testing.T) {
 	require.Contains(t, result.Details, "cache-efficiency")
 }
 
-func Test_StatisticsFreshness_NeverReset(t *testing.T) {
+func Test_DBStatistics_NeverReset(t *testing.T) {
 	t.Parallel()
 
 	// NULL stats_reset means statistics have NEVER been reset
@@ -193,7 +193,7 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -206,7 +206,7 @@ func Test_StatisticsFreshness_NeverReset(t *testing.T) {
 	require.NotContains(t, result.Details, "optimal")
 }
 
-func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
+func Test_DBStatistics_ThresholdBoundary(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
@@ -242,14 +242,14 @@ func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 
-			row := db.StatisticsFreshnessRow{
+			row := db.DatabaseStatisticsRow{
 				StatsReset: makeTimestamp(int(tc.AgeDays)),
 				AgeSeconds: makeAgeSeconds(int(tc.AgeDays)),
 			}
 
 			queryer := newMockQueryer(row)
 
-			checker := statisticsfreshness.New(queryer)
+			checker := dbstatistics.New(queryer)
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
@@ -262,17 +262,17 @@ func Test_StatisticsFreshness_ThresholdBoundary(t *testing.T) {
 	}
 }
 
-func Test_StatisticsFreshness_AffectedChecks(t *testing.T) {
+func Test_DBStatistics_AffectedChecks(t *testing.T) {
 	t.Parallel()
 
-	row := db.StatisticsFreshnessRow{
+	row := db.DatabaseStatisticsRow{
 		StatsReset: makeTimestamp(3),
 		AgeSeconds: makeAgeSeconds(int(3)), UptimeSeconds: makeAgeSeconds(3),
 	}
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -285,45 +285,45 @@ func Test_StatisticsFreshness_AffectedChecks(t *testing.T) {
 	require.Contains(t, result.Details, "cache-efficiency", "Should mention cache-efficiency check")
 }
 
-func Test_StatisticsFreshness_QueryError(t *testing.T) {
+func Test_DBStatistics_QueryError(t *testing.T) {
 	t.Parallel()
 
 	expectedErr := fmt.Errorf("database connection error")
 	queryer := newMockQueryerWithError(expectedErr)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	_, err := checker.Check(context.Background())
 
 	require.Error(t, err, "Should return error when query fails")
-	require.Contains(t, err.Error(), "statistics-freshness", "Error should mention check ID")
+	require.Contains(t, err.Error(), "db-statistics", "Error should mention check ID")
 }
 
-func Test_StatisticsFreshness_Metadata(t *testing.T) {
+func Test_DBStatistics_Metadata(t *testing.T) {
 	t.Parallel()
 
-	queryer := newMockQueryer(db.StatisticsFreshnessRow{})
-	checker := statisticsfreshness.New(queryer)
+	queryer := newMockQueryer(db.DatabaseStatisticsRow{})
+	checker := dbstatistics.New(queryer)
 	metadata := checker.Metadata()
 
-	require.Equal(t, "statistics-freshness", metadata.CheckID, "CheckID should match")
-	require.Equal(t, "Statistics Freshness", metadata.Name, "Name should match")
+	require.Equal(t, "db-statistics", metadata.CheckID, "CheckID should match")
+	require.Equal(t, "DB Statistics", metadata.Name, "Name should match")
 	require.Equal(t, check.CategoryConfigs, metadata.Category, "Category should be configs")
 	require.NotEmpty(t, metadata.Description, "Description should not be empty")
 	require.NotEmpty(t, metadata.SQL, "SQL should not be empty")
 	require.NotEmpty(t, metadata.Readme, "Readme should not be empty")
 }
 
-func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
+func Test_DBStatistics_VeryOldStats(t *testing.T) {
 	t.Parallel()
 
-	row := db.StatisticsFreshnessRow{
+	row := db.DatabaseStatisticsRow{
 		StatsReset: makeTimestamp(90),
 		AgeSeconds: makeAgeSeconds(int(90)),
 	}
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -335,17 +335,17 @@ func Test_StatisticsFreshness_VeryOldStats(t *testing.T) {
 	require.Contains(t, result.Details, "Counters cover 90d")
 }
 
-func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
+func Test_DBStatistics_ZeroAge(t *testing.T) {
 	t.Parallel()
 
-	row := db.StatisticsFreshnessRow{
+	row := db.DatabaseStatisticsRow{
 		StatsReset: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		AgeSeconds: makeAgeSeconds(int(0)),
 	}
 
 	queryer := newMockQueryer(row)
 
-	checker := statisticsfreshness.New(queryer)
+	checker := dbstatistics.New(queryer)
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -364,12 +364,12 @@ func Test_StatisticsFreshness_ZeroAge(t *testing.T) {
 // zeroes the counters and leaves stats_reset NULL, so judging only explicit resets
 // warned about the deliberate reset an operator already knew about and stayed silent
 // about the one that silently invalidated every usage-based check.
-func Test_StatisticsFreshness_UnrecordedResetIsCaughtByUptime(t *testing.T) {
+func Test_DBStatistics_UnrecordedResetIsCaughtByUptime(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
 		Name             string
-		Row              db.StatisticsFreshnessRow
+		Row              db.DatabaseStatisticsRow
 		ExpectedSeverity check.Severity
 	}{
 		{
@@ -393,7 +393,7 @@ func Test_StatisticsFreshness_UnrecordedResetIsCaughtByUptime(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := statisticsfreshness.New(newMockQueryer(tc.Row)).Check(context.Background())
+			report, err := dbstatistics.New(newMockQueryer(tc.Row)).Check(context.Background())
 			require.NoError(t, err)
 			require.Len(t, report.Results, 1)
 

@@ -1,5 +1,5 @@
-// Package statisticsfreshness validates that PostgreSQL statistics are mature enough for accurate analysis.
-package statisticsfreshness
+// Package dbstatistics validates that PostgreSQL statistics are mature enough for accurate analysis.
+package dbstatistics
 
 import (
 	"context"
@@ -23,26 +23,26 @@ const (
 	secondsPerDay           = 24 * 60 * 60
 )
 
-type StatisticsFreshnessQueries interface {
-	StatisticsFreshness(context.Context) (db.StatisticsFreshnessRow, error)
+type DBStatisticsQueries interface {
+	DatabaseStatistics(context.Context) (db.DatabaseStatisticsRow, error)
 }
 
 type checker struct {
-	queries StatisticsFreshnessQueries
+	queries DBStatisticsQueries
 }
 
 func Metadata() check.Metadata {
 	return check.Metadata{
 		Category:    check.CategoryConfigs,
-		CheckID:     "statistics-freshness",
-		Name:        "Statistics Freshness",
+		CheckID:     "db-statistics",
+		Name:        "DB Statistics",
 		Description: "Validates PostgreSQL statistics are mature enough for usage-based analysis",
 		Readme:      readme,
 		SQL:         querySQL,
 	}
 }
 
-func New(queries StatisticsFreshnessQueries, _ ...check.Config) check.Checker {
+func New(queries DBStatisticsQueries, _ ...check.Config) check.Checker {
 	return &checker{
 		queries: queries,
 	}
@@ -55,7 +55,7 @@ func (c *checker) Metadata() check.Metadata {
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
-	row, err := c.queries.StatisticsFreshness(ctx)
+	row, err := c.queries.DatabaseStatistics(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
@@ -100,7 +100,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 // statsWindow returns how far back the counters reach, and whether that is exact.
 // Only pg_stat_reset() records a timestamp, so without one the best that can be said
 // is that they reach back at least as far as the server start.
-func statsWindow(row db.StatisticsFreshnessRow) (seconds int64, exact bool) {
+func statsWindow(row db.DatabaseStatisticsRow) (seconds int64, exact bool) {
 	if row.StatsReset.Valid {
 		return row.AgeSeconds.Int64, true
 	}
@@ -112,13 +112,13 @@ func statsWindow(row db.StatisticsFreshnessRow) (seconds int64, exact bool) {
 // Details, so this is the only place the figure stays visible when nothing is wrong.
 func windowTitle(window int64, exact bool) string {
 	if exact {
-		return fmt.Sprintf("Statistics: %s since last reset", check.FormatDurationSec(window))
+		return fmt.Sprintf("DB Statistics: %s since last reset", check.FormatDurationSec(window))
 	}
 
-	return fmt.Sprintf("Statistics: at least %s, no reset recorded", check.FormatDurationSec(window))
+	return fmt.Sprintf("DB Statistics: at least %s, no reset recorded", check.FormatDurationSec(window))
 }
 
-func windowDetails(row db.StatisticsFreshnessRow, window int64, exact bool) string {
+func windowDetails(row db.DatabaseStatisticsRow, window int64, exact bool) string {
 	if exact {
 		return fmt.Sprintf("Counters cover %s, since %s.",
 			check.FormatDurationSec(window), row.StatsReset.Time.Format(time.RFC3339))

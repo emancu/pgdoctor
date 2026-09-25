@@ -209,7 +209,7 @@ Filtering happens at the runner level (`pgdoctor.go`):
 
 Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):
 
-- Use the dedicated `statistics-freshness` check to validate stats maturity
+- Use the dedicated `db-statistics` check to validate stats maturity
 - Add a note in your README indicating the check depends on statistics
 - Avoid CROSS JOINs with `pg_stat_database` for stats age
 
