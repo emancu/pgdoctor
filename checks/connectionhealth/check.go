@@ -92,6 +92,29 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s (long-idle): %w", check.CategoryConfigs, report.CheckID, err)
 	}
 
+	if stats.HiddenConnections.Int64 > 0 {
+		checkConnectionSaturation(stats, report)
+		report.AddFinding(check.Finding{
+			ID:       "stats-restricted",
+			Name:     "Connection State Not Visible",
+			Severity: check.SeverityWarn,
+			Details: fmt.Sprintf(
+				"%d connections from other roles hide their state from the current role, so pool-pressure and idle-ratio cannot be evaluated and idle-in-transaction and long-idle cover only visible connections. Grant pg_read_all_stats to see every connection.",
+				stats.HiddenConnections.Int64),
+		})
+
+		// Visible sessions still prove a problem, but their PASS would claim the hidden ones are healthy.
+		visible := check.NewReport(Metadata())
+		checkIdleInTransaction(idleTxns, visible)
+		checkLongIdleConnections(longIdle, visible)
+		for _, finding := range visible.Results {
+			if finding.Severity > check.SeverityPass {
+				report.AddFinding(finding)
+			}
+		}
+		return report, nil
+	}
+
 	addConnectionOverview(stats, report)
 
 	checkConnectionSaturation(stats, report)

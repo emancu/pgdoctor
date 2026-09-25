@@ -13,8 +13,7 @@ import (
 
 const brokenIndexes = `-- name: BrokenIndexes :many
 SELECT
-  n.nspname::text AS schema_name
-  , tbl.relname::text AS table_name
+  (n.nspname || '.' || tbl.relname)::text AS table_name
   , idx.relname::text AS index_name
   , (idx.relname ~ '_cc(new|old)[0-9]*$') AS is_leftover
 FROM pg_index AS i
@@ -31,7 +30,6 @@ ORDER BY is_leftover, n.nspname, tbl.relname, idx.relname
 `
 
 type BrokenIndexesRow struct {
-	SchemaName pgtype.Text
 	TableName  pgtype.Text
 	IndexName  pgtype.Text
 	IsLeftover pgtype.Bool
@@ -49,12 +47,7 @@ func (q *Queries) BrokenIndexes(ctx context.Context) ([]BrokenIndexesRow, error)
 	var items []BrokenIndexesRow
 	for rows.Next() {
 		var i BrokenIndexesRow
-		if err := rows.Scan(
-			&i.SchemaName,
-			&i.TableName,
-			&i.IndexName,
-			&i.IsLeftover,
-		); err != nil {
+		if err := rows.Scan(&i.TableName, &i.IndexName, &i.IsLeftover); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -75,6 +68,8 @@ SELECT
   , count(*) FILTER (WHERE state = 'idle in transaction') AS idle_in_transaction
   , count(*) FILTER (WHERE state = 'idle in transaction (aborted)') AS idle_in_transaction_aborted
   , count(*) FILTER (WHERE wait_event_type IS NOT NULL AND state = 'active') AS waiting_connections
+  -- Processes with no datid or no usesysid are masked for every role without pg_read_all_stats.
+  , count(*) FILTER (WHERE datid IS NOT NULL AND usesysid IS NOT NULL AND query = '<insufficient privilege>') AS hidden_connections
 FROM pg_stat_activity
 WHERE pid != pg_backend_pid()
 `
@@ -88,6 +83,7 @@ type ConnectionStatsRow struct {
 	IdleInTransaction        pgtype.Int8
 	IdleInTransactionAborted pgtype.Int8
 	WaitingConnections       pgtype.Int8
+	HiddenConnections        pgtype.Int8
 }
 
 // Gets overall connection statistics including pool sizing metrics.
@@ -103,6 +99,7 @@ func (q *Queries) ConnectionStats(ctx context.Context) (ConnectionStatsRow, erro
 		&i.IdleInTransaction,
 		&i.IdleInTransactionAborted,
 		&i.WaitingConnections,
+		&i.HiddenConnections,
 	)
 	return i, err
 }
@@ -804,8 +801,10 @@ SELECT
   END AS cache_hit_ratio
 FROM pg_statio_user_indexes AS psio
 INNER JOIN ranked ON psio.indexrelid = ranked.indexrelid
+INNER JOIN pg_class AS c ON psio.indexrelid = c.oid
 WHERE
-  psio.schemaname = 'public'
+  psio.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND c.relpersistence <> 't'
   -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
   AND (pg_relation_size(psio.indexrelid) >= 500 * 1024 * 1024 OR ranked.scan_rank <= 20)
 ORDER BY pg_relation_size(psio.indexrelid) DESC
@@ -870,7 +869,8 @@ INNER JOIN pg_class AS tbl ON x.indrelid = tbl.oid
 INNER JOIN pg_namespace AS n ON tbl.relnamespace = n.oid
 LEFT JOIN pg_stat_user_tables AS ut ON tbl.oid = ut.relid
 WHERE
-  n.nspname = 'public'
+  n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND tbl.relpersistence <> 't'
 ORDER BY
   pg_relation_size(psai.indexrelid) DESC
 `
@@ -887,7 +887,7 @@ type IndexUsageStatsRow struct {
 	StatsAgeSeconds pgtype.Int8
 }
 
-// Excludes: system schemas. Returns data for subchecks: unused-indexes, low-usage-indexes.
+// Excludes: system schemas and temporary tables. Returns data for subchecks: unused-indexes, low-usage-indexes.
 func (q *Queries) IndexUsageStats(ctx context.Context) ([]IndexUsageStatsRow, error) {
 	rows, err := q.db.Query(ctx, indexUsageStats)
 	if err != nil {
@@ -2240,8 +2240,7 @@ func (q *Queries) StatisticsFreshness(ctx context.Context) (StatisticsFreshnessR
 
 const tableActivity = `-- name: TableActivity :many
 SELECT
-  schemaname
-  , relname
+  (schemaname || '.' || relname)::text AS table_name
   , n_tup_ins
   , n_tup_upd
   , n_tup_del
@@ -2254,8 +2253,7 @@ ORDER BY n_tup_ins + n_tup_upd + n_tup_del DESC
 `
 
 type TableActivityRow struct {
-	Schemaname     pgtype.Text
-	Relname        pgtype.Text
+	TableName      pgtype.Text
 	NTupIns        pgtype.Int8
 	NTupUpd        pgtype.Int8
 	NTupDel        pgtype.Int8
@@ -2276,8 +2274,7 @@ func (q *Queries) TableActivity(ctx context.Context) ([]TableActivityRow, error)
 	for rows.Next() {
 		var i TableActivityRow
 		if err := rows.Scan(
-			&i.Schemaname,
-			&i.Relname,
+			&i.TableName,
 			&i.NTupIns,
 			&i.NTupUpd,
 			&i.NTupDel,
@@ -2392,8 +2389,10 @@ SELECT
   END AS cache_hit_ratio
 FROM pg_statio_user_tables AS psio
 INNER JOIN ranked ON psio.relid = ranked.relid
+INNER JOIN pg_class AS c ON psio.relid = c.oid
 WHERE
-  psio.schemaname = 'public'
+  psio.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND c.relpersistence <> 't'
   -- rank<=20 rows bypass the size floor so the top-20 ranking is verifiable at --detail debug
   AND (pg_relation_size(psio.relid) >= 500 * 1024 * 1024 OR ranked.read_rank <= 20)
 ORDER BY pg_relation_size(psio.relid) DESC
@@ -3147,30 +3146,48 @@ func (q *Queries) ToastStorage(ctx context.Context) ([]ToastStorageRow, error) {
 }
 
 const uuidColumnDefaults = `-- name: UuidColumnDefaults :many
-WITH indexed_columns AS (
+WITH RECURSIVE tree AS (
   SELECT
-    i.indrelid AS table_oid
-    , unnest(i.indkey) AS column_num
-  FROM pg_index AS i
+    c.oid AS root
+    , c.oid AS relid
+  FROM pg_class AS c
+  WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
+  UNION ALL
+  SELECT
+    tree.root
+    , inh.inhrelid
+  FROM tree
+  INNER JOIN pg_inherits AS inh ON tree.relid = inh.inhparent
+  INNER JOIN pg_class AS pc ON inh.inhrelid = pc.oid AND pc.relispartition
+)
+
+, indexed AS (
+  SELECT DISTINCT
+    tree.root
+    , ia.attname
+  FROM tree
+  INNER JOIN pg_index AS i ON tree.relid = i.indrelid
+  INNER JOIN pg_attribute AS ia
+    ON i.indrelid = ia.attrelid AND ia.attnum = ANY(i.indkey)
 )
 
 SELECT
   (n.nspname || '.' || c.relname)::text AS table_name
   , a.attname::text AS column_name
   , pg_get_expr(d.adbin, d.adrelid)::text AS default_expr
-  , (idx.column_num IS NOT NULL) AS has_index
+  , (ix.root IS NOT NULL) AS has_index
 FROM pg_attribute AS a
 INNER JOIN pg_class AS c ON a.attrelid = c.oid
 INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
 INNER JOIN pg_type AS t ON a.atttypid = t.oid
 LEFT JOIN pg_attrdef AS d ON c.oid = d.adrelid AND a.attnum = d.adnum
-LEFT JOIN indexed_columns AS idx
-  ON c.oid = idx.table_oid AND a.attnum = idx.column_num
+LEFT JOIN indexed AS ix ON c.oid = ix.root AND a.attname = ix.attname
 WHERE
   a.attnum > 0
   AND NOT a.attisdropped
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.relkind IN ('r', 'p')
+  AND NOT c.relispartition
   AND t.typname = 'uuid'
   AND d.adbin IS NOT NULL
 `
@@ -3183,6 +3200,8 @@ type UuidColumnDefaultsRow struct {
 }
 
 // Find UUID columns with their DEFAULT expressions to detect random UUID usage.
+// A partitioned table reports once, indexed if an index on the root or any partition covers the column.
+// pg_inherits instead of pg_partition_tree(), which locks every partition.
 func (q *Queries) UuidColumnDefaults(ctx context.Context) ([]UuidColumnDefaultsRow, error) {
 	rows, err := q.db.Query(ctx, uuidColumnDefaults)
 	if err != nil {

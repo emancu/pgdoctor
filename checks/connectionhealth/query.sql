@@ -9,6 +9,8 @@ SELECT
   , count(*) FILTER (WHERE state = 'idle in transaction') AS idle_in_transaction
   , count(*) FILTER (WHERE state = 'idle in transaction (aborted)') AS idle_in_transaction_aborted
   , count(*) FILTER (WHERE wait_event_type IS NOT NULL AND state = 'active') AS waiting_connections
+  -- Processes with no datid or no usesysid are masked for every role without pg_read_all_stats.
+  , count(*) FILTER (WHERE datid IS NOT NULL AND usesysid IS NOT NULL AND query = '<insufficient privilege>') AS hidden_connections
 FROM pg_stat_activity
 WHERE pid != pg_backend_pid();
 
