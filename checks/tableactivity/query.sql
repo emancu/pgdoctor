@@ -2,8 +2,7 @@
 -- Retrieves table write activity metrics from pg_stat_user_tables
 -- Used to identify high-churn tables and HOT update efficiency issues
 SELECT
-  schemaname
-  , relname
+  (schemaname || '.' || relname)::text AS table_name
   , n_tup_ins
   , n_tup_upd
   , n_tup_del
