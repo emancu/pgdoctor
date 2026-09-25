@@ -702,6 +702,20 @@ func TestTableVacuumHealth_VacuumStale_SortedWorstFirst(t *testing.T) {
 	assert.Equal(t, "public.warn_small", stale.Table.Rows[2].Cells[0])
 }
 
+func TestTableVacuumHealth_VacuumStale_SameNameInTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	report := runCheck(t, []db.TableVacuumHealthRow{
+		makeRow("tenant_a.orders").withRows(2_000_000).withDeadTuples(300_000).withLastVacuumAge(staleWarn).withLastAnalyzeAge(recent).build(),
+		makeRow("tenant_b.orders").withRows(2_000_000).withDeadTuples(260_000).withLastVacuumAge(staleWarn).withLastAnalyzeAge(recent).build(),
+	})
+
+	stale := findingByID(t, report, findingIDVacuumStale)
+	require.Len(t, stale.Table.Rows, 2)
+	assert.Equal(t, "tenant_a.orders", stale.Table.Rows[0].Cells[0])
+	assert.Equal(t, "tenant_b.orders", stale.Table.Rows[1].Cells[0])
+}
+
 func TestTableVacuumHealth_QueryError(t *testing.T) {
 	t.Parallel()
 
