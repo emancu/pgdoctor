@@ -175,3 +175,6 @@ read, and scan counters, ranking each index by scan count and computing its shar
 of total index-scan traffic to identify hot indexes. The per-table query mirrors
 this over `pg_statio_user_tables` and `pg_stat_user_tables`, ranking by heap reads
 (`seq_scan` + `idx_scan`) and measuring the heap-block hit ratio.
+The per-index and per-table queries read every non-system schema, not only
+`public`, and exclude temporary tables and their indexes. Each row names its
+object as `schema.name`.

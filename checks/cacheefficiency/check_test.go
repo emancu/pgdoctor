@@ -333,6 +333,20 @@ func runWithIndexRows(t *testing.T, rows []db.IndexCacheEfficiencyRow) *check.Re
 	return report
 }
 
+func Test_IndexCacheRatio_SameNameInTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	report := runWithIndexRows(t, []db.IndexCacheEfficiencyRow{
+		indexRow("tenant_a.idx_orders_created", mb(700), 60000, 1, 0.5, 70.0),
+		indexRow("tenant_b.idx_orders_created", mb(600), 50000, 2, 0.4, 60.0),
+	})
+
+	f := findFinding(t, report, "index-cache-ratio")
+	require.Len(t, f.Table.Rows, 2)
+	require.Equal(t, "tenant_a.idx_orders_created", f.Table.Rows[0].Cells[2])
+	require.Equal(t, "tenant_b.idx_orders_created", f.Table.Rows[1].Cells[2])
+}
+
 func Test_IndexCacheRatio_Informational(t *testing.T) {
 	t.Parallel()
 
@@ -473,6 +487,20 @@ func runWithTableRows(t *testing.T, rows []db.TableCacheEfficiencyRow) *check.Re
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
 	return report
+}
+
+func Test_TableCacheRatio_SameNameInTwoSchemas(t *testing.T) {
+	t.Parallel()
+
+	report := runWithTableRows(t, []db.TableCacheEfficiencyRow{
+		tableRow("tenant_a.orders", mb(700), 60000, 1, 0.5, 70.0),
+		tableRow("tenant_b.orders", mb(600), 50000, 2, 0.4, 60.0),
+	})
+
+	f := findFinding(t, report, "table-cache-ratio")
+	require.Len(t, f.Table.Rows, 2)
+	require.Equal(t, "tenant_a.orders", f.Table.Rows[0].Cells[2])
+	require.Equal(t, "tenant_b.orders", f.Table.Rows[1].Cells[2])
 }
 
 func Test_TableCacheRatio_Informational(t *testing.T) {
