@@ -68,6 +68,8 @@ SELECT
   , count(*) FILTER (WHERE state = 'idle in transaction') AS idle_in_transaction
   , count(*) FILTER (WHERE state = 'idle in transaction (aborted)') AS idle_in_transaction_aborted
   , count(*) FILTER (WHERE wait_event_type IS NOT NULL AND state = 'active') AS waiting_connections
+  -- Processes with no datid or no usesysid are masked for every role without pg_read_all_stats.
+  , count(*) FILTER (WHERE datid IS NOT NULL AND usesysid IS NOT NULL AND query = '<insufficient privilege>') AS hidden_connections
 FROM pg_stat_activity
 WHERE pid != pg_backend_pid()
 `
@@ -81,6 +83,7 @@ type ConnectionStatsRow struct {
 	IdleInTransaction        pgtype.Int8
 	IdleInTransactionAborted pgtype.Int8
 	WaitingConnections       pgtype.Int8
+	HiddenConnections        pgtype.Int8
 }
 
 // Gets overall connection statistics including pool sizing metrics.
@@ -96,6 +99,7 @@ func (q *Queries) ConnectionStats(ctx context.Context) (ConnectionStatsRow, erro
 		&i.IdleInTransaction,
 		&i.IdleInTransactionAborted,
 		&i.WaitingConnections,
+		&i.HiddenConnections,
 	)
 	return i, err
 }

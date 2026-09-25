@@ -139,6 +139,18 @@ sessions while doing no work. Pooled fleets keep a warm floor of idle connection
 is healthy. The leak signal is a count far above any configured floor, and a true leak is confirmed when it
 keeps climbing across runs instead of resting steady.
 
+### stats-restricted
+
+Reports when `pg_stat_activity` hides the state of other roles' connections from the current role.
+
+**Threshold:**
+- Warning: at least one connection to a database hides its state
+
+**Why it matters:**
+Only superusers and roles with `pg_read_all_stats` (for example through `pg_monitor`) can read `state`, `wait_event_type`, `query` and the timestamps of other roles' connections; everyone else sees NULL, and `<insufficient privilege>` as the query. `pool-pressure`, `idle-ratio`, `idle-in-transaction` and `long-idle` all read those columns, so a restricted role would count zero active or idle connections and report PASS even during an outage. When any connection is hidden, the check reports `stats-restricted`, skips `connection-overview`, `pool-pressure` and `idle-ratio`, and reports `idle-in-transaction` and `long-idle` only when the visible connections already show a problem. `connection-saturation` counts rows only, so it is still graded.
+
+Grant `pg_read_all_stats` (or `pg_monitor`) to the role that runs pgdoctor.
+
 ## How to Fix
 
 ### For `connection-saturation`
