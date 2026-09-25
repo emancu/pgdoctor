@@ -2,7 +2,7 @@
 
 Verifies that PostgreSQL role-level session settings (timeouts and logging) are properly configured for application roles.
 
-By default, application roles are **discovered dynamically** — any login-capable, non-system role is checked. You can also specify exact roles via configuration (see Library Configuration below).
+By default, application roles are **discovered dynamically** — any login-capable, non-system role is checked. You can also specify exact roles via configuration (see Configuration below).
 
 ## What it checks
 
@@ -97,26 +97,37 @@ WHERE r.rolcanlogin = true
 - Consider application deployment to cycle connections
 - Monitor application error rates after changes
 
-## Library Configuration
+## Configuration
 
-When using pgdoctor as a library, you can configure roles and timeout thresholds:
+| Key | Description | Default |
+|-----|-------------|---------|
+| `roles` | Comma-separated list of roles to check | Discovered dynamically |
+| `timeout` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` are a `Too high` WARN | `5000` |
+| `timeout.<role>` | Threshold (ms) for one role, in place of `timeout` | `timeout` |
+
+A role without a `timeout.<role>` key uses `timeout`. A value that is not an integer is ignored. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
+
+```yaml
+session-settings:
+  roles: "app_rw,dba_ro"
+  timeout: "2000"
+  timeout.dba_ro: "300000"
+```
+
+As a library, pass the same keys in `check.Config`:
 
 ```go
 cfg := check.Config{
     "session-settings": {
-        "roles":   "app_ro,app_rw",
-        "timeout": "2000",   // above this → "Too high" WARN (default: 5000)
+        "roles":          "app_rw,dba_ro",
+        "timeout":        "2000",
+        "timeout.dba_ro": "300000",
     },
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Config: cfg,
 })
 ```
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `roles` | Comma-separated list of roles to check | Discovered dynamically |
-| `timeout` | Threshold (ms) above which the timeouts are a `Too high` WARN | `5000` |
 
 When no config is provided, roles are discovered dynamically and default thresholds apply.
 

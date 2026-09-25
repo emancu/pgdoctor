@@ -35,9 +35,10 @@ type settingCheck struct {
 }
 
 type checker struct {
-	queryer SessionSettingsQueries
-	roles   []string
-	timeout int64 // default: 5000
+	queryer      SessionSettingsQueries
+	roles        []string
+	timeout      int64 // default: 5000
+	roleTimeouts map[string]int64
 }
 
 func Metadata() check.Metadata {
@@ -53,8 +54,9 @@ func Metadata() check.Metadata {
 
 func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
 	c := &checker{
-		queryer: queryer,
-		timeout: 5000,
+		queryer:      queryer,
+		timeout:      5000,
+		roleTimeouts: map[string]int64{},
 	}
 	if len(cfg) > 0 && cfg[0] != nil {
 		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
@@ -64,6 +66,15 @@ func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
 			if v, ok := myCfg["timeout"]; ok {
 				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 					c.timeout = n
+				}
+			}
+			for k, v := range myCfg {
+				role, ok := strings.CutPrefix(k, "timeout.")
+				if !ok {
+					continue
+				}
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					c.roleTimeouts[role] = n
 				}
 			}
 		}
@@ -192,8 +203,13 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 		return nil, fmt.Errorf("fetching transaction_timeout: %w", err)
 	}
 
+	timeout := c.timeout
+	if n, ok := c.roleTimeouts[user]; ok {
+		timeout = n
+	}
+
 	// Check statement_timeout
-	expectedTimeout := fmt.Sprintf("≤ %dms", c.timeout)
+	expectedTimeout := fmt.Sprintf("≤ %dms", timeout)
 	if stmtTimeout == 0 {
 		checks = append(checks, settingCheck{
 			Role:      user,
@@ -203,7 +219,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 			Status:    "MUST be set",
 			Severity:  check.SeverityWarn,
 		})
-	} else if stmtTimeout > c.timeout {
+	} else if stmtTimeout > timeout {
 		checks = append(checks, settingCheck{
 			Role:      user,
 			Parameter: "statement_timeout",
@@ -257,7 +273,7 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 				Status:    "MUST be set (PG17+)",
 				Severity:  check.SeverityWarn,
 			})
-		} else if txTimeout > c.timeout {
+		} else if txTimeout > timeout {
 			checks = append(checks, settingCheck{
 				Role:      user,
 				Parameter: "transaction_timeout",
