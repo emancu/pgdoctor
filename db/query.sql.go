@@ -2736,7 +2736,8 @@ LEFT JOIN LATERAL (
 ) AS i ON TRUE
 WHERE
   c.relkind IN ('r', 'p')
-  AND n.nspname = 'public'
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+  AND c.relpersistence <> 't'
 ORDER BY COALESCE(s.n_live_tup, c.reltuples::bigint) DESC
 `
 
@@ -2757,7 +2758,7 @@ type TableVacuumHealthRow struct {
 	NInsSinceVacuum       pgtype.Int8
 }
 
-// Returns all tables with vacuum-related health metrics.
+// Returns all tables with vacuum-related health metrics. Excludes: system schemas and temporary tables.
 // Used by subchecks: autovacuum-disabled, large-table-defaults, vacuum-stale.
 func (q *Queries) TableVacuumHealth(ctx context.Context) ([]TableVacuumHealthRow, error) {
 	rows, err := q.db.Query(ctx, tableVacuumHealth)
