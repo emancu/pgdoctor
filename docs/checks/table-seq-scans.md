@@ -23,7 +23,8 @@ Analyzes the ratio of sequential scans to index scans on tables:
 **Excludes**:
 - Small tables (< 10,000 rows) where sequential scans are efficient
 - Tables with no indexes (may be intentional staging/temp tables)
-- System schemas
+- System schemas (`pg_catalog`, `information_schema`, `pg_toast`); every other schema is read
+- Temporary tables
 
 ## Statistics Requirements
 
@@ -72,7 +73,7 @@ SELECT * FROM table_name WHERE commonly_filtered_column = value;
 ```sql
 SELECT indexname, indexdef
 FROM pg_indexes
-WHERE tablename = 'table_name';
+WHERE schemaname = 'schema' AND tablename = 'table_name';
 ```
 
 ### Creating Indexes
