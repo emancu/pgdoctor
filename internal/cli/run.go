@@ -30,6 +30,7 @@ type runOptions struct {
 	detail      string
 	hidePassing bool
 	output      string
+	config      string
 }
 
 func newRunCommand() *cobra.Command {
@@ -59,6 +60,15 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 			// Default to 'brief' detail when --only is used
 			if len(opts.only) > 0 && !cmd.Flags().Changed("detail") {
 				opts.detail = string(detailBrief)
+			}
+
+			var cfg check.Config
+			if opts.config != "" {
+				var err error
+				cfg, err = loadConfig(opts.config, pgdoctor.AllChecks())
+				if err != nil {
+					return err
+				}
 			}
 
 			ctx := cmd.Context()
@@ -110,6 +120,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			runOpts := pgdoctor.Options{
 				Checks: checks,
+				Config: cfg,
 			}
 
 			// JSON output: batch collect then render
@@ -189,6 +200,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief (default), verbose, debug")
 	cmd.Flags().BoolVar(&opts.hidePassing, "hide-passing", false, "Hide passing checks")
 	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
+	cmd.Flags().StringVar(&opts.config, "config", "", "YAML file with per-check settings, keyed by check ID")
 
 	return cmd
 }
