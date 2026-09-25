@@ -41,9 +41,11 @@ type rowBuilder struct {
 }
 
 func makeRow(tableName string) *rowBuilder {
+	_, relname, _ := strings.Cut(tableName, ".")
 	return &rowBuilder{
 		row: db.TableVacuumHealthRow{
 			TableName:        pgtype.Text{String: tableName, Valid: true},
+			Relname:          pgtype.Text{String: relname, Valid: true},
 			EstimatedRows:    pgtype.Int8{Int64: 0, Valid: true},
 			TableSizeBytes:   pgtype.Int8{Int64: 0, Valid: true},
 			NDeadTup:         pgtype.Int8{Int64: 0, Valid: true},
@@ -56,6 +58,11 @@ func makeRow(tableName string) *rowBuilder {
 			NInsSinceVacuum:  pgtype.Int8{Int64: 0, Valid: true},
 		},
 	}
+}
+
+func (b *rowBuilder) withRelname(relname string) *rowBuilder {
+	b.row.Relname = pgtype.Text{String: relname, Valid: true}
+	return b
 }
 
 func (b *rowBuilder) withRows(rows int64) *rowBuilder {
@@ -217,6 +224,115 @@ func TestTableVacuumHealth_AutovacuumDisabled_OneRowPerTableSortedByDeadTuples(t
 	require.Len(t, disabled.Table.Rows, 2)
 	assert.Equal(t, "public.busy", disabled.Table.Rows[0].Cells[0])
 	assert.Equal(t, "public.quiet", disabled.Table.Rows[1].Cells[0])
+}
+
+func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
+	t.Parallel()
+
+	rows := []db.TableVacuumHealthRow{
+		makeRow("public.outbox_events").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("tenant_1.outbox_events_p20260101").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("public.audit_logs").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("public.staging").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("audit_logs.orders").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("tenant.eu.outbox_events").withRelname("outbox_events").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("tenant.outbox_events.orders").withRelname("orders").withReloptions("autovacuum_enabled=false").build(),
+	}
+
+	tests := []struct {
+		name     string
+		cfg      check.Config
+		expected []string
+	}{
+		{
+			name:     "no config reports every table",
+			cfg:      nil,
+			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders", "tenant.eu.outbox_events", "tenant.outbox_events.orders"},
+		},
+		{
+			name:     "prefix excludes plain tables and partition leaves in every schema",
+			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events,audit_logs"}},
+			expected: []string{"public.staging", "audit_logs.orders", "tenant.outbox_events.orders"},
+		},
+		{
+			name:     "empty entries and spaces are ignored",
+			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ",outbox_events, ,audit_logs ,"}},
+			expected: []string{"public.staging", "audit_logs.orders", "tenant.outbox_events.orders"},
+		},
+		{
+			name:     "empty value reports every table",
+			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ""}},
+			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders", "tenant.eu.outbox_events", "tenant.outbox_events.orders"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, tt.cfg).Check(context.Background())
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			disabled := findingByID(t, report, findingIDAutovacuumDisabled)
+			assert.Equal(t, fmt.Sprintf("Found %d table(s) with autovacuum disabled", len(tt.expected)), disabled.Details)
+			require.NotNil(t, disabled.Table)
+			var got []string
+			for _, row := range disabled.Table.Rows {
+				got = append(got, row.Cells[0])
+			}
+			assert.ElementsMatch(t, tt.expected, got)
+		})
+	}
+}
+
+func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
+	t.Parallel()
+
+	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events"}}
+	rows := []db.TableVacuumHealthRow{
+		makeRow("public.outbox_events").withReloptions("autovacuum_enabled=false").build(),
+	}
+
+	report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+
+	disabled := findingByID(t, report, findingIDAutovacuumDisabled)
+	assert.Equal(t, check.SeverityPass, disabled.Severity)
+	assert.Nil(t, disabled.Table)
+}
+
+func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testing.T) {
+	t.Parallel()
+
+	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "outbox_events"}}
+	rows := []db.TableVacuumHealthRow{
+		makeRow("public.outbox_events").
+			withReloptions("autovacuum_enabled=false").
+			withRows(5_000_000).
+			withDeadTuples(600_000).
+			withLastVacuumAge(staleFail).
+			withLastAnalyzeAge(recent).
+			build(),
+	}
+
+	report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+
+	assert.Equal(t, check.SeverityPass, findingByID(t, report, findingIDAutovacuumDisabled).Severity)
+
+	large := findingByID(t, report, findingIDLargeTableDefaults)
+	require.NotNil(t, large.Table)
+	require.Len(t, large.Table.Rows, 1)
+	assert.Equal(t, "public.outbox_events", large.Table.Rows[0].Cells[0])
+
+	stale := findingByID(t, report, findingIDVacuumStale)
+	assert.Equal(t, check.SeverityFail, stale.Severity)
+	require.NotNil(t, stale.Table)
+	require.Len(t, stale.Table.Rows, 1)
+	assert.Equal(t, "public.outbox_events", stale.Table.Rows[0].Cells[0])
 }
 
 // Column indices for the large-table-defaults table:

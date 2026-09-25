@@ -3,6 +3,7 @@
 -- Used by subchecks: autovacuum-disabled, large-table-defaults, vacuum-stale.
 SELECT
   (n.nspname || '.' || c.relname)::text AS table_name
+  , c.relname::text AS relname
   , s.last_autovacuum
   , COALESCE(s.n_live_tup, c.reltuples::bigint) AS estimated_rows
   -- Lock-free size estimate from pg_class instead of PG_TOTAL_RELATION_SIZE(),

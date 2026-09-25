@@ -25,7 +25,8 @@ type TableVacuumHealthQueries interface {
 }
 
 type checker struct {
-	queries TableVacuumHealthQueries
+	queries                    TableVacuumHealthQueries
+	autovacuumDisabledExcludes []string
 }
 
 const (
@@ -62,10 +63,22 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableVacuumHealthQueries, _ ...check.Config) check.Checker {
-	return &checker{
+func New(queries TableVacuumHealthQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
 		queries: queries,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
+			if v, ok := myCfg["autovacuum_disabled_exclude"]; ok {
+				for _, prefix := range strings.Split(v, ",") {
+					if prefix = strings.TrimSpace(prefix); prefix != "" {
+						c.autovacuumDisabledExcludes = append(c.autovacuumDisabledExcludes, prefix)
+					}
+				}
+			}
+		}
+	}
+	return c
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -80,7 +93,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryVacuum, report.CheckID, err)
 	}
 
-	checkAutovacuumDisabled(rows, report)
+	checkAutovacuumDisabled(rows, c.autovacuumDisabledExcludes, report)
 	checkLargeTableDefaults(rows, report)
 	checkVacuumStale(rows, report)
 
@@ -98,10 +111,10 @@ func maxRowSeverity(rows []check.TableRow) check.Severity {
 	return severity
 }
 
-func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Report) {
+func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, excludes []string, report *check.Report) {
 	var disabled []db.TableVacuumHealthRow
 	for _, row := range rows {
-		if hasAutovacuumDisabled(row.Reloptions.String) {
+		if hasAutovacuumDisabled(row.Reloptions.String) && !isExcluded(row.Relname.String, excludes) {
 			disabled = append(disabled, row)
 		}
 	}
@@ -348,6 +361,15 @@ func formatActivity(age pgtype.Int8, count int64) string {
 
 func hasAutovacuumDisabled(reloptions string) bool {
 	return strings.Contains(strings.ToLower(reloptions), "autovacuum_enabled=false")
+}
+
+func isExcluded(table string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(table, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isUsingDefaultSettings(reloptions string) bool {
