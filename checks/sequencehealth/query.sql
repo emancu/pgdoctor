@@ -70,7 +70,7 @@ WITH sequence_info AS (
 
 SELECT
   si.schema_name
-  , si.sequence_name
+  , (si.schema_name || '.' || si.sequence_name)::text AS sequence_name
   , si.seq_data_type
   , si.current_value
   , si.max_value
@@ -78,7 +78,7 @@ SELECT
   , si.is_cyclic
   , si.remaining_values
   , ROUND(si.usage_percent::numeric, 2) AS usage_percent
-  , COALESCE(so.table_name, '') AS table_name
+  , COALESCE(so.table_schema || '.' || so.table_name, '')::text AS table_name
   , COALESCE(so.column_name, '') AS column_name
   , COALESCE(so.column_type, '') AS column_type
   , COALESCE(so.column_max_value, 0) AS column_max_value

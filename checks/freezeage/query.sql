@@ -110,7 +110,7 @@ ORDER BY pin_age DESC;
 -- Size avoids pg_total_relation_size(), whose AccessShareLock queues behind a
 -- *waiting* AccessExclusiveLock and would time this check out during the DDL
 -- pile-up it exists to diagnose. relpages is returned so relpages = 0 (never
--- vacuumed) renders as "unknown" rather than "0 B".
+-- vacuumed) renders as "-" rather than "0B".
 WITH settings AS (
   SELECT
     coalesce(max(CASE WHEN s.name = 'autovacuum_freeze_max_age' THEN s.setting::bigint END), 200000000) AS freeze_max_age
