@@ -3033,7 +3033,7 @@ WITH toast_info AS (
   FROM pg_class AS c
   INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
   INNER JOIN pg_class AS t ON c.reltoastrelid = t.oid
-  LEFT JOIN pg_stat_user_tables AS st ON t.oid = st.relid
+  LEFT JOIN pg_stat_all_tables AS st ON t.oid = st.relid
   WHERE
     c.relkind IN ('r', 'p')
     AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
