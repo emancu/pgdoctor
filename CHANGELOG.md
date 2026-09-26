@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: `connection-efficiency` no longer reports SKIP ("Server version unknown") on every standalone run, and `replication-slots` runs the query for the server version ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **`vacuum-settings`**: `maintenance_work_mem` no longer reports a FAIL with a `+Inf%` budget when the metadata has no memory size ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **`duplicate-indexes`**: `prefix-duplicates` reports an index whose key columns are a prefix of another index. It skips unique, exclusion, and `INCLUDE` indexes, and pairs with a different access method, operator class, collation, or sort order ([#132](https://github.com/emancu/pgdoctor/pull/132)).
+- **Release**: the release binary reports its version without `+dirty`, and pgx, x/net, x/text and goldmark move to versions that fix the reachable govulncheck findings ([#144](https://github.com/emancu/pgdoctor/pull/144)).
 
 ## [0.5.0] - 2026-08-14
 
