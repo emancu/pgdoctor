@@ -75,7 +75,7 @@ Advance or remove the single object the finding names, one command at a time: `S
 
 ## Notes
 
-- `Size (est)` is a lock-free `relpages` estimate. `pg_total_relation_size()` takes an `AccessShareLock` that queues behind waiting DDL and would time this check out during a lock pile-up. It is stale until the next `VACUUM`/`ANALYZE`, and `unknown` when `relpages` is 0.
+- `Size (est)` is a lock-free `relpages` estimate. `pg_total_relation_size()` takes an `AccessShareLock` that queues behind waiting DDL and would time this check out during a lock pile-up. It is stale until the next `VACUUM`/`ANALYZE`, and `-` when `relpages` is 0.
 - Anti-wraparound vacuum is exempt from the lock-conflict auto-cancel a normal autovacuum obeys, so a queued `ALTER TABLE` turns it into a table lockout. `autovacuum_enabled = false` does not prevent it.
 - PostgreSQL 14 is the floor, because `vacuum_failsafe_age` and `vacuum_multixact_failsafe_age` were added there. `horizon-pin` never reads `inactive_since` (PG17+), so slot recency is the age of the pinned xid.
 

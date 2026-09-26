@@ -1973,7 +1973,7 @@ WITH sequence_info AS (
 
 SELECT
   si.schema_name
-  , si.sequence_name
+  , (si.schema_name || '.' || si.sequence_name)::text AS sequence_name
   , si.seq_data_type
   , si.current_value
   , si.max_value
@@ -1981,7 +1981,7 @@ SELECT
   , si.is_cyclic
   , si.remaining_values
   , ROUND(si.usage_percent::numeric, 2) AS usage_percent
-  , COALESCE(so.table_name, '') AS table_name
+  , COALESCE(so.table_schema || '.' || so.table_name, '')::text AS table_name
   , COALESCE(so.column_name, '') AS column_name
   , COALESCE(so.column_type, '') AS column_type
   , COALESCE(so.column_max_value, 0) AS column_max_value
@@ -2690,7 +2690,7 @@ type TableFreezeAgeRow struct {
 // Size avoids pg_total_relation_size(), whose AccessShareLock queues behind a
 // *waiting* AccessExclusiveLock and would time this check out during the DDL
 // pile-up it exists to diagnose. relpages is returned so relpages = 0 (never
-// vacuumed) renders as "unknown" rather than "0 B".
+// vacuumed) renders as "-" rather than "0B".
 // The worst member per counter, picked whole. Reporting max(age) against
 // min(trigger) as independent aggregates would pair one member's age with
 // another's trigger and fabricate a severity no relation has: a 390M/100M parent

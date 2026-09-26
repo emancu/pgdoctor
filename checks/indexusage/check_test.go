@@ -163,7 +163,7 @@ func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 	report := runCheck(t, []db.IndexUsageStatsRow{r})
 	unused := finding(t, report, "unused-indexes")
 	require.Contains(t, unused.Details, "0 scans since 2026-06-01")
-	require.Contains(t, unused.Details, ">500MB")
+	require.Contains(t, unused.Details, ">500MiB")
 }
 
 func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
@@ -174,7 +174,7 @@ func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
 	report := runCheck(t, []db.IndexUsageStatsRow{r})
 	unused := finding(t, report, "unused-indexes")
 	require.Equal(t, check.SeverityWarn, unused.Severity)
-	require.Contains(t, unused.Details, "(0 scans, >500MB)")
+	require.Contains(t, unused.Details, "(0 scans, >500MiB)")
 	require.NotContains(t, unused.Details, "since")
 }
 

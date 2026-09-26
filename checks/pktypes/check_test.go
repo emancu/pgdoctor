@@ -246,14 +246,14 @@ func TestPKTypes_TableFormatting(t *testing.T) {
 	require.Equal(t, "id", table.Rows[0].Cells[1])
 	require.Equal(t, "int4", table.Rows[0].Cells[2])
 	require.Contains(t, table.Rows[0].Cells[3], "88.9%")
-	require.Contains(t, table.Rows[0].Cells[4], "1.9B")
+	require.Contains(t, table.Rows[0].Cells[4], "1.9G")
 	require.Equal(t, check.SeverityFail, table.Rows[0].Severity)
 
 	require.Equal(t, "public.kyc_statuses", table.Rows[1].Cells[0])
 	require.Equal(t, "id", table.Rows[1].Cells[1])
 	require.Equal(t, "int4", table.Rows[1].Cells[2])
 	require.Contains(t, table.Rows[1].Cells[3], "46.6%")
-	require.Contains(t, table.Rows[1].Cells[4], "1.0B")
+	require.Contains(t, table.Rows[1].Cells[4], "1.0G")
 	require.Equal(t, check.SeverityWarn, table.Rows[1].Severity)
 }
 

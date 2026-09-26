@@ -119,7 +119,7 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 		ID:       "unused-indexes",
 		Name:     "Unused Indexes",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d unused indexes (0 scans%s, >500MB)", len(unused), since),
+		Details:  fmt.Sprintf("Found %d unused indexes (0 scans%s, >500MiB)", len(unused), since),
 		Table: &check.Table{
 			Headers: []string{"Table", "Index", "Size"},
 			Rows:    tableRows,
@@ -196,7 +196,7 @@ func reportLowUsage(lowUsage []db.IndexUsageStatsRow, report *check.Report) {
 		ID:       "low-usage-indexes",
 		Name:     "Low Usage Indexes",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("Found %d indexes with sustained low read rates (>500MB, >=10k writes, <1 scan/week)", len(lowUsage)),
+		Details:  fmt.Sprintf("Found %d indexes with sustained low read rates (>500MiB, >=10k writes, <1 scan/week)", len(lowUsage)),
 		Table: &check.Table{
 			Headers: []string{"Table", "Index", "Size", "Scans", "Writes"},
 			Rows:    tableRows,

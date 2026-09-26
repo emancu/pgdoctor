@@ -513,6 +513,7 @@ func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
 		}
 	}
 	require.NotNil(t, foundRow, "Should find 'Role not found' row for nonexistent role")
+	require.Equal(t, "-", foundRow.Cells[2])
 }
 
 func Test_SessionSettings_CustomThreshold(t *testing.T) {
