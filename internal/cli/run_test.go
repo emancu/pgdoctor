@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/emancu/pgdoctor/check"
 )
 
 func TestParseDSNLabel(t *testing.T) {
@@ -77,4 +81,73 @@ func TestParseDSNLabel_DatabaseFromEnvironment(t *testing.T) {
 	cfg, err := parseDSN("postgres://u:secret@db.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "db.example.com/envdb", dsnLabel(cfg))
+}
+
+// main exits 2 on any error that is not a *SilentError.
+func TestRunCommand_UsageErrorsExitTwo(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"unknown flag", []string{"--bogus"}, "unknown flag"},
+		{"too many args", []string{"postgres://other"}, "accepts at most 1 arg"},
+		{"unknown detail", []string{"--detail", "full"}, "--detail"},
+		{"unknown output", []string{"--output", "yaml"}, "--output"},
+		{"unknown only", []string{"--only", "bogus"}, "bogus"},
+		{"unknown ignore", []string{"--ignore", "bogus"}, "bogus"},
+		{"missing config", []string{"--config", "/nonexistent/pgdoctor.yml"}, "pgdoctor.yml"},
+		{"zero checks", []string{"--only", "pg-version", "--ignore", "pg-version"}, "no checks selected"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := newRunCommand()
+			cmd.SetArgs(append([]string{"postgres://u@127.0.0.1:1/db"}, tt.args...))
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+
+			require.ErrorContains(t, err, tt.wantErr)
+			var silent *SilentError
+			assert.False(t, errors.As(err, &silent))
+		})
+	}
+}
+
+func TestExitStatus(t *testing.T) {
+	t.Parallel()
+
+	report := func(severity check.Severity) *check.Report {
+		r := check.NewReport(check.Metadata{CheckID: "demo"})
+		r.AddFinding(check.Finding{ID: "demo", Severity: severity})
+		return r
+	}
+
+	tests := []struct {
+		name     string
+		reports  []*check.Report
+		wantCode int
+	}{
+		{"no reports", nil, 0},
+		{"pass and warn", []*check.Report{report(check.SeverityPass), report(check.SeverityWarn)}, 0},
+		{"info", []*check.Report{report(check.SeverityInfo)}, 0},
+		{"one fail", []*check.Report{report(check.SeverityPass), report(check.SeverityFail)}, 1},
+	}
+
+	for _, tt := range tests {
+		err := exitStatus(tt.reports)
+		if tt.wantCode == 0 {
+			assert.NoError(t, err, tt.name)
+			continue
+		}
+		var silent *SilentError
+		require.ErrorAs(t, err, &silent, tt.name)
+		assert.Equal(t, tt.wantCode, silent.ExitCode, tt.name)
+	}
 }

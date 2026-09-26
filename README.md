@@ -82,7 +82,15 @@ A setting value can also be a list of scalars. pgdoctor joins the items with com
 
 pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar or a list of scalars. It prints each skipped entry to stderr at `--detail debug`.
 
-Exit codes: `0` = all checks pass, `1` = failures found, `2` = connection error.
+Exit codes are the same for text and JSON output:
+
+| Code | Meaning |
+|------|---------|
+| `0` | The checks ran. No check reported FAIL. |
+| `1` | The checks ran. At least one check reported FAIL. |
+| `2` | pgdoctor could not run: connection error, usage error, bad `--config`, unknown flag value, or zero checks selected. |
+
+A usage error is an unknown flag, too many arguments, or an unknown `--only` or `--ignore` value.
 
 ### `pgdoctor list`
 

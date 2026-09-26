@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`invalid-indexes`**: the table shows one schema-qualified `Table` column. Breaking for library consumers: `db.BrokenIndexesRow` drops `SchemaName` ([#89](https://github.com/emancu/pgdoctor/pull/89)).
 - **`table-activity`**: both findings show one schema-qualified `Table` column. Breaking for library consumers: `db.TableActivityRow` replaces `Schemaname` and `Relname` with `TableName` ([#90](https://github.com/emancu/pgdoctor/pull/90)).
 - **`db-statistics`**: breaking — the `statistics-freshness` check and its finding ID are renamed `db-statistics` ([#97](https://github.com/emancu/pgdoctor/pull/97)).
+- **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 
 ### Fixed
 
