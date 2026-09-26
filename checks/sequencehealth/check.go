@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -71,7 +72,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		}
 	}
 
-	if len(readable) == 0 {
+	if len(readable) == 0 && !slices.ContainsFunc(rows, exceedsColumn) {
 		report.AddFinding(check.Finding{
 			ID:       report.CheckID,
 			Name:     report.Name,
@@ -82,8 +83,10 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	checkNearExhaustion(readable, report)
-	checkIntegerShouldBeBigint(readable, report)
+	if len(readable) > 0 {
+		checkNearExhaustion(readable, report)
+		checkIntegerShouldBeBigint(readable, report)
+	}
 	checkSequenceTypeMismatch(rows, report)
 
 	if unreadable := len(rows) - len(readable); unreadable > 0 {
@@ -239,7 +242,7 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 	var mismatched []db.SequenceHealthRow
 
 	for _, row := range rows {
-		if row.SequenceExceedsColumn.Bool && row.ColumnType.String != "" {
+		if exceedsColumn(row) {
 			mismatched = append(mismatched, row)
 		}
 	}
@@ -285,6 +288,10 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 }
 
 // Helper functions
+
+func exceedsColumn(row db.SequenceHealthRow) bool {
+	return row.SequenceExceedsColumn.Bool && row.ColumnType.String != ""
+}
 
 func formatTableColumn(table, column string) string {
 	if table == "" || column == "" {

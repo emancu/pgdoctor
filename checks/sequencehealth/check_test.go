@@ -126,6 +126,12 @@ func unreadableRow(seqName, tableName string) db.SequenceHealthRow {
 func TestSequenceHealth_UnreadableSequences(t *testing.T) {
 	t.Parallel()
 
+	mismatched := unreadableRow("c_id_seq", "c")
+	mismatched.SeqDataType = pgtype.Text{String: "bigint", Valid: true}
+	mismatched.MaxValue = pgtype.Int8{Int64: 9223372036854775807, Valid: true}
+	mismatched.ColumnMaxValue = pgtype.Int8{Int64: 2147483647, Valid: true}
+	mismatched.SequenceExceedsColumn = pgtype.Bool{Bool: true, Valid: true}
+
 	critical := makeSequenceRow(
 		"public", "orders_id_seq", "integer", "orders", "id", "integer",
 		1932735283, 2147483647, 1, 214748364, 2147483647,
@@ -144,6 +150,13 @@ func TestSequenceHealth_UnreadableSequences(t *testing.T) {
 			rows:       []db.SequenceHealthRow{unreadableRow("a_id_seq", "a"), unreadableRow("b_id_seq", "b")},
 			severity:   check.SeveritySkip,
 			findingIDs: []string{"sequence-health"},
+		},
+		{
+			name:         "all unreadable with a type mismatch - FAIL plus INFO",
+			rows:         []db.SequenceHealthRow{mismatched, unreadableRow("a_id_seq", "a")},
+			severity:     check.SeverityFail,
+			findingIDs:   []string{findingIDTypeMismatch, "unreadable-sequences"},
+			wantInfoText: "2 sequence(s) not evaluated",
 		},
 		{
 			name:         "some unreadable - readable ones evaluated plus INFO",
