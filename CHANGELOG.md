@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`table-seq-scans`**: reads tables in every non-system schema, not only `public` ([#95](https://github.com/emancu/pgdoctor/pull/95)).
 - **`table-vacuum-health`**: reads tables in every non-system schema, not only `public` ([#96](https://github.com/emancu/pgdoctor/pull/96)).
 - **CLI**: the `run` report header no longer shows the password of a keyword connection string ([#103](https://github.com/emancu/pgdoctor/pull/103)).
+- **`pk-types`**: finds the sequence behind a key by OID, so IDENTITY keys are reported and a sequence with the same name in another schema no longer supplies the value. The query takes about 100 ms at 10,000 tables, where it used to exceed the statement timeout. Breaking for library consumers: `db.InvalidPrimaryKeyTypesRow` fields `TableName`, `ColumnName`, `ColumnType` and `EstimatedRows` are `string`/`int64` instead of `pgtype` values ([#136](https://github.com/emancu/pgdoctor/pull/136)).
 
 ## [0.5.0] - 2026-08-14
 
