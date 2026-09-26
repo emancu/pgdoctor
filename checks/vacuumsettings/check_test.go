@@ -367,6 +367,19 @@ func Test_VacuumSettings_WorkMemGuards(t *testing.T) {
 	}
 }
 
+func Test_VacuumSettings_MaintenanceWorkMemMemoryUnknown(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockVacuumSettingsQueries{rows: overrideOptimalWith("maintenance_work_mem", "1048576")}
+	checker := vacuumsettings.New(queryer)
+
+	ctx := check.ContextWithInstanceMetadata(context.Background(), &check.InstanceMetadata{EngineVersion: "17.4", EngineVersionMajor: 17, EngineVersionMinor: 4})
+	report, err := checker.Check(ctx)
+	require.NoError(t, err)
+
+	require.Nil(t, findResult(report.Results, "maintenance_work_mem"))
+}
+
 func Test_VacuumSettings_MultipleIssues(t *testing.T) {
 	t.Parallel()
 

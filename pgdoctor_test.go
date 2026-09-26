@@ -7,6 +7,7 @@ import (
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,7 +117,7 @@ func TestRun_ContinuesAfterStatementTimeout(t *testing.T) {
 	fastReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityPass, Details: "all good"})
 
 	var reports []*check.Report
-	Run(context.Background(), nil, Options{
+	Run(context.Background(), &fakeDB{versionNum: 170004}, Options{
 		Checks: []check.Package{
 			fakePackage("slow-check", check.CategoryConfigs, nil, pgErr),
 			fakePackage("fast-check", check.CategoryConfigs, fastReport, nil),
@@ -141,7 +142,7 @@ func TestRun_ContinuesAfterCheckError(t *testing.T) {
 	goodReport.AddFinding(check.Finding{ID: "ok", Name: "OK", Severity: check.SeverityPass})
 
 	var reports []*check.Report
-	Run(context.Background(), nil, Options{
+	Run(context.Background(), &fakeDB{versionNum: 170004}, Options{
 		Checks: []check.Package{
 			fakePackage("broken-check", check.CategoryConfigs, nil, fmt.Errorf("connection refused")),
 			fakePackage("good-check", check.CategoryConfigs, goodReport, nil),
@@ -157,4 +158,123 @@ func TestRun_ContinuesAfterCheckError(t *testing.T) {
 
 	assert.Equal(t, check.SeverityPass, reports[1].Severity)
 	assert.Equal(t, "good-check", reports[1].CheckID)
+}
+
+type fakeDB struct {
+	versionNum int32
+	err        error
+	queries    int
+}
+
+func (f *fakeDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (f *fakeDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, nil
+}
+
+func (f *fakeDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	f.queries++
+	return fakeRow{versionNum: f.versionNum, err: f.err}
+}
+
+type fakeRow struct {
+	versionNum int32
+	err        error
+}
+
+func (r fakeRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*dest[0].(*int32) = r.versionNum / 10000
+	*dest[1].(*int32) = r.versionNum % 100
+	return nil
+}
+
+type metadataCapture struct {
+	seen *check.InstanceMetadata
+}
+
+func (m *metadataCapture) Metadata() check.Metadata {
+	return check.Metadata{CheckID: "capture", Name: "Capture", Category: check.CategoryConfigs}
+}
+
+func (m *metadataCapture) Check(ctx context.Context) (*check.Report, error) {
+	m.seen = check.InstanceMetadataFromContext(ctx)
+	return check.NewReport(m.Metadata()), nil
+}
+
+func TestRun_ServerVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		meta        *check.InstanceMetadata
+		dbErr       error
+		wantQueries int
+		want        *check.InstanceMetadata
+	}{
+		{
+			name:        "no metadata",
+			meta:        nil,
+			wantQueries: 1,
+			want:        &check.InstanceMetadata{EngineVersion: "17.4", EngineVersionMajor: 17, EngineVersionMinor: 4},
+		},
+		{
+			name:        "metadata without version",
+			meta:        &check.InstanceMetadata{InstanceID: "db-1", VCPUCores: 4, MemoryGB: 16},
+			wantQueries: 1,
+			want:        &check.InstanceMetadata{InstanceID: "db-1", VCPUCores: 4, MemoryGB: 16, EngineVersion: "17.4", EngineVersionMajor: 17, EngineVersionMinor: 4},
+		},
+		{
+			name:        "metadata with version",
+			meta:        &check.InstanceMetadata{InstanceID: "db-1", EngineVersion: "15.2", EngineVersionMajor: 15, EngineVersionMinor: 2},
+			wantQueries: 0,
+			want:        &check.InstanceMetadata{InstanceID: "db-1", EngineVersion: "15.2", EngineVersionMajor: 15, EngineVersionMinor: 2},
+		},
+		{
+			name:        "query error",
+			meta:        nil,
+			dbErr:       fmt.Errorf("permission denied"),
+			wantQueries: 1,
+			want:        nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var callerCopy check.InstanceMetadata
+			if tt.meta != nil {
+				callerCopy = *tt.meta
+			}
+
+			conn := &fakeDB{versionNum: 170004, err: tt.dbErr}
+			capture := &metadataCapture{}
+			var reports []*check.Report
+
+			ctx := context.Background()
+			if tt.meta != nil {
+				ctx = check.ContextWithInstanceMetadata(ctx, tt.meta)
+			}
+
+			Run(ctx, conn, Options{
+				Checks: []check.Package{{
+					Metadata: capture.Metadata,
+					New:      func(db.DBTX, check.Config) check.Checker { return capture },
+				}},
+				OnReport: Collect(&reports),
+			})
+
+			require.Len(t, reports, 1)
+			assert.Equal(t, tt.wantQueries, conn.queries)
+			assert.Equal(t, tt.want, capture.seen)
+			if tt.meta != nil {
+				assert.Equal(t, callerCopy, *tt.meta, "caller metadata must not change")
+			}
+		})
+	}
 }
