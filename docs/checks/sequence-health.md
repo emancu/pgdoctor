@@ -98,6 +98,8 @@ COMMIT;
 - 100K inserts/day: Migrate within 6 months
 - <10K inserts/day: Plan migration opportunistically
 
+**Foreign key references multiply the migration work.** Each referencing column must also become bigint. Each `ALTER COLUMN ... TYPE bigint` rewrites its table and the indexes of that table under an `ACCESS EXCLUSIVE` lock, so the lock time grows with the table size. A column with many references needs a coordinated migration of several tables. Plan it early, before capacity forces it. To list the references, see "Critical: Update ALL Foreign Keys" below.
+
 ### For `type-mismatch`
 
 Fix sequence bounds to match column type:
@@ -124,9 +126,6 @@ GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO monitoring_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
   GRANT SELECT ON SEQUENCES TO monitoring_role;
 ```
-### For `sequence-health`
-
-No action.
 
 ## Decision Tree: Which Issue to Fix First?
 
@@ -137,10 +136,12 @@ CRITICAL (Migrate immediately - days to failure):
 
 HIGH PRIORITY (Plan migration - weeks to months):
 ├─► near-exhaustion >75%
-└─► integer-columns >50% with >100K inserts/day
+├─► integer-columns >50% with >100K inserts/day
+└─► integer-columns with >10 foreign key references
 
 MEDIUM PRIORITY (Plan proactively - months to years):
 ├─► integer-columns >50% with <100K inserts/day
+├─► integer-columns with 1-10 foreign key references
 └─► type-mismatch (fix before it becomes critical)
 
 LOW PRIORITY (Monitor):

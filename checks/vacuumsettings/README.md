@@ -267,10 +267,6 @@ SELECT pg_reload_conf();
 - Values < 4MB cause excessive temp file usage
 - Values > 64MB risky without RAM awareness
 
-### For `vacuum-settings`
-
-No action.
-
 ### For Individual Tables
 
 Override settings for specific tables:

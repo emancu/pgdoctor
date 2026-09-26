@@ -77,10 +77,6 @@ Consider if these indexes are:
 
 Evaluate index value vs maintenance cost for your workload.
 
-### For `index-usage`
-
-No action.
-
 ## Query Details
 
 Queries `pg_stat_user_indexes`, `pg_stat_user_tables`, and `pg_stat_database` for comprehensive usage analysis.

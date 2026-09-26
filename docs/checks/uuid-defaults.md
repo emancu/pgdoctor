@@ -110,10 +110,6 @@ import { v7 as uuidv7 } from 'uuid';
 const id = uuidv7();
 ```
 
-### For `uuid-defaults`
-
-No action.
-
 ## Subchecks
 
 ### random-uuid-indexed

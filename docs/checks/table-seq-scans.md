@@ -60,10 +60,6 @@ Large tables are read mostly by sequential scans. Find the queries that scan the
 
 Use the same steps as for `high-seq-scans`. These tables are smaller or scanned less often, so the fix is less urgent.
 
-### For `table-seq-scans`
-
-No action.
-
 ### Investigation Steps
 
 1. **Identify Problematic Queries**:

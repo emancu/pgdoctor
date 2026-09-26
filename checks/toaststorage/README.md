@@ -101,6 +101,10 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ## Subchecks
 
+### toast-usage
+
+Looks for tables with more than 1MB of TOAST storage.
+
 ### toast-ratio
 
 Lists TOAST-heavy tables: TOAST >=50% of total size, or >=10GB absolute. Sorted by TOAST size.
@@ -277,14 +281,6 @@ ALTER TABLE media ALTER COLUMN file_data SET STORAGE EXTERNAL;
   `pg_repack` or dump/restore — `VACUUM FULL`/`CLUSTER` do not reliably recompress out-of-line datums.
 - The catalog records settings, not data. To see a table's real pglz/lz4 mix, run the (scan-priced)
   `SELECT pg_column_compression(col), count(*) FROM tab GROUP BY 1;`
-
-### For `toast-usage`
-
-No action. No table has more than 1MB of TOAST storage.
-
-### For `toast-storage`
-
-TOAST compression settings exist only in PostgreSQL 14 and later. Upgrade the server to use this check.
 
 ## Decision Tree: Which Issue to Fix First?
 

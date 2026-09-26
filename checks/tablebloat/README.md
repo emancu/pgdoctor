@@ -77,10 +77,6 @@ pg_repack -t schema.table_name
 - Ensure adequate `maintenance_work_mem`
 - Monitor for long-running transactions
 
-### For `table-bloat`
-
-No action.
-
 ## Related Checks
 
 - `vacuum-settings` - Validates global autovacuum configuration

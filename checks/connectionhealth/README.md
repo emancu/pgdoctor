@@ -275,10 +275,6 @@ SELECT pg_reload_conf();
 # - Long-running background jobs not releasing connections
 ```
 
-### For `connection-overview`
-
-No action. This finding shows the current connection counts as context for the other findings.
-
 ### For `stats-restricted`
 
 Grant `pg_read_all_stats` (or `pg_monitor`) to the role that runs pgdoctor:

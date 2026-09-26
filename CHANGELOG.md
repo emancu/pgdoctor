@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`toast-storage`**: breaking — the finding that reports no significant TOAST storage is renamed from `toast-storage` to `toast-usage` ("TOAST Usage"), so the text output prints the check header once ([#152](https://github.com/emancu/pgdoctor/pull/152)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 - **CLI**: byte values under 1 KiB print as `512 bytes`, so `B` means only billions in counts (`2.1B`). Byte values in prose use IEC units, a missing table cell shows `-`, `sequence-health` prints schema-qualified names, and the summary line uses correct plurals ([#162](https://github.com/emancu/pgdoctor/pull/162)).
-- **Docs**: every emitted finding ID has a `### For \`finding-id\`` heading in its check README, and `readme_test.go` enforces it. `**Severity**` lines and SKIP/PASS narration are removed from the READMEs ([#163](https://github.com/emancu/pgdoctor/pull/163)).
+- **Docs**: every finding ID that a check emits as INFO, WARN or FAIL has a `### For \`finding-id\`` heading in its check README, and `readme_test.go` enforces it. A PASS-only or SKIP-only ID has a heading only when the operator can act, for example to install an extension, grant a privilege, or wait for statistics. `**Severity**` lines and SKIP/PASS narration are removed from the READMEs ([#163](https://github.com/emancu/pgdoctor/pull/163)).
 
 ### Fixed
 

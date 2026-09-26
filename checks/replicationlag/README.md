@@ -401,10 +401,6 @@ FROM pg_replication_slots;
 - Increase `max_slot_wal_keep_size` if possible
 - Investigate why consumer is lagging (see lag subchecks)
 
-### For `no-replication`
-
-No action. If this database must have a standby or a subscriber, make sure that its replication stream is connected.
-
 ### Emergency Response
 
 If lag is critical and growing:

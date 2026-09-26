@@ -161,10 +161,6 @@ WHERE datname NOT IN ('template0', 'template1');
    - Add indexes for frequently filtered columns
    - Review query plans for sequential scans on large tables
 
-### For `connection-efficiency`
-
-Session statistics exist only in PostgreSQL 14 and later. Upgrade an older server to get these metrics. After a restart or a `pg_stat_reset()`, the counters are empty. Let clients open and close sessions, then run the check again.
-
 ## Monitoring Queries
 
 ### Track termination trends:

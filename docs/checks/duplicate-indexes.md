@@ -89,10 +89,6 @@ The shorter index columns are a prefix of the longer index. PostgreSQL can use t
 DROP INDEX CONCURRENTLY schema.prefix_index_name;
 ```
 
-### For `duplicate-indexes`
-
-No action.
-
 ### Preventing Duplicates
 
 Add checks to migration reviews:

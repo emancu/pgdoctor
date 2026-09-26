@@ -200,10 +200,6 @@ Slots with >= 1GB lag need attention:
 3. **Optimize consumer processing** if possible
 4. **Increase consumer resources** if needed
 
-### For `replication-slots`
-
-No action.
-
 ### Dropping Unused Slots
 
 **⚠️ Warning**: Only drop slots that are no longer needed!

@@ -15,6 +15,7 @@ var (
 	checkIDPattern   = regexp.MustCompile(`CheckID:\s+"([^"]+)"`)
 	findingIDPattern = regexp.MustCompile(`(\w*)ID:\s+("[^"]+"|[\w.]+),`)
 	headingPattern   = regexp.MustCompile("(?m)^### For `([^`]+)`")
+	severityPattern  = regexp.MustCompile(`Severity:\s+([\w.]+)`)
 )
 
 // Operators grep a check README for the finding ID that the run output prints.
@@ -43,11 +44,15 @@ func TestReadmeHasHeadingForEveryFindingID(t *testing.T) {
 				headings[m[1]]++
 			}
 
-			for id := range emitted {
-				assert.Equal(t, 1, headings[id], "README needs exactly one \"### For `%s`\" heading", id)
+			for id, required := range emitted {
+				if required {
+					assert.Equal(t, 1, headings[id], "README needs exactly one \"### For `%s`\" heading", id)
+				}
 			}
-			for id := range headings {
-				assert.True(t, emitted[id], "README has a heading for %q, which the check does not emit", id)
+			for id, n := range headings {
+				_, ok := emitted[id]
+				assert.True(t, ok, "README has a heading for %q, which the check does not emit", id)
+				assert.Equal(t, 1, n, "README has more than one \"### For `%s`\" heading", id)
 			}
 		})
 	}
@@ -56,6 +61,10 @@ func TestReadmeHasHeadingForEveryFindingID(t *testing.T) {
 // findingIDPattern also matches `CheckID:` and struct fields such as
 // `dbFindingID:`. A selector value such as c.dbFindingID is skipped, because the
 // struct literal that sets that field supplies the ID.
+//
+// The map value is true when the ID needs a heading: the first `Severity:`
+// after some occurrence of the ID is neither PASS nor SKIP. A severity held in
+// a variable counts as needing a heading.
 func findingIDs(t *testing.T, src string) map[string]bool {
 	t.Helper()
 
@@ -64,22 +73,27 @@ func findingIDs(t *testing.T, src string) map[string]bool {
 	checkID := m[1]
 
 	ids := map[string]bool{}
-	for _, m := range findingIDPattern.FindAllStringSubmatch(src, -1) {
-		if m[1] == "Check" {
+	for _, loc := range findingIDPattern.FindAllStringSubmatchIndex(src, -1) {
+		if src[loc[2]:loc[3]] == "Check" {
 			continue
 		}
-		expr := m[2]
+		var id string
+		expr := src[loc[4]:loc[5]]
 		switch {
 		case strings.HasPrefix(expr, `"`):
-			ids[strings.Trim(expr, `"`)] = true
+			id = strings.Trim(expr, `"`)
 		case expr == "report.CheckID":
-			ids[checkID] = true
+			id = checkID
 		case strings.Contains(expr, "."):
+			continue
 		default:
 			c := regexp.MustCompile(`\b` + expr + `\s+=\s+"([^"]+)"`).FindStringSubmatch(src)
 			require.NotNil(t, c, "cannot resolve finding ID %s", expr)
-			ids[c[1]] = true
+			id = c[1]
 		}
+		sev := severityPattern.FindStringSubmatch(src[loc[1]:])
+		quiet := sev != nil && (sev[1] == "check.SeverityPass" || sev[1] == "check.SeveritySkip")
+		ids[id] = ids[id] || !quiet
 	}
 	return ids
 }
