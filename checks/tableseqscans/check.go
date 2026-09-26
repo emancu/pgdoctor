@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -76,10 +75,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
-	var failTables []string
-	var warnTables []string
-	failCount := 0
-	warnCount := 0
+	var failRows []check.TableRow
+	var warnRows []check.TableRow
 
 	for _, row := range rows {
 		if row.IndexCount.Int64 == 0 {
@@ -87,65 +84,54 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 		}
 
 		var ratio float64
+		ratioCell := "-"
 		if row.SeqToIdxRatio.Valid {
 			r, _ := row.SeqToIdxRatio.Float64Value()
 			ratio = r.Float64
+			ratioCell = fmt.Sprintf("%.1f", ratio)
 		} else {
 			ratio = 999999
 		}
 
-		sizeMB := float64(row.TableSizeBytes.Int64) / (1024 * 1024)
+		cells := []string{
+			row.TableName.String,
+			check.FormatNumber(row.SeqScan.Int64),
+			check.FormatNumber(row.IdxScan.Int64),
+			ratioCell,
+			check.FormatNumber(row.EstimatedRows.Int64),
+			check.FormatBytes(row.TableSizeBytes.Int64),
+		}
 
 		if row.EstimatedRows.Int64 >= failRowThreshold && ratio >= failRatioThreshold {
-			failCount++
-			if len(failTables) < 10 {
-				failTables = append(failTables, fmt.Sprintf("%s (seq: %d, idx: %d, ratio: %.1f, rows: %d, size: %.1f MB)",
-					row.TableName.String, row.SeqScan.Int64, row.IdxScan.Int64, ratio, row.EstimatedRows.Int64, sizeMB))
-			}
+			failRows = append(failRows, check.TableRow{Cells: cells, Severity: check.SeverityFail})
 		} else if row.EstimatedRows.Int64 >= warnRowThreshold && ratio >= warnRatioThreshold {
-			warnCount++
-			if len(warnTables) < 10 {
-				warnTables = append(warnTables, fmt.Sprintf("%s (seq: %d, idx: %d, ratio: %.1f, rows: %d, size: %.1f MB)",
-					row.TableName.String, row.SeqScan.Int64, row.IdxScan.Int64, ratio, row.EstimatedRows.Int64, sizeMB))
-			}
+			warnRows = append(warnRows, check.TableRow{Cells: cells, Severity: check.SeverityWarn})
 		}
 	}
 
-	if failCount > 0 {
-		details := fmt.Sprintf("Found %d tables with very high sequential scan ratios:\n%s",
-			failCount,
-			strings.Join(failTables, "\n"),
-		)
-		if failCount > len(failTables) {
-			details += fmt.Sprintf("\n... and %d more", failCount-len(failTables))
-		}
+	headers := []string{"Table", "Seq Scans", "Idx Scans", "Ratio", "Rows", "Size"}
 
+	if len(failRows) > 0 {
 		report.AddFinding(check.Finding{
 			ID:       "high-seq-scans",
 			Name:     "High Sequential Scans",
 			Severity: check.SeverityFail,
-			Details:  details,
+			Details:  fmt.Sprintf("Found %d tables with very high sequential scan ratios", len(failRows)),
+			Table:    &check.Table{Headers: headers, Rows: failRows},
 		})
 	}
 
-	if warnCount > 0 {
-		details := fmt.Sprintf("Found %d tables with elevated sequential scan ratios:\n%s",
-			warnCount,
-			strings.Join(warnTables, "\n"),
-		)
-		if warnCount > len(warnTables) {
-			details += fmt.Sprintf("\n... and %d more", warnCount-len(warnTables))
-		}
-
+	if len(warnRows) > 0 {
 		report.AddFinding(check.Finding{
 			ID:       "moderate-seq-scans",
 			Name:     "Moderate Sequential Scans",
 			Severity: check.SeverityWarn,
-			Details:  details,
+			Details:  fmt.Sprintf("Found %d tables with elevated sequential scan ratios", len(warnRows)),
+			Table:    &check.Table{Headers: headers, Rows: warnRows},
 		})
 	}
 
-	if failCount == 0 && warnCount == 0 {
+	if len(failRows) == 0 && len(warnRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "high-seq-scans",
 			Name:     "High Sequential Scans",
