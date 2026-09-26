@@ -81,6 +81,13 @@ func New(queries TableVacuumHealthQueries, cfg ...check.Config) check.Checker {
 	return c
 }
 
+func ValidateSetting(key, _ string) error {
+	if key != "autovacuum_disabled_exclude" {
+		return fmt.Errorf("unknown key %q", key)
+	}
+	return nil
+}
+
 func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }

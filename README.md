@@ -82,7 +82,13 @@ session-settings:
 
 A setting value can also be a list of scalars. pgdoctor joins the items with commas, so `roles: [app_rw, dba_ro]` is the same as `roles: "app_rw,dba_ro"`.
 
-pgdoctor skips an unknown check ID, a check value that is not a map, and a setting value that is not a scalar or a list of scalars. It prints each skipped entry to stderr at `--detail debug`.
+An error in the config file stops pgdoctor with exit code `2` before it runs a query. pgdoctor prints every error to stderr. These are errors:
+
+- an unknown check ID
+- a check value that is not a map
+- a key that the check does not read
+- a setting value that is not a scalar or a list of scalars
+- a value that the check cannot read, for example `timeout: 5s`
 
 Exit codes are the same for text and JSON output:
 

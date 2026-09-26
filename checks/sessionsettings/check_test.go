@@ -604,22 +604,28 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 	}
 
 	// Config only specifies api_user — worker_user should be ignored
-	cfg := check.Config{
-		"session-settings": {"roles": "api_user"},
+	for _, roles := range []string{"api_user", " api_user , ,"} {
+		t.Run(roles, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := check.Config{
+				"session-settings": {"roles": roles},
+			}
+
+			queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
+
+			checker := sessionsettings.New(queryer, cfg)
+			report, err := checker.Check(context.Background())
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			results := report.Results
+			require.Equal(t, 1, len(results), "Should have exactly 1 result")
+
+			// Only api_user is checked (which has good settings), worker_user is ignored
+			require.Equal(t, check.SeverityPass, results[0].Severity, "Should only check configured roles")
+		})
 	}
-
-	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
-
-	checker := sessionsettings.New(queryer, cfg)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-	checktest.AssertSeverityInvariant(t, report)
-
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-	// Only api_user is checked (which has good settings), worker_user is ignored
-	require.Equal(t, check.SeverityPass, results[0].Severity, "Should only check configured roles")
 }
 
 func Test_SessionSettings_RoleTimeout(t *testing.T) {
