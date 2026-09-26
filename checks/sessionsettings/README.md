@@ -46,6 +46,8 @@ Common production problems caused by misconfigured settings:
 
 ## How to Fix
 
+### For `session-settings`
+
 Configure role settings using `ALTER ROLE`:
 
 ```sql

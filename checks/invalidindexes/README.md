@@ -26,6 +26,8 @@ An index becomes invalid when:
 
 ## How to Fix
 
+### For `invalid-indexes`
+
 For each invalid index, choose one of these options:
 
 ### Option 1: Recreate the Index

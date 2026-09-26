@@ -8,8 +8,7 @@ Monitors PostgreSQL temporary file creation which indicates queries spilling to 
 
 ### Temp File Rate (`temp-rate`)
 
-One finding carrying two numbers, the files created and the bytes written. Each is
-graded against its own thresholds and the finding reports the worse of the two.
+Two numbers: the files created and the bytes written. Each has its own thresholds.
 
 Files created:
 - **FAIL**: ≥20 files/hour (serious regression or multiple problematic queries)
@@ -20,10 +19,6 @@ Bytes written:
 - **FAIL**: ≥5 GB/hour (major regression or multiple large queries spilling to disk)
 - **WARN**: ≥1 GB/hour (increased large sorts/hashes from new features or query changes)
 - **Baseline**: Well-tuned production databases typically see 100-200MB/hour
-
-`temp-file-sources` below carries the same grade when it can name the statements
-responsible. When it cannot, the rate keeps it: a spill nothing accounts for is more
-often the worst case than a benign one.
 
 ### The Measurement Window
 
@@ -38,11 +33,11 @@ real window is **at least** the uptime, and the rates computed from it are **upp
 bounds**:
 
 - A rate below the threshold is conclusive — the true rate is lower still.
-- A rate above it might just be a long history divided by a short uptime, so the
-  finding is capped at WARN and never escalates to FAIL.
+- A rate above it might just be a long history divided by a short uptime. Compare
+  two runs over a known interval before you treat it as urgent.
 
-The check reports SKIP only when the window is under an hour, where the denominator
-is small enough that a single query's temp file would dominate the rate.
+A window under an hour is too short to use: a single query's temp file would
+dominate the rate.
 
 ### Top Spilling Statements (`temp-file-sources`)
 
@@ -238,6 +233,18 @@ LIMIT 10;
 ALTER SYSTEM SET maintenance_work_mem = '1GB';
 SELECT pg_reload_conf();
 ```
+
+### For `temp-file-sources`
+
+Start with the statement at the top of the table. Run `EXPLAIN` on it to find the sort
+or hash that spills. `EXPLAIN ANALYZE` executes the statement, so use it only on a
+`SELECT`. Then fix the query, or raise `work_mem` for its role, as for `temp-rate`. To confirm the fix, see "Verifying a Fix" above.
+
+### For `temp-usage`
+
+The statistics window is unknown or shorter than one hour, so no rate can be computed.
+Wait at least one hour after a server restart or a `pg_stat_reset()`, then run the
+check again.
 
 ## work_mem Tuning
 

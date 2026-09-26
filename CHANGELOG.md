@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`duplicate-indexes`**, **`table-seq-scans`**: findings list every object in a table instead of at most 10 objects in `Details`. `Details` keeps the count. A `prefix-duplicates` row above 100 MiB is FAIL ([#161](https://github.com/emancu/pgdoctor/pull/161)).
 - **`toast-storage`**: breaking — the finding that reports no significant TOAST storage is renamed from `toast-storage` to `toast-usage` ("TOAST Usage"), so the text output prints the check header once ([#152](https://github.com/emancu/pgdoctor/pull/152)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
+- **Docs**: every emitted finding ID has a `### For \`finding-id\`` heading in its check README, and `readme_test.go` enforces it. `**Severity**` lines and SKIP/PASS narration are removed from the READMEs ([#163](https://github.com/emancu/pgdoctor/pull/163)).
 
 ### Fixed
 

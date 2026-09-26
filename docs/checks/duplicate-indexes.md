@@ -7,8 +7,6 @@ Identifies exact and prefix duplicate indexes that waste disk space and slow dow
 ### 1. Exact Duplicates
 Indexes with identical definitions on the same table. These are completely redundant and one should always be dropped.
 
-**Severity**: FAIL
-
 **Example**:
 ```sql
 CREATE INDEX idx_users_email ON users(email);
@@ -18,7 +16,7 @@ CREATE INDEX idx_users_email_duplicate ON users(email);  -- Exact duplicate!
 ### 2. Prefix Duplicates
 Indexes where one is a left-prefix of another. PostgreSQL can use multi-column indexes for queries on leading columns, making the shorter index often redundant.
 
-**Severity**:
+**Thresholds**:
 - FAIL: Prefix index > 100 MB
 - WARN: Any prefix relationship
 
@@ -90,6 +88,10 @@ The shorter index columns are a prefix of the longer index. PostgreSQL can use t
 -- Drop the redundant prefix index
 DROP INDEX CONCURRENTLY schema.prefix_index_name;
 ```
+
+### For `duplicate-indexes`
+
+No action.
 
 ### Preventing Duplicates
 

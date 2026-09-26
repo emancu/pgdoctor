@@ -59,18 +59,6 @@ Identifies sequences that can generate values exceeding their column's capacity:
 
 This occurs when a bigint sequence feeds an integer column. The sequence will eventually generate values too large for the column, causing INSERT failures.
 
-### int4-pk-fk
-
-Identifies integer (int4) primary key columns with foreign key references:
-- **WARN**: Any int4 column that is a PK or has FK references
-
-**Why this matters**: Migration complexity scales with FK count:
-- 0 FKs: Simple migration (~10 seconds lock)
-- 5 FKs: Coordinate 6 table migrations (5-10 minutes planning)
-- 20 FKs: Complex coordination (days of planning, careful rollout)
-
-Proactive migration (before capacity crisis) is exponentially easier.
-
 ## How to Fix
 
 ### For `near-exhaustion`
@@ -125,6 +113,10 @@ ALTER SEQUENCE orders_id_seq AS bigint MAXVALUE 9223372036854775807;
 -- Restart connection pools to invalidate prepared statements
 ```
 
+### For `sequence-health`
+
+No action.
+
 ## Decision Tree: Which Issue to Fix First?
 
 ```
@@ -134,12 +126,10 @@ CRITICAL (Migrate immediately - days to failure):
 
 HIGH PRIORITY (Plan migration - weeks to months):
 ├─► near-exhaustion >75%
-├─► integer-columns >50% with >100K inserts/day
-└─► int4-pk-fk with >10 foreign key references
+└─► integer-columns >50% with >100K inserts/day
 
 MEDIUM PRIORITY (Plan proactively - months to years):
 ├─► integer-columns >50% with <100K inserts/day
-├─► int4-pk-fk with 1-10 foreign key references
 └─► type-mismatch (fix before it becomes critical)
 
 LOW PRIORITY (Monitor):
