@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
@@ -79,7 +80,13 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			ctx := cmd.Context()
 
-			conn, err := pgx.Connect(ctx, dsn)
+			connConfig, err := parseDSN(dsn)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to connect to database: %v\n", err)
+				return &SilentError{ExitCode: 2}
+			}
+
+			conn, err := pgx.ConnectConfig(ctx, connConfig)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: failed to connect to database: %v\n", err)
 				return &SilentError{ExitCode: 2}
@@ -145,7 +152,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			// Text output: stream results with category headers
 			w := cmd.OutOrStdout()
-			dbLabel := parseDSNLabel(dsn)
+			dbLabel := dsnLabel(connConfig)
 			fmt.Fprintf(w, "Database Health Check: %s\n\n", dbLabel)
 
 			var reports []*check.Report
@@ -217,13 +224,24 @@ func sortChecksByCategory(checks []check.Package) {
 	})
 }
 
-// parseDSNLabel extracts a human-readable label from a DSN.
-func parseDSNLabel(dsn string) string {
+func parseDSN(dsn string) (*pgx.ConnConfig, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return "unknown"
+		return nil, err
 	}
 
+	// pgx parses connect_timeout=0 (no timeout) the same as an absent setting.
+	if cfg.ConnectTimeout == 0 && !strings.Contains(dsn, "connect_timeout") {
+		cfg.ConnectTimeout = 10 * time.Second
+	}
+	if _, ok := cfg.RuntimeParams["application_name"]; !ok {
+		cfg.RuntimeParams["application_name"] = "pgdoctor"
+	}
+	return cfg, nil
+}
+
+// dsnLabel extracts a human-readable label from a DSN.
+func dsnLabel(cfg *pgx.ConnConfig) string {
 	if cfg.Database != "" {
 		return fmt.Sprintf("%s/%s", cfg.Host, cfg.Database)
 	}
