@@ -21,7 +21,7 @@ const (
 func FormatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
-		return fmt.Sprintf("%dB", bytes)
+		return fmt.Sprintf("%d bytes", bytes)
 	}
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {
@@ -32,10 +32,9 @@ func FormatBytes(bytes int64) string {
 }
 
 // FormatNumber formats a large number as a human-readable string (e.g., "1.5M").
-// Billions use the SI suffix "G", because "B" means bytes in FormatBytes.
 func FormatNumber(n int64) string {
 	if n >= 1_000_000_000 {
-		return fmt.Sprintf("%.1fG", float64(n)/1_000_000_000)
+		return fmt.Sprintf("%.1fB", float64(n)/1_000_000_000)
 	}
 	if n >= 1_000_000 {
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)

@@ -48,6 +48,26 @@ func TestParseDurationMs_Invalid(t *testing.T) {
 	}
 }
 
+func TestFormatBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{512, "512 bytes"},
+		{1_536, "1.5KiB"},
+		{3 * check.GiB, "3.0GiB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, check.FormatBytes(tt.in))
+		})
+	}
+}
+
 func TestFormatNumber(t *testing.T) {
 	t.Parallel()
 
@@ -58,7 +78,7 @@ func TestFormatNumber(t *testing.T) {
 		{999, "999"},
 		{1_500, "1.5K"},
 		{47_500_000, "47.5M"},
-		{2_147_483_647, "2.1G"},
+		{2_147_483_647, "2.1B"},
 	}
 
 	for _, tt := range tests {
