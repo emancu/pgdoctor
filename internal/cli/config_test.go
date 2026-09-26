@@ -48,6 +48,11 @@ func TestLoadConfig(t *testing.T) {
 			want:    check.Config{"pg-version": {}},
 		},
 		{
+			name:    "partition row floor",
+			content: "partitioning:\n  inefficient_partitions_min_rows: 25000000\n",
+			want:    check.Config{"partitioning": {"inefficient_partitions_min_rows": "25000000"}},
+		},
+		{
 			name:    "role timeout and table prefixes",
 			content: "session-settings:\n  timeout.dba_ro: 300000\ntable-vacuum-health:\n  autovacuum_disabled_exclude: [public.outbox]\n",
 			want: check.Config{
@@ -146,6 +151,11 @@ func TestLoadConfigInvalid(t *testing.T) {
 			name:    "unknown table-vacuum-health key",
 			content: "table-vacuum-health:\n  exclude: public.outbox\n",
 			want:    []string{`table-vacuum-health: unknown key "exclude"`},
+		},
+		{
+			name:    "partition row floor that is not positive",
+			content: "partitioning:\n  inefficient_partitions_min_rows: 0\n",
+			want:    []string{`partitioning: inefficient_partitions_min_rows: "0" is not a positive integer`},
 		},
 		{
 			name:    "every problem is reported",

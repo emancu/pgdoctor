@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/emancu/pgdoctor/check"
+	"github.com/emancu/pgdoctor/checks/partitioning"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/checks/tablevacuumhealth"
 )
@@ -16,6 +17,7 @@ import (
 // A check that reads settings must be listed here, or loadConfig rejects
 // every key of that check as unknown.
 var settingValidators = map[string]func(key, value string) error{
+	partitioning.Metadata().CheckID:      partitioning.ValidateSetting,
 	sessionsettings.Metadata().CheckID:   sessionsettings.ValidateSetting,
 	tablevacuumhealth.Metadata().CheckID: tablevacuumhealth.ValidateSetting,
 }

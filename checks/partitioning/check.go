@@ -68,6 +68,16 @@ func New(queries PartitioningQueries, cfg ...check.Config) check.Checker {
 	return c
 }
 
+func ValidateSetting(key, value string) error {
+	if key != "inefficient_partitions_min_rows" {
+		return fmt.Errorf("unknown key %q", key)
+	}
+	if n, err := strconv.ParseInt(value, 10, 64); err != nil || n <= 0 {
+		return fmt.Errorf("%s: %q is not a positive integer", key, value)
+	}
+	return nil
+}
+
 func (c *checker) Metadata() check.Metadata {
 	return Metadata()
 }
