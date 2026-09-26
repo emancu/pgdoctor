@@ -1,5 +1,10 @@
 package cli
 
+import (
+	"fmt"
+	"io"
+)
+
 const (
 	presetAll    = "all"
 	presetTriage = "triage"
@@ -18,26 +23,17 @@ var triageChecks = []string{
 	"cache-efficiency",
 }
 
-func getPresetChecks(preset string) []string {
+func applyPreset(w io.Writer, preset string, only []string) []string {
 	switch preset {
+	case presetAll:
+		return only
 	case presetTriage:
+		if len(only) > 0 {
+			fmt.Fprintf(w, "Warning: --preset %s ignores --only\n", preset)
+		}
 		return triageChecks
 	default:
-		return nil
+		fmt.Fprintf(w, "Warning: ignoring unknown preset %q (valid presets: %s, %s)\n", preset, presetAll, presetTriage)
+		return only
 	}
-}
-
-func intersect(a, b []string) []string {
-	bMap := make(map[string]struct{}, len(b))
-	for _, item := range b {
-		bMap[item] = struct{}{}
-	}
-
-	var result []string
-	for _, item := range a {
-		if _, exists := bMap[item]; exists {
-			result = append(result, item)
-		}
-	}
-	return result
 }
