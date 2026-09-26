@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -220,23 +219,13 @@ func sortChecksByCategory(checks []check.Package) {
 
 // parseDSNLabel extracts a human-readable label from a DSN.
 func parseDSNLabel(dsn string) string {
-	u, err := url.Parse(dsn)
+	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return dsn
+		return "unknown"
 	}
 
-	host := u.Hostname()
-	if host == "" {
-		return dsn
+	if cfg.Database != "" {
+		return fmt.Sprintf("%s/%s", cfg.Host, cfg.Database)
 	}
-
-	db := ""
-	if u.Path != "" && u.Path != "/" {
-		db = u.Path[1:] // strip leading /
-	}
-
-	if db != "" {
-		return fmt.Sprintf("%s/%s", host, db)
-	}
-	return host
+	return cfg.Host
 }
