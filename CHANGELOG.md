@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Library**: `Run` reads `server_version_num` from the database when the caller supplies no `InstanceMetadata` version. Caller metadata with a version wins, and the other fields stay caller-only ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 - **CLI**: `--detail verbose` and `--detail debug` show the details of PASS findings. Finding names still carry their headline value ([#138](https://github.com/emancu/pgdoctor/pull/138)).
+- **CLI**: breaking — an invalid `--config` stops `run` with exit `2` before any query runs, and pgdoctor prints every error. An unknown check ID, an unknown key, a value that is not a map or a scalar, and a value that a check cannot read are errors. Before, pgdoctor skipped them and printed them only at `--detail debug`. `session-settings` `roles` now ignores spaces around a role name and empty entries ([#148](https://github.com/emancu/pgdoctor/pull/148)).
 
 ### Fixed
 
