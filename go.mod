@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/charmbracelet/glamour v0.10.0
-	github.com/fatih/color v1.18.0
+	github.com/fatih/color v1.19.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/spf13/cobra v1.10.2
@@ -30,7 +30,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
@@ -44,7 +44,7 @@ require (
 	github.com/yuin/goldmark v1.7.17 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 )
