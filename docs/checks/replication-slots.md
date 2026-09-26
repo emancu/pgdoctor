@@ -60,7 +60,7 @@ Inactive slots will eventually lead to disk exhaustion if not addressed.
 
 ### critical-lag
 
-Detects slots with severe replication lag.
+Detects active and inactive slots with severe replication lag.
 
 **Severity:** FAIL
 
@@ -76,7 +76,7 @@ At this level of lag, consider whether the consumer can realistically catch up o
 
 ### high-lag
 
-Detects slots with elevated replication lag.
+Detects active and inactive slots with elevated replication lag.
 
 **Severity:** WARN
 
