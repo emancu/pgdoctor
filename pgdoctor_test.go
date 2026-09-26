@@ -161,7 +161,7 @@ func TestRun_ContinuesAfterCheckError(t *testing.T) {
 }
 
 type fakeDB struct {
-	versionNum int
+	versionNum int32
 	err        error
 	queries    int
 }
@@ -180,7 +180,7 @@ func (f *fakeDB) QueryRow(context.Context, string, ...any) pgx.Row {
 }
 
 type fakeRow struct {
-	versionNum int
+	versionNum int32
 	err        error
 }
 
@@ -188,8 +188,8 @@ func (r fakeRow) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
-	*dest[0].(*int32) = int32(r.versionNum / 10000)
-	*dest[1].(*int32) = int32(r.versionNum % 100)
+	*dest[0].(*int32) = r.versionNum / 10000
+	*dest[1].(*int32) = r.versionNum % 100
 	return nil
 }
 
