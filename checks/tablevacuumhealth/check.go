@@ -175,7 +175,8 @@ type largeDefaultEntry struct {
 func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Report) {
 	var entries []largeDefaultEntry
 	for _, row := range rows {
-		if row.EstimatedRows.Int64 >= largeTableMinRows &&
+		if row.VacuumTrigger.Valid &&
+			row.EstimatedRows.Int64 >= largeTableMinRows &&
 			isUsingDefaultSettings(row.Reloptions.String) &&
 			row.VacuumScaleFactor.Float64 >= defaultVacuumScaleFactor {
 			entries = append(entries, largeDefaultEntry{
@@ -232,7 +233,7 @@ func estNextVacuum(trigger, pending int64, lastVacuumAge pgtype.Int8) string {
 	if pending == 0 {
 		return noEstimate
 	}
-	if pending >= trigger {
+	if pending > trigger {
 		return "overdue"
 	}
 	if !lastVacuumAge.Valid || lastVacuumAge.Int64 <= 0 {

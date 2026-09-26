@@ -2778,7 +2778,7 @@ SELECT
   -- *waiting* AccessExclusiveLock, so it makes this check time out during a DDL
   -- pile-up. relpages is only refreshed by VACUUM/ANALYZE, so it is stale by
   -- definition and 0 on a never-vacuumed relation.
-  , (c.relpages + COALESCE(t.relpages, 0) + COALESCE(i.index_pages, 0))::BIGINT
+  , (c.relpages::BIGINT + COALESCE(t.relpages::BIGINT, 0) + COALESCE(i.index_pages, 0))
     * CURRENT_SETTING('block_size')::BIGINT AS table_size_bytes
   , COALESCE(s.n_dead_tup, 0) AS n_dead_tup
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
@@ -2791,10 +2791,14 @@ SELECT
   ) AS autovacuum_disabled
   , av.scale_factor AS vacuum_scale_factor
   -- autovacuum_vacuum_max_threshold is PG18+; -1 disables the cap.
-  , LEAST(
-    av.threshold + av.scale_factor * GREATEST(c.reltuples, 0)
-    , NULLIF(av.max_threshold, -1)
-  )::bigint AS vacuum_trigger
+  -- Autovacuum never processes a partitioned parent, so it has no trigger.
+  , CASE
+    WHEN c.relkind = 'r'
+      THEN LEAST(
+        av.threshold + av.scale_factor * GREATEST(c.reltuples, 0)
+        , NULLIF(av.max_threshold, -1)
+      )::bigint
+  END AS vacuum_trigger
   -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
@@ -2822,11 +2826,11 @@ LEFT JOIN LATERAL (
     , COALESCE(
       MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_threshold')
       , CURRENT_SETTING('autovacuum_vacuum_threshold')
-    )::bigint AS threshold
+    )::float8::bigint AS threshold
     , COALESCE(
       MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_max_threshold')
       , CURRENT_SETTING('autovacuum_vacuum_max_threshold', TRUE)
-    )::bigint AS max_threshold
+    )::float8::bigint AS max_threshold
   FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
 ) AS av ON TRUE
 WHERE

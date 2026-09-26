@@ -90,6 +90,11 @@ func (b *rowBuilder) withTrigger(trigger int64) *rowBuilder {
 	return b
 }
 
+func (b *rowBuilder) withNoTrigger() *rowBuilder {
+	b.row.VacuumTrigger = pgtype.Int8{}
+	return b
+}
+
 func (b *rowBuilder) withAutovacuumDisabled() *rowBuilder {
 	b.row.AutovacuumDisabled = pgtype.Bool{Bool: true, Valid: true}
 	return b
@@ -416,6 +421,11 @@ func TestTableVacuumHealth_LargeTableDefaults_Detection(t *testing.T) {
 			row:    makeRow("public.lax").withRows(5_000_000).withScaleFactor(0.3).withLastVacuumAge(recent).build(),
 			listed: true,
 		},
+		{
+			name:   "partitioned parent without a trigger is ignored",
+			row:    makeRow("public.parent").withRows(5_000_000).withNoTrigger().build(),
+			listed: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -461,6 +471,11 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
 			name: "overdue when pending crosses trigger",
 			row:  makeRow("public.over").withRows(1_000_000).withTrigger(200_050).withDeadTuples(250_000).withLastVacuumAge(recent).build(),
 			want: "overdue",
+		},
+		{
+			name: "pending equal to trigger is not overdue",
+			row:  makeRow("public.edge").withRows(1_000_000).withTrigger(200_050).withDeadTuples(200_050).withLastVacuumAge(recent).build(),
+			want: "<1h",
 		},
 		{
 			name: "never vacuumed has no rate",
