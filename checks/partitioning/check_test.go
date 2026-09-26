@@ -305,6 +305,12 @@ func Test_Partitioning_MinPartitionRowsConfig(t *testing.T) {
 			wantDetails: ">= 25.0M rows",
 		},
 		{
+			name:        "zero",
+			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "0"}},
+			wantMinRows: 10_000_000,
+			wantDetails: ">= 10.0M rows",
+		},
+		{
 			name:        "not an integer",
 			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "25M"}},
 			wantMinRows: 10_000_000,

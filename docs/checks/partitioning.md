@@ -151,7 +151,7 @@ Identifies individual partitions that have grown too large (>= 10M rows by defau
 |-----|-------------|---------|
 | `inefficient_partitions_min_rows` | Row count at which `inefficient-partitions` reports a partition | `10000000` |
 
-A value that is not an integer is ignored.
+A value that is not a positive integer is ignored.
 
 ```yaml
 partitioning:

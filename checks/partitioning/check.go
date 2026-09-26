@@ -59,7 +59,7 @@ func New(queries PartitioningQueries, cfg ...check.Config) check.Checker {
 	if len(cfg) > 0 && cfg[0] != nil {
 		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
 			if v, ok := myCfg["inefficient_partitions_min_rows"]; ok {
-				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 					c.minPartitionRows = n
 				}
 			}
