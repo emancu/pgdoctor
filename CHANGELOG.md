@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 - **CLI**: byte values under 1 KiB print as `512 bytes`, so `B` means only billions in counts (`2.1B`). Byte values in prose use IEC units, a missing table cell shows `-`, `sequence-health` prints schema-qualified names, and the summary line uses correct plurals ([#162](https://github.com/emancu/pgdoctor/pull/162)).
 - **Docs**: every finding ID that a check emits as INFO, WARN or FAIL has a `### For \`finding-id\`` heading in its check README, and `readme_test.go` enforces it. A PASS-only or SKIP-only ID has a heading only when the operator can act, for example to install an extension, grant a privilege, or wait for statistics. `**Severity**` lines and SKIP/PASS narration are removed from the READMEs ([#163](https://github.com/emancu/pgdoctor/pull/163)).
+- **Release**: release binaries compile with the latest stable Go. `go.mod` keeps `go 1.25.0` as the minimum and adds `toolchain go1.26.8`, and CI also tests Go 1.27 ([#170](https://github.com/emancu/pgdoctor/pull/170)).
 
 ### Fixed
 
