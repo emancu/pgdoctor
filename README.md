@@ -57,6 +57,8 @@ pgdoctor run "postgres://..." --help
 
 Run health checks against a PostgreSQL database. The DSN can be passed as a positional argument or via the `PGDOCTOR_DSN` environment variable.
 
+pgdoctor always uses a connect timeout. When the DSN sets no positive `connect_timeout`, the timeout is 10 seconds. When the DSN sets no `application_name`, pgdoctor uses `pgdoctor`, so you can find its session in `pg_stat_activity`. A value in the DSN wins.
+
 | Flag | Description |
 |------|-------------|
 | `--only` | Only run these checks or categories |
