@@ -62,6 +62,17 @@ func (c *checker) Metadata() check.Metadata {
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
+	if meta := check.InstanceMetadataFromContext(ctx); meta != nil && meta.EngineVersionMajor > 0 && meta.EngineVersionMajor < 14 {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeveritySkip,
+			Details:  fmt.Sprintf("TOAST compression columns need PostgreSQL 14 or newer, server is %d", meta.EngineVersionMajor),
+		})
+		report.Severity = check.SeveritySkip
+		return report, nil
+	}
+
 	rows, err := c.queries.ToastStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze TOAST storage: %w", err)

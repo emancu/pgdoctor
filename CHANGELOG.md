@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: `pgdoctor run --config <file>` reads per-check settings from a YAML file ([#99](https://github.com/emancu/pgdoctor/pull/99)).
 - **`table-vacuum-health`**: new `autovacuum_disabled_exclude` config key stops `autovacuum-disabled` from reporting tables whose schema-qualified names start with the given prefixes ([#100](https://github.com/emancu/pgdoctor/pull/100)).
 - **CLI**: a `--config` setting value can be a YAML list of scalars, which pgdoctor joins with commas ([#102](https://github.com/emancu/pgdoctor/pull/102)).
+- **`partitioning`**: new `inefficient_partitions_min_rows` config key sets the row count at which `inefficient-partitions` reports a partition (default 10M). The finding prints that value instead of a fixed 25M. Breaking for library consumers: `db.Queries.LargeTables` takes `minPartitionRows` ([#149](https://github.com/emancu/pgdoctor/pull/149)).
 
 ### Changed
 
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 - **CLI**: `--detail verbose` and `--detail debug` show the details of PASS findings. Finding names still carry their headline value ([#138](https://github.com/emancu/pgdoctor/pull/138)).
 - **`toast-storage`**: breaking — the finding that reports no significant TOAST storage is renamed from `toast-storage` to `toast-usage` ("TOAST Usage"), so the text output prints the check header once ([#152](https://github.com/emancu/pgdoctor/pull/152)).
+- **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 
 ### Fixed
 
@@ -43,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: `--only` and `--ignore` accept the `category/check-id` form that `pgdoctor list` prints. Before, `--only configs/pg-version` ran the whole `configs` category ([#140](https://github.com/emancu/pgdoctor/pull/140)).
 - **CLI**: `connection-efficiency` no longer reports SKIP ("Server version unknown") on every standalone run, and `replication-slots` runs the query for the server version ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **`vacuum-settings`**: `maintenance_work_mem` no longer reports a FAIL with a `+Inf%` budget when the metadata has no memory size ([#131](https://github.com/emancu/pgdoctor/pull/131)).
+- **`toast-storage`**, **`pg-version`**: PostgreSQL 14 is the support floor. `toast-storage` reports SKIP on PostgreSQL 13 instead of a query error, and `pg-version` reports PostgreSQL 13 as past end of life, not approaching it ([#150](https://github.com/emancu/pgdoctor/pull/150)).
 - **`duplicate-indexes`**: `prefix-duplicates` reports an index whose key columns are a prefix of another index. It skips unique, exclusion, and `INCLUDE` indexes, and pairs with a different access method, operator class, collation, or sort order ([#132](https://github.com/emancu/pgdoctor/pull/132)).
+- **Release**: the release binary reports its version without `+dirty`, and pgx, x/net, x/text and goldmark move to versions that fix the reachable govulncheck findings ([#144](https://github.com/emancu/pgdoctor/pull/144)).
 
 ## [0.5.0] - 2026-08-14
 
