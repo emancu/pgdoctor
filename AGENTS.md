@@ -198,6 +198,8 @@ report.AddFinding(check.Finding{
 })
 ```
 
+A check uses its own check ID as a finding ID only when that finding is the only finding in the report. The text output folds a single finding with the check ID into the check header. Next to other findings, it prints the check header twice.
+
 A finding `Name` can carry the headline value of the finding (for example `Cache Hit Ratio: 99.80%`), so the value is visible at every detail level and every severity. Put the explanation and the supporting values in `Details`. The text output shows the `Details` of a PASS finding only at `--detail verbose` and `--detail debug`.
 
 ### Filtering
@@ -290,7 +292,7 @@ All queries must be production-safe: read-only, no locks, < 1 second execution.
 
 - **CheckID**: kebab-case (`pg-version`, `invalid-indexes`)
 - **Directory**: single word or concatenated (`pgversion`, `invalidindexes`)
-- **Finding ID**: kebab-case for subchecks (`index-timestamp`, `single-table`)
+- **Finding ID**: kebab-case for subchecks (`index-timestamp`, `single-table`). Exception: a finding about one GUC uses the GUC name as its ID (`work_mem`, `autovacuum_max_workers`), so an operator can find the setting in `postgresql.conf` with the same string
 - **Consistency**: American English (`indexes` not `indices`)
 
 ### Categories

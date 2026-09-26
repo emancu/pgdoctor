@@ -101,6 +101,10 @@ PostgreSQL offers four storage strategies that control how large values are hand
 
 ## Subchecks
 
+### toast-usage
+
+Looks for tables with more than 1MB of TOAST storage.
+
 ### toast-ratio
 
 Lists TOAST-heavy tables: TOAST >=50% of total size, or >=10GB absolute. Sorted by TOAST size.

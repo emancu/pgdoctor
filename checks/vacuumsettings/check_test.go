@@ -232,6 +232,38 @@ func Test_VacuumSettings(t *testing.T) {
 	}
 }
 
+func Test_VacuumSettings_FindingNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		setting string
+		value   string
+		name    string
+	}{
+		{"autovacuum_analyze_scale_factor", "0.2", "High autovacuum_analyze_scale_factor"},
+		{"autovacuum_analyze_scale_factor", "0.005", "Low autovacuum_analyze_scale_factor"},
+		{"autovacuum_vacuum_scale_factor", "0.3", "High autovacuum_vacuum_scale_factor"},
+		{"autovacuum_vacuum_scale_factor", "0.01", "Low autovacuum_vacuum_scale_factor"},
+		{"vacuum_cost_delay", "50", "High vacuum_cost_delay"},
+		{"vacuum_cost_limit", "100", "Low vacuum_cost_limit"},
+		{"vacuum_cost_limit", "15000", "High vacuum_cost_limit"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.setting+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockVacuumSettingsQueries{rows: overrideOptimalWith(tt.setting, tt.value)}
+			report, err := vacuumsettings.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			finding := findResult(report.Results, tt.setting)
+			require.NotNil(t, finding)
+			require.Equal(t, tt.name, finding.Name)
+		})
+	}
+}
+
 func findResult(results []check.Finding, id string) *check.Finding {
 	for i := range results {
 		if results[i].ID == id {
