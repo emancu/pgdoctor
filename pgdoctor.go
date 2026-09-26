@@ -5,6 +5,7 @@ package pgdoctor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -42,6 +43,8 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 		onReport = func(*check.Report) {}
 	}
 
+	ctx = withServerVersion(ctx, conn)
+
 	for _, pkg := range opts.Checks {
 		checker := pkg.New(conn, opts.Config)
 
@@ -70,6 +73,30 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 		report.Duration = elapsed
 		onReport(report)
 	}
+}
+
+// withServerVersion fills the engine version from the server when the
+// caller's instance metadata does not carry one.
+func withServerVersion(ctx context.Context, conn db.DBTX) context.Context {
+	meta := check.InstanceMetadataFromContext(ctx)
+	if meta != nil && meta.EngineVersionMajor != 0 {
+		return ctx
+	}
+
+	var versionNum int
+	if err := conn.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&versionNum); err != nil {
+		return ctx
+	}
+
+	var filled check.InstanceMetadata
+	if meta != nil {
+		filled = *meta
+	}
+	filled.EngineVersionMajor = versionNum / 10000
+	filled.EngineVersionMinor = versionNum % 10000
+	filled.EngineVersion = fmt.Sprintf("%d.%d", filled.EngineVersionMajor, filled.EngineVersionMinor)
+
+	return check.ContextWithInstanceMetadata(ctx, &filled)
 }
 
 // Filter returns checks matching the only/ignored filters.
