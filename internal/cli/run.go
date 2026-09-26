@@ -199,10 +199,10 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 	cmd.Flags().StringSliceVar(&opts.ignored, "ignore", nil, "Checks or categories to ignore")
 	cmd.Flags().StringSliceVar(&opts.only, "only", nil, "Only run these checks or categories")
-	cmd.Flags().StringVar(&opts.preset, "preset", presetAll, "Check preset: all, triage")
-	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief, verbose, debug")
+	cmd.Flags().StringVar(&opts.preset, "preset", presetAll, "Check preset: all (default), triage")
+	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief (default), verbose, debug")
 	cmd.Flags().BoolVar(&opts.hidePassing, "hide-passing", false, "Hide passing checks")
-	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text, json")
+	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
 	cmd.Flags().StringVar(&opts.config, "config", "", "YAML file with per-check settings, keyed by check ID")
 
 	return cmd
