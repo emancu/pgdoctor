@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -40,6 +41,42 @@ func TestPrintCheckReport_SingleFinding_HidesDebugWithoutDebugDetail(t *testing.
 	printCheckReport(&buf, singleFindingReport(), &runOptions{detail: string(detailBrief)})
 
 	assert.NotContains(t, buf.String(), "Debug:", "debug must stay hidden unless --detail debug")
+}
+
+func TestPrintCheckReport_PassDetailsFollowDetailLevel(t *testing.T) {
+	t.Parallel()
+
+	single := check.NewReport(check.Metadata{CheckID: "demo", Name: "Demo Check"})
+	single.AddFinding(check.Finding{ID: "demo", Name: "Demo Check", Severity: check.SeverityPass, Details: "pass figure"})
+
+	multi := check.NewReport(check.Metadata{CheckID: "demo", Name: "Demo Check"})
+	multi.AddFinding(check.Finding{ID: "one", Name: "One", Severity: check.SeverityPass, Details: "pass figure"})
+	multi.AddFinding(check.Finding{ID: "two", Name: "Two", Severity: check.SeverityPass})
+
+	tests := []struct {
+		name   string
+		report *check.Report
+		detail detailLevel
+		want   bool
+	}{
+		{"single finding at brief", single, detailBrief, false},
+		{"single finding at verbose", single, detailVerbose, true},
+		{"single finding at debug", single, detailDebug, true},
+		{"subcheck at brief", multi, detailBrief, false},
+		{"subcheck at verbose", multi, detailVerbose, true},
+		{"subcheck at debug", multi, detailDebug, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			printCheckReport(&buf, tt.report, &runOptions{detail: string(tt.detail)})
+
+			assert.Equal(t, tt.want, strings.Contains(buf.String(), "pass figure"))
+		})
+	}
 }
 
 func TestPrintCheckSummary_InfoFindingsLeaveTheTally(t *testing.T) {

@@ -108,8 +108,8 @@ func statsWindow(row db.DatabaseStatisticsRow) (seconds int64, exact bool) {
 	return row.UptimeSeconds.Int64, false
 }
 
-// windowTitle puts the window in the finding's own name. A passing check drops its
-// Details, so this is the only place the figure stays visible when nothing is wrong.
+// windowTitle puts the window in the finding's own name, so the figure is visible at
+// every detail level. A passing check shows its Details only at --detail verbose.
 func windowTitle(window int64, exact bool) string {
 	if exact {
 		return fmt.Sprintf("DB Statistics: %s since last reset", check.FormatDurationSec(window))

@@ -87,7 +87,7 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 			result.Name,
 			dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
 			timingStr)
-		if result.Severity != check.SeverityPass && result.Details != "" {
+		if result.Details != "" && (result.Severity != check.SeverityPass || showTiming(opts)) {
 			fmt.Fprintf(w, "%s\n", indent(result.Details, 2))
 		}
 		if result.Table != nil {
@@ -141,7 +141,7 @@ func printSubcheck(w io.Writer, report *check.Report, result check.Finding, opts
 		result.Name,
 		dimFunc(fmt.Sprintf("(%s)", fullID)))
 
-	if result.Severity != check.SeverityPass && result.Details != "" {
+	if result.Details != "" && (result.Severity != check.SeverityPass || showTiming(opts)) {
 		fmt.Fprintf(w, "%s\n", indent(result.Details, 2))
 	}
 
