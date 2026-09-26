@@ -89,10 +89,13 @@ ALTER TABLE schema.table_name RESET (autovacuum_enabled);
 
 **Monitor these tables regularly:**
 ```sql
-SELECT relname, n_dead_tup, last_vacuum, last_autovacuum
+SELECT s.relname, n_dead_tup, last_vacuum, last_autovacuum
 FROM pg_stat_user_tables s
 JOIN pg_class c ON c.oid = s.relid
-WHERE c.reloptions @> ARRAY['autovacuum_enabled=false'];
+WHERE EXISTS (
+  SELECT 1 FROM pg_options_to_table(c.reloptions) o
+  WHERE o.option_name = 'autovacuum_enabled' AND NOT o.option_value::boolean
+);
 ```
 
 ### For `large-table-defaults`

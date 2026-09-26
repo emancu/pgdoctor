@@ -16,6 +16,11 @@ SELECT
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count
   , ARRAY_TO_STRING(c.reloptions, ',') AS reloptions
+  , EXISTS (
+    SELECT 1
+    FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
+    WHERE o.option_name = 'autovacuum_enabled' AND NOT o.option_value::boolean
+  ) AS autovacuum_disabled
   -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds

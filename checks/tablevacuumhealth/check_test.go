@@ -78,6 +78,11 @@ func (b *rowBuilder) withReloptions(reloptions string) *rowBuilder {
 	return b
 }
 
+func (b *rowBuilder) withAutovacuumDisabled() *rowBuilder {
+	b.row.AutovacuumDisabled = pgtype.Bool{Bool: true, Valid: true}
+	return b
+}
+
 // withVacuumCount sets autovacuum_count.
 func (b *rowBuilder) withVacuumCount(count int64) *rowBuilder {
 	b.row.AutovacuumCount = pgtype.Int8{Int64: count, Valid: true}
@@ -188,7 +193,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_Found(t *testing.T) {
 	report := runCheck(t, []db.TableVacuumHealthRow{
 		makeRow("public.staging_table").
 			withRows(10000).
-			withReloptions("autovacuum_enabled=false").
+			withAutovacuumDisabled().
 			withLastVacuumAge(recent).
 			withLastAnalyzeAge(recent).
 			build(),
@@ -207,8 +212,8 @@ func TestTableVacuumHealth_AutovacuumDisabled_OneRowPerTableSortedByDeadTuples(t
 	t.Parallel()
 
 	report := runCheck(t, []db.TableVacuumHealthRow{
-		makeRow("public.quiet").withReloptions("autovacuum_enabled=false").withDeadTuples(10).build(),
-		makeRow("public.busy").withReloptions("autovacuum_enabled=false").withDeadTuples(5_000).build(),
+		makeRow("public.quiet").withAutovacuumDisabled().withDeadTuples(10).build(),
+		makeRow("public.busy").withAutovacuumDisabled().withDeadTuples(5_000).build(),
 		makeRow("public.normal").withLastVacuumAge(recent).withLastAnalyzeAge(recent).build(),
 	})
 
@@ -223,11 +228,11 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 	t.Parallel()
 
 	rows := []db.TableVacuumHealthRow{
-		makeRow("public.outbox_events").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("tenant_1.outbox_events_p20260101").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("public.audit_logs").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("public.staging").withReloptions("autovacuum_enabled=false").build(),
-		makeRow("audit_logs.orders").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("public.outbox_events").withAutovacuumDisabled().build(),
+		makeRow("tenant_1.outbox_events_p20260101").withAutovacuumDisabled().build(),
+		makeRow("public.audit_logs").withAutovacuumDisabled().build(),
+		makeRow("public.staging").withAutovacuumDisabled().build(),
+		makeRow("audit_logs.orders").withAutovacuumDisabled().build(),
 	}
 
 	tests := []struct {
@@ -282,7 +287,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 
 	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
-		makeRow("public.outbox_events").withReloptions("autovacuum_enabled=false").build(),
+		makeRow("public.outbox_events").withAutovacuumDisabled().build(),
 	}
 
 	report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
@@ -300,7 +305,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testi
 	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").
-			withReloptions("autovacuum_enabled=false").
+			withAutovacuumDisabled().
 			withRows(5_000_000).
 			withDeadTuples(600_000).
 			withLastVacuumAge(staleFail).
