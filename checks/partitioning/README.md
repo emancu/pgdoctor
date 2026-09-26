@@ -66,7 +66,7 @@ TRUNCATE TABLE outbox_events_w0;  -- Truncate partition for current week % 4
 
 ### For `inefficient-partitions`
 
-Individual partitions with >=25M rows indicate partition strategy needs adjustment:
+Individual partitions with >= 10M rows (see Configuration) indicate partition strategy needs adjustment:
 
 **For time-based partitions (too wide):**
 ```sql
@@ -136,7 +136,7 @@ Identifies large transient tables (outbox, inbox, jobs, queues) that are not par
 
 ### inefficient-partitions
 
-Identifies individual partitions that have grown too large (>= 10M rows), indicating the partition strategy is ineffective.
+Identifies individual partitions that have grown too large (>= 10M rows by default), indicating the partition strategy is ineffective.
 
 **Common causes:**
 - Time-based partitions are too wide (yearly instead of monthly)
@@ -144,6 +144,32 @@ Identifies individual partitions that have grown too large (>= 10M rows), indica
 - Uneven data distribution across partition keys
 
 **Severity:** Warning - review and adjust the partitioning strategy.
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `inefficient_partitions_min_rows` | Row count at which `inefficient-partitions` reports a partition | `10000000` |
+
+A value that is not an integer is ignored.
+
+```yaml
+partitioning:
+  inefficient_partitions_min_rows: "25000000"
+```
+
+As a library, pass the same key in `check.Config`:
+
+```go
+cfg := check.Config{
+    "partitioning": {
+        "inefficient_partitions_min_rows": "25000000",
+    },
+}
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Config: cfg,
+})
+```
 
 ## Architecture Guidelines
 

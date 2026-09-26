@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -17,11 +18,12 @@ var querySQL string
 var readme string
 
 type PartitioningQueries interface {
-	LargeTables(context.Context) ([]db.LargeTablesRow, error)
+	LargeTables(ctx context.Context, minPartitionRows int64) ([]db.LargeTablesRow, error)
 }
 
 type checker struct {
-	queries PartitioningQueries
+	queries          PartitioningQueries
+	minPartitionRows int64
 }
 
 const (
@@ -49,10 +51,21 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries PartitioningQueries, _ ...check.Config) check.Checker {
-	return &checker{
-		queries: queries,
+func New(queries PartitioningQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
+		queries:          queries,
+		minPartitionRows: 10_000_000,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
+			if v, ok := myCfg["inefficient_partitions_min_rows"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+					c.minPartitionRows = n
+				}
+			}
+		}
+	}
+	return c
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -62,7 +75,7 @@ func (c *checker) Metadata() check.Metadata {
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
-	rows, err := c.queries.LargeTables(ctx)
+	rows, err := c.queries.LargeTables(ctx, c.minPartitionRows)
 	if err != nil {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategorySchema, report.CheckID, err)
 	}
@@ -93,7 +106,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// Run subchecks.
 	checkLargeUnpartitioned(largeUnpartitioned, report)
 	checkTransientUnpartitioned(transientUnpartitioned, report)
-	checkInefficientPartitions(inefficientPartitions, report)
+	checkInefficientPartitions(inefficientPartitions, c.minPartitionRows, report)
 
 	return report, nil
 }
@@ -251,7 +264,7 @@ func checkTransientUnpartitioned(rows []db.LargeTablesRow, report *check.Report)
 }
 
 // checkInefficientPartitions identifies partitions that are too large, indicating poor partition strategy.
-func checkInefficientPartitions(rows []db.LargeTablesRow, report *check.Report) {
+func checkInefficientPartitions(rows []db.LargeTablesRow, minRows int64, report *check.Report) {
 	if len(rows) == 0 {
 		return // No finding needed when there are no inefficient partitions
 	}
@@ -277,7 +290,7 @@ func checkInefficientPartitions(rows []db.LargeTablesRow, report *check.Report) 
 		ID:       "inefficient-partitions",
 		Name:     "Inefficient Partition Strategy",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d partition(s) with >= 25M rows - partition strategy may be inefficient", len(rows)),
+		Details:  fmt.Sprintf("Found %d partition(s) with >= %s rows - partition strategy may be inefficient", len(rows), check.FormatNumber(minRows)),
 		Table: &check.Table{
 			Headers: []string{"Partition", "Parent Table", "Size", "Est. Rows"},
 			Rows:    tableRows,

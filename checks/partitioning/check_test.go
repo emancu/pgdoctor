@@ -14,11 +14,13 @@ import (
 
 // Mock queryer for testing.
 type mockQueryer struct {
-	tables []db.LargeTablesRow
-	err    error
+	tables           []db.LargeTablesRow
+	err              error
+	minPartitionRows int64
 }
 
-func (m *mockQueryer) LargeTables(context.Context) ([]db.LargeTablesRow, error) {
+func (m *mockQueryer) LargeTables(_ context.Context, minPartitionRows int64) ([]db.LargeTablesRow, error) {
+	m.minPartitionRows = minPartitionRows
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -280,6 +282,57 @@ func Test_Partitioning_InefficientPartitions(t *testing.T) {
 	require.NotNil(t, inefficientFinding.Table)
 	require.Equal(t, 2, len(inefficientFinding.Table.Rows))
 	require.Equal(t, "public.orders", inefficientFinding.Table.Rows[0].Cells[1]) // Parent table
+}
+
+func Test_Partitioning_MinPartitionRowsConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		cfg         check.Config
+		wantMinRows int64
+		wantDetails string
+	}{
+		{
+			name:        "default",
+			wantMinRows: 10_000_000,
+			wantDetails: ">= 10.0M rows",
+		},
+		{
+			name:        "configured",
+			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "25000000"}},
+			wantMinRows: 25_000_000,
+			wantDetails: ">= 25.0M rows",
+		},
+		{
+			name:        "not an integer",
+			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "25M"}},
+			wantMinRows: 10_000_000,
+			wantDetails: ">= 10.0M rows",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := newMockQueryer([]db.LargeTablesRow{
+				makePartition("public", "orders_2024", "public.orders", 30_000_000),
+			})
+
+			report, err := partitioning.New(queryer, tt.cfg).Check(context.Background())
+			require.NoError(t, err)
+
+			require.Equal(t, tt.wantMinRows, queryer.minPartitionRows)
+			var details string
+			for _, finding := range report.Results {
+				if finding.ID == findingIDInefficientPartitions {
+					details = finding.Details
+				}
+			}
+			require.Contains(t, details, tt.wantDetails)
+		})
+	}
 }
 
 func Test_Partitioning_QueryError(t *testing.T) {

@@ -1,5 +1,5 @@
 -- name: LargeTables :many
--- Identifies all large tables (>= 10M rows) with partitioning and transient status.
+-- Identifies all large tables (>= 10M rows) and large partitions (>= min_partition_rows) with partitioning and transient status.
 -- Returns both regular and partitioned tables for unified analysis.
 -- Includes activity metrics (inserts/updates/deletes) for activity-aware thresholds.
 WITH inheritance_info AS (
@@ -30,4 +30,7 @@ LEFT JOIN inheritance_info AS ii ON c.oid = ii.child_oid
 WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
-  AND COALESCE(s.n_live_tup, 0) >= 10000000;
+  AND COALESCE(s.n_live_tup, 0) >= CASE
+    WHEN ii.parent_table IS NULL THEN 10000000
+    ELSE sqlc.arg(min_partition_rows)::bigint
+  END;
