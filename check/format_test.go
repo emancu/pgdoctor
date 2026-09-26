@@ -47,3 +47,24 @@ func TestParseDurationMs_Invalid(t *testing.T) {
 		require.Error(t, err, "expected error for %q", value)
 	}
 }
+
+func TestFormatNumber(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{999, "999"},
+		{1_500, "1.5K"},
+		{47_500_000, "47.5M"},
+		{2_147_483_647, "2.1G"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, check.FormatNumber(tt.in))
+		})
+	}
+}

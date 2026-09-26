@@ -112,7 +112,7 @@ func Test_ToastStorage_Heavy_MergedGate_Info(t *testing.T) {
 	f := findingByID(report, findingIDToastRatio)
 	require.NotNil(t, f)
 	require.Equal(t, check.SeverityInfo, f.Severity)
-	require.Contains(t, f.Details, "Found 3 TOAST-heavy table(s) (>50% ratio or >10GB)")
+	require.Contains(t, f.Details, "Found 3 TOAST-heavy table(s) (>50% ratio or >10GiB)")
 	require.NotNil(t, f.Table)
 	require.Equal(t, []string{"TOAST Size", "TOAST %", "Main Size", "Total", "Table"}, f.Table.Headers)
 	require.Len(t, f.Table.Rows, 3)

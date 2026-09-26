@@ -137,7 +137,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			checks = append(checks, settingCheck{
 				Role:      role,
 				Parameter: "(all)",
-				Current:   "N/A",
+				Current:   "-",
 				Expected:  "Role exists",
 				Status:    "Role not found",
 				Severity:  check.SeverityWarn,

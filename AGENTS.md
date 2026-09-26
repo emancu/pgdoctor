@@ -295,6 +295,15 @@ All queries must be production-safe: read-only, no locks, < 1 second execution.
 - **Finding ID**: kebab-case for subchecks (`index-timestamp`, `single-table`). Exception: a finding about one GUC uses the GUC name as its ID (`work_mem`, `autovacuum_max_workers`), so an operator can find the setting in `postgresql.conf` with the same string
 - **Consistency**: American English (`indexes` not `indices`)
 
+### Output Style
+
+These rules apply to table cells, finding names, and `Details`:
+
+- **Bytes**: use `check.FormatBytes`. It prints IEC units (`512B`, `3.1MiB`). Write a fixed threshold in IEC units too (`>500MiB`).
+- **Counts**: use `check.FormatNumber`. It prints `1.5K`, `47.5M`, `2.1G`. Never use `B` for a count, because `B` means bytes.
+- **Missing value**: use `-` in a table cell. Use a word only when it carries more meaning than `-` (for example `never` for a vacuum that did not run).
+- **Object names**: always `schema.name`. Build the name in SQL: `(n.nspname || '.' || c.relname)::text`.
+
 ### Categories
 
 Five categories:
