@@ -1922,11 +1922,12 @@ WITH sequence_info AS (
     , cur.value AS current_value
     , (cur.value IS NULL) AS is_unreadable
     -- numeric: a full bigint range overflows bigint subtraction.
-    , CASE
+    -- Usage counts from 0, or from the range bound when 0 is outside the range.
+    , CASE WHEN cur.value IS NOT NULL THEN GREATEST(0, CASE
       WHEN s.increment_by > 0
-        THEN (cur.value - s.min_value::numeric) / (s.max_value - s.min_value::numeric)
-      ELSE (s.max_value - cur.value::numeric) / (s.max_value - s.min_value::numeric)
-    END * 100 AS usage_percent
+        THEN (cur.value - base.ascending::numeric) / NULLIF(s.max_value - base.ascending::numeric, 0)
+      ELSE (base.descending - cur.value::numeric) / NULLIF(base.descending - s.min_value::numeric, 0)
+    END) * 100 END AS usage_percent
     , LEAST(TRUNC(CASE
       WHEN s.increment_by > 0
         THEN (s.max_value - cur.value::numeric) / s.increment_by
@@ -1942,6 +1943,11 @@ WITH sequence_info AS (
         THEN s.start_value
     END AS value
   ) AS cur
+  CROSS JOIN LATERAL (
+    SELECT
+      CASE WHEN s.max_value > 0 THEN GREATEST(s.min_value, 0) ELSE s.min_value END AS ascending
+      , CASE WHEN s.min_value < 0 THEN LEAST(s.max_value, 0) ELSE s.max_value END AS descending
+  ) AS base
   WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
 )
 
