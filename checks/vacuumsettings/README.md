@@ -8,7 +8,7 @@ Verifies that PostgreSQL autovacuum and maintenance settings are properly config
 
 Validates the threshold for triggering autovacuum on tables.
 
-**Severity:**
+**Thresholds:**
 - WARN: Value > 0.2 (too high, allows excessive bloat)
 - WARN: Value < 0.02 (too low, causes excessive vacuum overhead)
 - OK: Between 0.02 and 0.2
@@ -25,7 +25,7 @@ Validates the threshold for triggering autovacuum on tables.
 
 Validates the threshold for triggering autoanalyze (statistics updates).
 
-**Severity:**
+**Thresholds:**
 - WARN: Value > 0.1 (too high, leads to stale statistics)
 - WARN: Value < 0.01 (too low, causes excessive analyze overhead)
 - OK: Between 0.01 and 0.1
@@ -40,7 +40,7 @@ Validates the threshold for triggering autoanalyze (statistics updates).
 
 Validates the number of parallel autovacuum worker processes.
 
-**Severity:**
+**Thresholds:**
 - FAIL: Workers = 0 (autovacuum disabled, will cause bloat and wraparound)
 - WARN: Workers = 1 (critically low, cannot keep up with multiple tables)
 - WARN: Workers > 10 (excessive, causes I/O contention)
@@ -59,7 +59,7 @@ Validates the number of parallel autovacuum worker processes.
 
 Validates memory allocated for maintenance operations (VACUUM, CREATE INDEX, REINDEX).
 
-**Severity:**
+**Thresholds:**
 - FAIL: Total budget (maintenance_work_mem × autovacuum_max_workers) > 25% of RAM
 - WARN: Total budget > 12.5% of RAM
 - WARN: Value < 32MB (below half PostgreSQL default, causes slow VACUUM)
@@ -81,7 +81,7 @@ Validates memory allocated for maintenance operations (VACUUM, CREATE INDEX, REI
 
 Validates the throttling delay for vacuum operations to reduce I/O impact.
 
-**Severity:**
+**Thresholds:**
 - WARN: Value > 20ms (may throttle vacuum too much)
 - OK: <= 20ms
 
@@ -95,7 +95,7 @@ Validates the throttling delay for vacuum operations to reduce I/O impact.
 
 Validates the cost limit per vacuum round before sleeping.
 
-**Severity:**
+**Thresholds:**
 - WARN: Value < 200 (may throttle too much)
 - WARN: Value > 10000 (may cause I/O spikes)
 - OK: Between 200 and 10000
@@ -110,7 +110,7 @@ Validates the cost limit per vacuum round before sleeping.
 
 Validates memory allocated for query operations (sorts, hash tables).
 
-**Severity:**
+**Thresholds:**
 - FAIL: Value < 4MB (critically low, causes excessive temp file usage)
 - FAIL: work_mem × connected backends > 80% of RAM
 - WARN: work_mem × connected backends > 50% of RAM
@@ -266,6 +266,10 @@ SELECT pg_reload_conf();
 - `work_mem` is reload-only; changing `max_connections` requires a restart
 - Values < 4MB cause excessive temp file usage
 - Values > 64MB risky without RAM awareness
+
+### For `vacuum-settings`
+
+No action.
 
 ### For Individual Tables
 

@@ -56,7 +56,7 @@ Displays a summary of current connection pool status:
 - Total connections / available connections
 - Active, Idle, Idle-in-transaction, and Waiting counts
 
-This is informational (always OK) and provides context for other subchecks.
+This is informational and provides context for other subchecks.
 
 ### connection-saturation
 
@@ -147,9 +147,7 @@ Reports when `pg_stat_activity` hides the state of other roles' connections from
 - Warning: at least one connection to a database hides its state
 
 **Why it matters:**
-Only superusers and roles with `pg_read_all_stats` (for example through `pg_monitor`) can read `state`, `wait_event_type`, `query` and the timestamps of other roles' connections; everyone else sees NULL, and `<insufficient privilege>` as the query. `pool-pressure`, `idle-ratio`, `idle-in-transaction` and `long-idle` all read those columns, so a restricted role would count zero active or idle connections and report PASS even during an outage. When any connection is hidden, the check reports `stats-restricted`, skips `connection-overview`, `pool-pressure` and `idle-ratio`, and reports `idle-in-transaction` and `long-idle` only when the visible connections already show a problem. `connection-saturation` counts rows only, so it is still graded.
-
-Grant `pg_read_all_stats` (or `pg_monitor`) to the role that runs pgdoctor.
+Only superusers and roles with `pg_read_all_stats` (for example through `pg_monitor`) can read `state`, `wait_event_type`, `query` and the timestamps of other roles' connections; everyone else sees NULL, and `<insufficient privilege>` as the query. `pool-pressure`, `idle-ratio`, `idle-in-transaction` and `long-idle` all read those columns, so a restricted role would count zero active or idle connections, even during an outage.
 
 ## How to Fix
 
@@ -275,6 +273,18 @@ SELECT pg_reload_conf();
 # - Connections not released on error paths or process exit / shutdown
 # - Connection pool exhaustion causing app to hold connections
 # - Long-running background jobs not releasing connections
+```
+
+### For `connection-overview`
+
+No action. This finding shows the current connection counts as context for the other findings.
+
+### For `stats-restricted`
+
+Grant `pg_read_all_stats` (or `pg_monitor`) to the role that runs pgdoctor:
+
+```sql
+GRANT pg_read_all_stats TO pgdoctor_role;
 ```
 
 ## Decision Tree: Diagnosing Connection Issues

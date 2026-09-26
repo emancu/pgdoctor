@@ -13,7 +13,6 @@ PostgreSQL 14 introduced session-level statistics in `pg_stat_database` that tra
 ## Requirements
 
 - PostgreSQL 14 or later (session statistics don't exist in earlier versions)
-- For versions < 14, the check reports OK and skips validation
 
 ## Subchecks
 
@@ -161,6 +160,10 @@ WHERE datname NOT IN ('template0', 'template1');
    - Use `EXPLAIN ANALYZE` to find bottlenecks
    - Add indexes for frequently filtered columns
    - Review query plans for sequential scans on large tables
+
+### For `connection-efficiency`
+
+Session statistics exist only in PostgreSQL 14 and later. Upgrade an older server to get these metrics. After a restart or a `pg_stat_reset()`, the counters are empty. Let clients open and close sessions, then run the check again.
 
 ## Monitoring Queries
 

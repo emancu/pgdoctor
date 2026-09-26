@@ -18,8 +18,7 @@ Listed indexes are tiered by row severity:
 - **WARN**: wasted space >= 2 GiB or bloat >= 70%
 - **INFO**: bloat between 50% and 70% with less than 2 GiB wasted (small-waste tail)
 
-The finding itself is at most WARN — index bloat is a chronic maintenance
-issue, never an urgent outage signal.
+Index bloat is a chronic maintenance issue, never an urgent outage signal.
 
 ## How It Works
 
@@ -56,6 +55,8 @@ Bloated indexes cause:
 - **Longer backups** - More data to copy
 
 ## How to Fix
+
+### For `index-bloat`
 
 Rebuild bloated indexes, largest wasted space first:
 

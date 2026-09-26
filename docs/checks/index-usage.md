@@ -11,8 +11,6 @@ Indexes with zero scans that are larger than 500 MB. These indexes consume disk 
 INSERT/UPDATE/DELETE operations without providing query benefits.
 Details disclose the statistics window (since `pg_stat_database.stats_reset`) so "0 scans" is interpretable.
 
-**Severity**: WARN
-
 **Excludes**:
 - Primary keys (required for constraints)
 - Unique indexes (enforce data integrity)
@@ -24,11 +22,9 @@ clock on the host running pgdoctor does not affect which indexes are listed. Whe
 the server uptime is the window. With a shorter window, the check does not evaluate read rates. Zero-scan indexes surface as unused-indexes.
 These indexes have high maintenance costs relative to their query benefits.
 
-**Severity**: INFO
-
 ## Statistics Requirements
 
-This check requires at least **7 days** of statistics history for accurate results. If statistics were recently reset (PostgreSQL restart, manual reset), the check will warn about insufficient data.
+This check requires at least **7 days** of statistics history for accurate results. If statistics were recently reset (PostgreSQL restart, manual reset), wait until the history is long enough before you drop an index.
 
 ## Important Considerations
 
@@ -80,6 +76,10 @@ Consider if these indexes are:
 3. Needed on read replicas (keep)
 
 Evaluate index value vs maintenance cost for your workload.
+
+### For `index-usage`
+
+No action.
 
 ## Query Details
 

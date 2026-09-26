@@ -132,7 +132,7 @@ Identifies large transient tables (outbox, inbox, jobs, queues) that are not par
 - `logs` - Generic debug/log tables
 - `events` - Event tables
 
-**Required:** All large transient tables MUST be partitioned (FAIL severity).
+**Required:** All large transient tables MUST be partitioned.
 
 ### inefficient-partitions
 
@@ -142,8 +142,6 @@ Identifies individual partitions that have grown too large (>= 10M rows by defau
 - Time-based partitions are too wide (yearly instead of monthly)
 - Hash partitions have too few buckets
 - Uneven data distribution across partition keys
-
-**Severity:** Warning - review and adjust the partitioning strategy.
 
 ## Configuration
 

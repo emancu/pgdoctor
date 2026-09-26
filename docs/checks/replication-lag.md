@@ -6,17 +6,15 @@ Monitors active replication streams to ensure subscribers are keeping up with th
 
 ### no-replication
 
-Reports OK status when no replication is configured on the database.
+No active replication stream exists on the database.
 
-**Severity:** OK
-
-**Why this check exists:** Differentiates between "no replication configured" (OK) and "replication configured but failing" (WARN/FAIL). Many databases intentionally have no replication.
+**Why this check exists:** Many databases intentionally have no replication.
 
 ### replication-state
 
 Validates that all active replication streams are in the `streaming` state.
 
-**Severity:**
+**Thresholds:**
 - WARN: Stream in `catchup` state
 - FAIL: Stream in `backup` or `stopping` state
 
@@ -32,7 +30,7 @@ Validates that all active replication streams are in the `streaming` state.
 
 Validates that replication slots have healthy WAL retention status.
 
-**Severity:**
+**Thresholds:**
 - WARN: Slot has `extended` status
 - FAIL: Slot has `unreserved` or `lost` status
 
@@ -48,7 +46,7 @@ Validates that replication slots have healthy WAL retention status.
 
 Monitors replay lag for physical standby servers (streaming replication to standbys).
 
-**Severity:**
+**Thresholds:**
 - FAIL: >= 1 second
 - WARN: >= 250ms
 - OK: < 250ms
@@ -402,6 +400,10 @@ FROM pg_replication_slots;
 **For `extended` status:**
 - Increase `max_slot_wal_keep_size` if possible
 - Investigate why consumer is lagging (see lag subchecks)
+
+### For `no-replication`
+
+No action. If this database must have a standby or a subscriber, make sure that its replication stream is connected.
 
 ### Emergency Response
 

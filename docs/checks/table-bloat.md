@@ -10,8 +10,7 @@ Identifies tables with high dead tuple percentages:
 
 Dead tuples are rows marked for deletion but not yet reclaimed by vacuum. A high
 ratio degrades performance (bloated scans, index bloat) but never stops the
-database, so this finding stays WARN and never pages — vacuum emergencies surface
-via the `table-vacuum-health` check.
+database. Vacuum emergencies surface via the `table-vacuum-health` check.
 
 ### Large Bloated Tables (`large-bloated-tables`)
 Identifies large tables where bloat wastes significant disk space:
@@ -77,6 +76,10 @@ pg_repack -t schema.table_name
 - Lower autovacuum thresholds for large tables
 - Ensure adequate `maintenance_work_mem`
 - Monitor for long-running transactions
+
+### For `table-bloat`
+
+No action.
 
 ## Related Checks
 
