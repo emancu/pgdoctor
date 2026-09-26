@@ -70,6 +70,11 @@ func (b *rowBuilder) withSize(sizeBytes int64) *rowBuilder {
 	return b
 }
 
+func (b *rowBuilder) withNoSize() *rowBuilder {
+	b.row.TableSizeBytes = pgtype.Int8{}
+	return b
+}
+
 func (b *rowBuilder) withDeadTuples(deadTup int64) *rowBuilder {
 	b.row.NDeadTup = pgtype.Int8{Int64: deadTup, Valid: true}
 	return b
@@ -239,6 +244,47 @@ func TestTableVacuumHealth_AutovacuumDisabled_OneRowPerTableSortedByDeadTuples(t
 	require.Len(t, disabled.Table.Rows, 2)
 	assert.Equal(t, "public.busy", disabled.Table.Rows[0].Cells[0])
 	assert.Equal(t, "public.quiet", disabled.Table.Rows[1].Cells[0])
+}
+
+func TestTableVacuumHealth_SizeCell(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		findingID string
+		row       *rowBuilder
+	}{
+		{
+			name:      "autovacuum disabled",
+			findingID: findingIDAutovacuumDisabled,
+			row:       makeRow("public.events").withAutovacuumDisabled(),
+		},
+		{
+			name:      "vacuum stale",
+			findingID: findingIDVacuumStale,
+			row:       makeRow("public.events").withDeadTuples(500_000).withLastVacuumAge(staleFail).withLastAnalyzeAge(recent),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := runCheck(t, []db.TableVacuumHealthRow{
+				tt.row.withSize(8192).build(),
+			})
+			finding := findingByID(t, report, tt.findingID)
+			require.NotNil(t, finding.Table)
+			assert.Equal(t, "8.0KiB", finding.Table.Rows[0].Cells[2])
+
+			report = runCheck(t, []db.TableVacuumHealthRow{
+				tt.row.withNoSize().build(),
+			})
+			finding = findingByID(t, report, tt.findingID)
+			require.NotNil(t, finding.Table)
+			assert.Equal(t, "-", finding.Table.Rows[0].Cells[2])
+		})
+	}
 }
 
 func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {

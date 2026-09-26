@@ -145,7 +145,7 @@ func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, excludes []string, 
 			Cells: []string{
 				row.TableName.String,
 				check.FormatNumber(row.EstimatedRows.Int64),
-				check.FormatBytes(row.TableSizeBytes.Int64),
+				formatSize(row.TableSizeBytes),
 				check.FormatNumber(row.NDeadTup.Int64),
 				formatActivity(row.LastVacuumAgeSeconds, row.VacuumCount.Int64+row.AutovacuumCount.Int64),
 			},
@@ -207,7 +207,7 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 			Cells: []string{
 				e.row.TableName.String,
 				check.FormatNumber(e.row.EstimatedRows.Int64),
-				check.FormatBytes(e.row.TableSizeBytes.Int64),
+				formatSize(e.row.TableSizeBytes),
 				check.FormatNumber(e.trigger),
 				check.FormatNumber(e.pending),
 				estNextVacuum(e.trigger, e.pending, e.row.LastVacuumAgeSeconds),
@@ -307,7 +307,7 @@ func checkVacuumStale(rows []db.TableVacuumHealthRow, report *check.Report) {
 			Cells: []string{
 				e.row.TableName.String,
 				check.FormatNumber(e.row.EstimatedRows.Int64),
-				check.FormatBytes(e.row.TableSizeBytes.Int64),
+				formatSize(e.row.TableSizeBytes),
 				check.FormatNumber(e.pendingWork),
 				formatActivity(e.lastVacuumAge, e.row.VacuumCount.Int64+e.row.AutovacuumCount.Int64),
 				formatActivity(e.lastAnalyzeAge, e.row.AnalyzeCount.Int64+e.row.AutoanalyzeCount.Int64),
@@ -359,6 +359,14 @@ func formatActivity(age pgtype.Int8, count int64) string {
 		return neverLabel
 	}
 	return fmt.Sprintf("%s (%d)", formatAge(age.Int64), count)
+}
+
+// formatSize renders "-" for a relation without storage of its own.
+func formatSize(bytes pgtype.Int8) string {
+	if !bytes.Valid {
+		return "-"
+	}
+	return check.FormatBytes(bytes.Int64)
 }
 
 // Helper functions.
