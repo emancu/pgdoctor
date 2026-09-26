@@ -96,6 +96,16 @@ COMMIT;
 
 For large tables (>1M rows), complex foreign key relationships, or zero-downtime requirements, see detailed migration strategies in the "Migration Guide" section below.
 
+When the finding says that some tables use the row estimate, the role cannot read the current value of their sequences. `pg_monitor` does not give this privilege. `SELECT` on a sequence lets the role read its value, but not advance it:
+
+```sql
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO monitoring_role;
+
+-- Also cover sequences that app_owner creates later
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+  GRANT SELECT ON SEQUENCES TO monitoring_role;
+```
+
 ## Migration Guide
 
 ### For New Tables (5 minutes)

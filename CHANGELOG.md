@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`replication-slots`**: an inactive slot also appears in `critical-lag` (FAIL) or `high-lag` (WARN) when its WAL lag reaches the threshold, not only in `inactive-slots` ([#147](https://github.com/emancu/pgdoctor/pull/147)).
 - **`index-usage`**, **`partition-usage`**: a finding that cannot be computed reports SKIP with a reason, not PASS or WARN. `low-usage-indexes` uses the server uptime as the window when no statistics reset is recorded, where it used to judge read rates over any window ([#143](https://github.com/emancu/pgdoctor/pull/143)).
 - **`vacuum-settings`**: findings for a value above or below the recommended range are named "High <setting>" or "Low <setting>", not "Default <setting>". The finding IDs do not change ([#151](https://github.com/emancu/pgdoctor/pull/151)).
+- **`sequence-health`**, **`pk-types`**: a sequence that the role cannot read no longer counts as 0% used. `sequence-health` reports SKIP when it can read no sequence value, and adds an INFO `unreadable-sequences` finding when it can read only some. `pk-types` says in its finding how many tables use the row estimate ([#146](https://github.com/emancu/pgdoctor/pull/146)).
 
 ## [0.5.0] - 2026-08-14
 
