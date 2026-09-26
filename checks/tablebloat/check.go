@@ -156,7 +156,7 @@ func checkLargeBloatedTables(rows []db.TableBloatRow, report *check.Report) {
 
 	for _, row := range bloated {
 		pct := getDeadTuplePercent(row)
-		wastedBytes := int64(float64(row.TotalSizeBytes.Int64) * pct / 100)
+		wastedBytes := int64(float64(row.HeapSizeBytes.Int64) * pct / 100)
 		tableRows = append(tableRows, check.TableRow{
 			Cells: []string{
 				row.TableName.String,

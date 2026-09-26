@@ -2378,6 +2378,7 @@ SELECT
     ELSE 0
   END AS dead_tuple_percent
   , pg_total_relation_size(relid) AS total_size_bytes
+  , pg_relation_size(relid) AS heap_size_bytes
 FROM pg_stat_user_tables
 WHERE
   schemaname NOT IN ('pg_catalog', 'information_schema')
@@ -2398,6 +2399,7 @@ type TableBloatRow struct {
 	ModificationsSinceAnalyze pgtype.Int8
 	DeadTuplePercent          pgtype.Numeric
 	TotalSizeBytes            pgtype.Int8
+	HeapSizeBytes             pgtype.Int8
 }
 
 // Identifies tables with high dead tuple percentages indicating vacuum issues
@@ -2423,6 +2425,7 @@ func (q *Queries) TableBloat(ctx context.Context) ([]TableBloatRow, error) {
 			&i.ModificationsSinceAnalyze,
 			&i.DeadTuplePercent,
 			&i.TotalSizeBytes,
+			&i.HeapSizeBytes,
 		); err != nil {
 			return nil, err
 		}
