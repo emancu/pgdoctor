@@ -8,14 +8,24 @@ WITH sequence_info AS (
     , s.max_value
     , s.increment_by
     , s.cycle AS is_cyclic
-    , COALESCE(s.last_value, s.start_value) AS current_value
+    , cur.value AS current_value
+    , (cur.value IS NULL) AS is_unreadable
     , CASE
-      WHEN s.max_value > 0 AND COALESCE(s.last_value, s.start_value) > 0
-        THEN (COALESCE(s.last_value, s.start_value)::numeric / s.max_value::numeric) * 100
-      ELSE 0
+      WHEN s.max_value > 0 AND cur.value > 0
+        THEN (cur.value::numeric / s.max_value::numeric) * 100
+      WHEN cur.value IS NOT NULL
+        THEN 0
     END AS usage_percent
-    , (s.max_value - COALESCE(s.last_value, s.start_value)) / NULLIF(s.increment_by, 0) AS remaining_values
+    , (s.max_value - cur.value) / NULLIF(s.increment_by, 0) AS remaining_values
   FROM pg_sequences AS s
+  -- last_value is NULL both for a sequence never called and for one the role cannot read.
+  CROSS JOIN LATERAL (
+    SELECT CASE
+      WHEN s.last_value IS NOT NULL
+        OR has_sequence_privilege(quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename), 'SELECT,USAGE')
+        THEN COALESCE(s.last_value, s.start_value)
+    END AS value
+  ) AS cur
   WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
 )
 
@@ -76,6 +86,7 @@ SELECT
   , si.max_value
   , si.increment_by
   , si.is_cyclic
+  , si.is_unreadable
   , si.remaining_values
   , ROUND(si.usage_percent::numeric, 2) AS usage_percent
   , COALESCE(so.table_name, '') AS table_name
@@ -104,4 +115,4 @@ LEFT JOIN fk_references AS fkr
   ON
     so.table_oid = fkr.referenced_table_oid
     AND so.column_num = fkr.referenced_column_num
-ORDER BY si.usage_percent DESC, si.remaining_values ASC;
+ORDER BY si.usage_percent DESC NULLS LAST, si.remaining_values ASC;

@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -23,6 +24,8 @@ type SequenceHealthQueries interface {
 type checker struct {
 	queries SequenceHealthQueries
 }
+
+const unreadableReason = "role cannot read sequence values (needs SELECT on the sequences)"
 
 func Metadata() check.Metadata {
 	return check.Metadata{
@@ -62,9 +65,38 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	checkNearExhaustion(rows, report)
-	checkIntegerShouldBeBigint(rows, report)
+	var readable []db.SequenceHealthRow
+	for _, row := range rows {
+		if !row.IsUnreadable.Bool {
+			readable = append(readable, row)
+		}
+	}
+
+	if len(readable) == 0 && !slices.ContainsFunc(rows, exceedsColumn) {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeveritySkip,
+			Details:  unreadableReason,
+		})
+		report.Severity = check.SeveritySkip
+		return report, nil
+	}
+
+	if len(readable) > 0 {
+		checkNearExhaustion(readable, report)
+		checkIntegerShouldBeBigint(readable, report)
+	}
 	checkSequenceTypeMismatch(rows, report)
+
+	if unreadable := len(rows) - len(readable); unreadable > 0 {
+		report.AddFinding(check.Finding{
+			ID:       "unreadable-sequences",
+			Name:     "Unreadable Sequences",
+			Severity: check.SeverityInfo,
+			Details:  fmt.Sprintf("%d sequence(s) not evaluated: %s", unreadable, unreadableReason),
+		})
+	}
 
 	return report, nil
 }
@@ -210,7 +242,7 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 	var mismatched []db.SequenceHealthRow
 
 	for _, row := range rows {
-		if row.SequenceExceedsColumn.Bool && row.ColumnType.String != "" {
+		if exceedsColumn(row) {
 			mismatched = append(mismatched, row)
 		}
 	}
@@ -256,6 +288,10 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, report *check.Report
 }
 
 // Helper functions
+
+func exceedsColumn(row db.SequenceHealthRow) bool {
+	return row.SequenceExceedsColumn.Bool && row.ColumnType.String != ""
+}
 
 func formatTableColumn(table, column string) string {
 	if table == "" || column == "" {

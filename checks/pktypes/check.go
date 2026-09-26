@@ -72,8 +72,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	maxSeverity := check.SeverityWarn
 	criticalCount := 0
 	warningCount := 0
+	unreadableCount := 0
 
 	for _, row := range rows {
+		if row.SequenceUnreadable.Bool {
+			unreadableCount++
+		}
+
 		entry := analyzeRow(row)
 		if entry.usagePct < usagePercentFloor {
 			continue
@@ -98,23 +103,30 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			ID:       report.CheckID,
 			Name:     report.Name,
 			Severity: check.SeverityPass,
-			Details:  "All tables use bigint or UUID primary keys",
+			Details:  withUnreadableNote("All tables use bigint or UUID primary keys", unreadableCount),
 		})
-		return report, nil
+	} else {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: maxSeverity,
+			Details:  withUnreadableNote(formatDetails(criticalCount, warningCount), unreadableCount),
+			Table: &check.Table{
+				Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
+				Rows:    tableRows,
+			},
+		})
 	}
 
-	report.AddFinding(check.Finding{
-		ID:       report.CheckID,
-		Name:     report.Name,
-		Severity: maxSeverity,
-		Details:  formatDetails(criticalCount, warningCount),
-		Table: &check.Table{
-			Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
-			Rows:    tableRows,
-		},
-	})
-
 	return report, nil
+}
+
+func withUnreadableNote(details string, unreadableCount int) string {
+	if unreadableCount == 0 {
+		return details
+	}
+	return fmt.Sprintf("%s\n%d table(s) use the row estimate: role cannot read sequence values (needs SELECT on the sequences)",
+		details, unreadableCount)
 }
 
 type tableEntry struct {

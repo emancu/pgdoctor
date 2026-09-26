@@ -64,6 +64,7 @@ WITH pk_columns AS (
       WHEN has_sequence_privilege(so.sequence_oid, 'SELECT,USAGE')
         THEN pg_sequence_last_value(so.sequence_oid::regclass)
     END AS sequence_current
+    , (so.sequence_oid IS NOT NULL AND NOT has_sequence_privilege(so.sequence_oid, 'SELECT,USAGE')) AS sequence_unreadable
   FROM pk_tables AS p
   LEFT JOIN sequence_owners AS so
     ON
@@ -78,6 +79,7 @@ WITH pk_columns AS (
     , p.column_type
     , p.estimated_rows
     , p.sequence_current
+    , p.sequence_unreadable
     , p.type_max_value
     , CASE
       WHEN p.sequence_current IS NOT NULL AND p.type_max_value > 0
@@ -96,6 +98,7 @@ SELECT
   , column_type
   , estimated_rows
   , sequence_current
+  , sequence_unreadable
   , type_max_value
   , usage_pct
 FROM pk_with_usage

@@ -125,6 +125,18 @@ ALTER SEQUENCE orders_id_seq AS bigint MAXVALUE 9223372036854775807;
 -- Restart connection pools to invalidate prepared statements
 ```
 
+### For `unreadable-sequences`
+
+The role cannot read the current value of some sequences. `pg_monitor` does not give this privilege. `SELECT` on a sequence lets the role read its value, but not advance it:
+
+```sql
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO monitoring_role;
+
+-- Also cover sequences that app_owner creates later
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+  GRANT SELECT ON SEQUENCES TO monitoring_role;
+```
+
 ## Decision Tree: Which Issue to Fix First?
 
 ```
