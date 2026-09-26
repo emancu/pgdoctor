@@ -16,8 +16,6 @@ PostgreSQL's autovacuum maintains table health by removing dead tuples, updating
 
 Lists tables where `autovacuum_enabled=false` has been explicitly set.
 
-**Severity:** Warning
-
 These tables rely entirely on manual maintenance. Common legitimate uses:
 - Bulk import staging tables (re-enable after import)
 - Tables managed by external ETL processes
@@ -27,8 +25,6 @@ To stop the report of a table that has autovacuum disabled on purpose, use the `
 ### large-table-defaults
 
 Identifies tables with more than 1 million rows using default autovacuum scale factors.
-
-**Severity:** Warning
 
 The default `autovacuum_vacuum_scale_factor` is 0.2 (20%), meaning autovacuum triggers when dead tuples exceed 20% of the table size:
 
@@ -51,7 +47,7 @@ ALTER TABLE schema.large_table SET (
 
 Identifies tables that haven't been vacuumed or analyzed recently despite pending work.
 
-**Severity:**
+**Thresholds:**
 - Warning: No vacuum/analyze in 7+ days with 250,000+ pending work
 - Fail: No vacuum/analyze in 25+ days with 500,000+ pending work
 
@@ -64,7 +60,7 @@ Tables that go too long without maintenance may have:
 
 Table size is a **lock-free estimate** derived from `pg_class`: heap `relpages` + the TOAST relation's `relpages` + the sum of `relpages` over the table's indexes, times `block_size`.
 
-It is deliberately not `pg_total_relation_size()`, which takes an `AccessShareLock`. A new `AccessShareLock` request queues behind a *waiting* `AccessExclusiveLock`, so with a 2-second `statement_timeout` this check would SKIP during a DDL pile-up — and it runs for every table, not a top-N. The trade-off: `relpages` is only refreshed by `VACUUM`/`ANALYZE`, so the estimate is stale by definition and `0` on a never-vacuumed table.
+It is deliberately not `pg_total_relation_size()`, which takes an `AccessShareLock`. A new `AccessShareLock` request queues behind a *waiting* `AccessExclusiveLock`, so with a 2-second `statement_timeout` this check would time out during a DDL pile-up — and it runs for every table, not a top-N. The trade-off: `relpages` is only refreshed by `VACUUM`/`ANALYZE`, so the estimate is stale by definition and `0` on a never-vacuumed table.
 
 ## Pending Work Column
 

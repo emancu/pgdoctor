@@ -28,7 +28,7 @@ Analyzes the ratio of sequential scans to index scans on tables:
 
 ## Statistics Requirements
 
-This check requires at least **7 days** of statistics history. Recent statistics resets will trigger a warning.
+This check requires at least **7 days** of statistics history. After a recent statistics reset, the ratios do not represent the workload.
 
 ## Important Considerations
 
@@ -51,6 +51,18 @@ This check can produce false positives for:
 Always analyze actual query patterns before adding indexes.
 
 ## How to Fix
+
+### For `high-seq-scans`
+
+Large tables are read mostly by sequential scans. Find the queries that scan them and add the missing indexes, with the steps below. Start with the largest tables.
+
+### For `moderate-seq-scans`
+
+Use the same steps as for `high-seq-scans`. These tables are smaller or scanned less often, so the fix is less urgent.
+
+### For `table-seq-scans`
+
+No action.
 
 ### Investigation Steps
 

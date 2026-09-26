@@ -25,8 +25,6 @@ Lists an index only when it is a hot, disk-bound index — all of the following 
 
 A rarely-read index is uncached by design, so only hot-path indexes are reported.
 
-**Severity**: INFO
-
 ### Per-Table Cache Hit Ratio (`table-cache-ratio`)
 
 Lists a table only when it is a hot, disk-bound heap — all of the following hold:
@@ -35,8 +33,6 @@ Lists a table only when it is a hot, disk-bound heap — all of the following ho
 - heap cache hit ratio (`heap_blks_hit` / (`heap_blks_hit` + `heap_blks_read`)) < 75%
 
 Index blocks are covered by the sibling `index-cache-ratio` finding; TOAST blocks are excluded.
-
-**Severity**: INFO
 
 ## Why Cache Hit Ratio Matters
 
@@ -64,7 +60,7 @@ Index blocks are covered by the sibling `index-cache-ratio` finding; TOAST block
 
 ## Statistics Requirements
 
-This check requires at least **7 days** of statistics history. Recent statistics resets will trigger a warning.
+This check requires at least **7 days** of statistics history. After a recent statistics reset, the ratios do not represent the workload.
 
 ## How to Fix
 

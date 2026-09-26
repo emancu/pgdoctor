@@ -110,16 +110,18 @@ import { v7 as uuidv7 } from 'uuid';
 const id = uuidv7();
 ```
 
+### For `uuid-defaults`
+
+No action.
+
 ## Subchecks
 
-### For `random-uuid-indexed`
+### random-uuid-indexed
 
 Identifies UUID columns with the following conditions:
 1. Column has an index (primary key or regular index)
 2. Column has a DEFAULT using `gen_random_uuid()` or `uuid_generate_v4()`
 3. Table has more than 100K rows (smaller tables have negligible impact)
-
-**Severity:** WARN - Not urgent, but should be addressed during next schema update.
 
 ## Detection Criteria
 
