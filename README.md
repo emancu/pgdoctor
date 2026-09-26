@@ -5,6 +5,7 @@
 A command-line tool and Go library for running health checks against PostgreSQL databases.
 It identifies misconfigurations, performance issues, and areas for optimization through
 read-only checks that are safe to run against production.
+It supports PostgreSQL 14 and newer.
 
 <br clear="left" />
 
@@ -66,7 +67,7 @@ pgdoctor always uses a connect timeout. When the DSN sets no positive `connect_t
 | `--preset` | Check preset: `all` (default), `triage` |
 | `--detail` | Detail level: `summary`, `brief` (default), `verbose`, `debug` |
 | `--output` | Output format: `text` (default), `json` |
-| `--hide-passing` | Hide passing checks |
+| `--hide-passing` | Hide checks and findings that passed |
 | `--config` | YAML file with per-check settings, keyed by check ID |
 
 `--only` and `--ignore` accept a check ID with or without its category, so the IDs that `pgdoctor list` prints work as they are: `--only configs/pg-version` is the same as `--only pg-version`.

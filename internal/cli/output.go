@@ -49,12 +49,29 @@ func printCheckSummary(w io.Writer, report *check.Report, opts *runOptions) {
 		}
 	}
 
-	fmt.Fprintf(w, "%s %s %s %s%s\n",
+	var tallyStr string
+	if total > 0 {
+		tallyStr = " " + dimFunc(fmt.Sprintf("(%d/%d)", okCount, total))
+	}
+
+	fmt.Fprintf(w, "%s %s %s%s%s\n",
 		colorFunc(fmt.Sprintf("[%s]", label)),
 		report.Name,
 		dimFunc(fmt.Sprintf("(%s)", report.CheckID)),
-		dimFunc(fmt.Sprintf("(%d/%d)", okCount, total)),
+		tallyStr,
 		timingStr)
+}
+
+func hidden(report *check.Report, opts *runOptions) bool {
+	if !opts.hidePassing || report.Severity != check.SeverityPass {
+		return false
+	}
+	for _, result := range report.Results {
+		if result.Severity != check.SeverityPass {
+			return false
+		}
+	}
+	return true
 }
 
 func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
@@ -116,6 +133,9 @@ func printCheckReport(w io.Writer, report *check.Report, opts *runOptions) {
 		})
 
 		for _, result := range sortedResults {
+			if opts.hidePassing && result.Severity == check.SeverityPass {
+				continue
+			}
 			printSubcheck(w, report, result, opts)
 		}
 	}
@@ -221,15 +241,6 @@ func printTable(w io.Writer, table *check.Table, indentSpaces int, opts *runOpti
 	}
 }
 
-func hasInfoFinding(report *check.Report) bool {
-	for _, result := range report.Results {
-		if result.Severity == check.SeverityInfo {
-			return true
-		}
-	}
-	return false
-}
-
 func printSummary(w io.Writer, reports []*check.Report) {
 	okCount, warnCount, failCount, skipCount, infoCount := 0, 0, 0, 0, 0
 	var totalDuration time.Duration
@@ -237,13 +248,7 @@ func printSummary(w io.Writer, reports []*check.Report) {
 		totalDuration += report.Duration
 		switch report.Severity {
 		case check.SeverityPass:
-			// A report starts at PASS and an INFO finding never raises it, so the
-			// info tally has to come from the findings.
-			if hasInfoFinding(report) {
-				infoCount++
-			} else {
-				okCount++
-			}
+			okCount++
 		case check.SeverityWarn:
 			warnCount++
 		case check.SeverityFail:

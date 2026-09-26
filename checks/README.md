@@ -371,7 +371,7 @@ Pick the severity by what you expect the reader to do with the finding:
 
 When in doubt, downgrade — false alarms cost more trust than a missed WARN.
 
-Row severity must never exceed its finding's severity (enforced by `internal/checktest.AssertSeverityInvariant`).
+A row can have a higher severity than its finding. The row color is only a visual signal. The finding severity drives the report severity and the exit code.
 
 ## CLI Output Format
 

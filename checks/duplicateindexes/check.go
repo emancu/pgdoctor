@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -74,23 +73,25 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 func checkExactDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
-	var exactDuplicates []string
-	exactCount := 0
+	var tableRows []check.TableRow
 
 	for _, row := range rows {
 		if row.DuplicateType.String != "exact" {
 			continue
 		}
 
-		exactCount++
-		if len(exactDuplicates) < 10 {
-			sizeMB := float64(row.SizeA.Int64+row.SizeB.Int64) / (1024 * 1024)
-			exactDuplicates = append(exactDuplicates, fmt.Sprintf("%s: %s <-> %s (%.1f MB total)",
-				row.TableName.String, row.IndexNameA.String, row.IndexNameB.String, sizeMB))
-		}
+		tableRows = append(tableRows, check.TableRow{
+			Cells: []string{
+				row.TableName.String,
+				row.IndexNameA.String,
+				row.IndexNameB.String,
+				check.FormatBytes(row.SizeA.Int64 + row.SizeB.Int64),
+			},
+			Severity: check.SeverityWarn,
+		})
 	}
 
-	if exactCount == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "exact-duplicates",
 			Name:     "Exact Duplicate Indexes",
@@ -99,26 +100,20 @@ func checkExactDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
 		return
 	}
 
-	details := fmt.Sprintf("Found %d exact duplicate index pairs:\n%s",
-		exactCount,
-		strings.Join(exactDuplicates, "\n"),
-	)
-	if exactCount > len(exactDuplicates) {
-		details += fmt.Sprintf("\n... and %d more", exactCount-len(exactDuplicates))
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "exact-duplicates",
 		Name:     "Exact Duplicate Indexes",
 		Severity: check.SeverityWarn,
-		Details:  details,
+		Details:  fmt.Sprintf("Found %d exact duplicate index pairs", len(tableRows)),
+		Table: &check.Table{
+			Headers: []string{"Table", "Index", "Duplicate Of", "Total Size"},
+			Rows:    tableRows,
+		},
 	})
 }
 
 func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
-	var prefixDuplicates []string
-	failCount := 0
-	warnCount := 0
+	var tableRows []check.TableRow
 
 	for _, row := range rows {
 		if row.DuplicateType.String != "prefix" {
@@ -126,22 +121,23 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 		}
 
 		sizeMB := float64(row.SizeA.Int64) / (1024 * 1024)
-		isLarge := sizeMB > prefixLargeSizeThresholdMB
-
-		if isLarge {
-			failCount++
-		} else {
-			warnCount++
+		rowSeverity := check.SeverityWarn
+		if sizeMB > prefixLargeSizeThresholdMB {
+			rowSeverity = check.SeverityFail
 		}
 
-		if len(prefixDuplicates) < 10 {
-			prefixDuplicates = append(prefixDuplicates, fmt.Sprintf("%s: %s is prefix of %s (%.1f MB)",
-				row.TableName.String, row.IndexNameA.String, row.IndexNameB.String, sizeMB))
-		}
+		tableRows = append(tableRows, check.TableRow{
+			Cells: []string{
+				row.TableName.String,
+				row.IndexNameA.String,
+				row.IndexNameB.String,
+				check.FormatBytes(row.SizeA.Int64),
+			},
+			Severity: rowSeverity,
+		})
 	}
 
-	totalIssues := failCount + warnCount
-	if totalIssues == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "prefix-duplicates",
 			Name:     "Prefix Duplicate Indexes",
@@ -150,18 +146,14 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 		return
 	}
 
-	details := fmt.Sprintf("Found %d prefix duplicate indexes:\n%s",
-		totalIssues,
-		strings.Join(prefixDuplicates, "\n"),
-	)
-	if totalIssues > len(prefixDuplicates) {
-		details += fmt.Sprintf("\n... and %d more", totalIssues-len(prefixDuplicates))
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "prefix-duplicates",
 		Name:     "Prefix Duplicate Indexes",
 		Severity: check.SeverityWarn,
-		Details:  details,
+		Details:  fmt.Sprintf("Found %d prefix duplicate indexes", len(tableRows)),
+		Table: &check.Table{
+			Headers: []string{"Table", "Index", "Prefix Of", "Size"},
+			Rows:    tableRows,
+		},
 	})
 }

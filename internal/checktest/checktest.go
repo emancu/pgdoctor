@@ -10,8 +10,8 @@ import (
 
 // AssertSeverityInvariant verifies the severity contract established by
 // check.NewReport and check.Report.AddFinding: the report severity is the
-// maximum finding severity (never below SeverityPass), and no table row is
-// more severe than the finding that contains it.
+// maximum finding severity (never below SeverityPass). Table row severities
+// do not count.
 //
 // A check whose findings are all SKIP is the one exception: it could not run at
 // all, so it reports SKIP rather than being floored up to PASS. AddFinding only
@@ -45,19 +45,6 @@ func severityViolations(report *check.Report) []string {
 		violations = append(violations, fmt.Sprintf(
 			"report %q severity is %q, want %q (max finding severity, floored at %q)",
 			report.CheckID, report.Severity, want, check.SeverityPass))
-	}
-
-	for _, finding := range report.Results {
-		if finding.Table == nil {
-			continue
-		}
-		for i, row := range finding.Table.Rows {
-			if row.Severity > finding.Severity {
-				violations = append(violations, fmt.Sprintf(
-					"finding %q row %d severity %q exceeds finding severity %q",
-					finding.ID, i, row.Severity, finding.Severity))
-			}
-		}
 	}
 
 	return violations

@@ -69,6 +69,8 @@ func Test_ToastStorage_NoIssues(t *testing.T) {
 	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 2, len(report.Results))
 	require.Equal(t, "compression-default", report.Results[0].ID)
+	require.Equal(t, "toast-usage", report.Results[1].ID)
+	require.Equal(t, "TOAST Usage", report.Results[1].Name)
 	require.Contains(t, report.Results[1].Details, "No tables with significant TOAST storage")
 }
 
@@ -432,6 +434,23 @@ func Test_ToastStorage_CompressionAlgorithm_SkipsOnPG13(t *testing.T) {
 
 	require.Nil(t, compressionFinding(t, report), "compression-algorithm subcheck should not run on PG < 14")
 	require.Nil(t, findingByID(report, findingIDCompressionDefault), "compression-default should not run on PG < 14")
+}
+
+func Test_ToastStorage_SkipsBeforeQueryOnPG13(t *testing.T) {
+	t.Parallel()
+
+	ctx := check.ContextWithInstanceMetadata(context.Background(), &check.InstanceMetadata{
+		EngineVersionMajor: 13,
+	})
+
+	queryer := &mockQueryer{err: fmt.Errorf("column a.attcompression does not exist")}
+	report, err := toaststorage.New(queryer).Check(ctx)
+
+	require.NoError(t, err)
+	checktest.AssertSeverityInvariant(t, report)
+	require.Equal(t, check.SeveritySkip, report.Severity)
+	require.Len(t, report.Results, 1)
+	require.Contains(t, report.Results[0].Details, "PostgreSQL 14 or newer, server is 13")
 }
 
 func Test_ToastStorage_CompressionDefault_PglzWarns(t *testing.T) {

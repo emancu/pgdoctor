@@ -43,7 +43,7 @@ func newRunCommand() *cobra.Command {
 potential issues, misconfigurations, or areas for optimization.
 
 By default, each check is shown in brief mode. Use --detail to control
-the level of detail, and --hide-passing to only show failures and warnings.`,
+the level of detail, and --hide-passing to hide checks and findings that passed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve DSN: positional argument > environment variable
@@ -152,6 +152,10 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 			runOpts.OnReport = func(r *check.Report) {
 				reports = append(reports, r)
 
+				if hidden(r, opts) {
+					return
+				}
+
 				// Print category header on transition
 				cat := string(r.Category)
 				if cat != currentCategory {
@@ -162,10 +166,6 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 					fmt.Fprintln(w, title)
 					fmt.Fprintln(w, strings.Repeat("─", len(title)))
 					currentCategory = cat
-				}
-
-				if r.Severity == check.SeverityPass && opts.hidePassing {
-					return
 				}
 
 				if opts.detail == string(detailSummary) {
@@ -194,7 +194,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 	cmd.Flags().StringSliceVar(&opts.only, "only", nil, "Only run these checks or categories")
 	cmd.Flags().StringVar(&opts.preset, "preset", presetAll, "Check preset: all (default), triage")
 	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief (default), verbose, debug")
-	cmd.Flags().BoolVar(&opts.hidePassing, "hide-passing", false, "Hide passing checks")
+	cmd.Flags().BoolVar(&opts.hidePassing, "hide-passing", false, "Hide checks and findings that passed")
 	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
 	cmd.Flags().StringVar(&opts.config, "config", "", "YAML file with per-check settings, keyed by check ID")
 

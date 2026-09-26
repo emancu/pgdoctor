@@ -195,10 +195,10 @@ func Test_TableSeqScans_HighSeqScans(t *testing.T) {
 	require.NotNil(t, highSeqResult, "Should have high-seq-scans finding")
 	require.Equal(t, check.SeverityFail, highSeqResult.Severity)
 	require.Contains(t, highSeqResult.Details, "2 tables")
-	require.Contains(t, highSeqResult.Details, "orders")
-	require.Contains(t, highSeqResult.Details, "seq: 10000")
-	require.Contains(t, highSeqResult.Details, "idx: 100")
-	require.Contains(t, highSeqResult.Details, "ratio: 100.0")
+	require.Equal(t, []string{"Table", "Seq Scans", "Idx Scans", "Ratio", "Rows", "Size"}, highSeqResult.Table.Headers)
+	require.Len(t, highSeqResult.Table.Rows, 2)
+	require.Equal(t, []string{"orders", "10.0K", "100", "100.0", "75.0K", "75.0MiB"}, highSeqResult.Table.Rows[0].Cells)
+	require.Equal(t, check.SeverityFail, highSeqResult.Table.Rows[0].Severity)
 }
 
 func Test_TableSeqScans_SameNameInTwoSchemas(t *testing.T) {
@@ -227,8 +227,8 @@ func Test_TableSeqScans_SameNameInTwoSchemas(t *testing.T) {
 	require.Equal(t, highSeqScansID, result.ID)
 	require.Equal(t, check.SeverityFail, result.Severity)
 	require.Contains(t, result.Details, "2 tables")
-	require.Contains(t, result.Details, "tenant_a.orders (seq: 10000")
-	require.Contains(t, result.Details, "tenant_b.orders (seq: 10000")
+	require.Equal(t, "tenant_a.orders", result.Table.Rows[0].Cells[0])
+	require.Equal(t, "tenant_b.orders", result.Table.Rows[1].Cells[0])
 }
 
 func Test_TableSeqScans_ModerateSeqScans(t *testing.T) {
@@ -262,7 +262,8 @@ func Test_TableSeqScans_ModerateSeqScans(t *testing.T) {
 
 	require.NotNil(t, moderateSeqResult, "Should have moderate-seq-scans finding")
 	require.Equal(t, check.SeverityWarn, moderateSeqResult.Severity)
-	require.Contains(t, moderateSeqResult.Details, "comments")
+	require.Equal(t, "comments", moderateSeqResult.Table.Rows[0].Cells[0])
+	require.Equal(t, check.SeverityWarn, moderateSeqResult.Table.Rows[0].Severity)
 }
 
 func Test_TableSeqScans_ThresholdBoundaries(t *testing.T) {
@@ -399,6 +400,7 @@ func Test_TableSeqScans_InvalidRatio(t *testing.T) {
 
 	require.NotNil(t, highSeqResult)
 	require.Equal(t, check.SeverityFail, highSeqResult.Severity, "Invalid ratio (no idx scans) should be treated as very high")
+	require.Equal(t, "-", highSeqResult.Table.Rows[0].Cells[3])
 }
 
 func Test_TableSeqScans_SizeFormatting(t *testing.T) {
@@ -431,10 +433,10 @@ func Test_TableSeqScans_SizeFormatting(t *testing.T) {
 	}
 
 	require.NotNil(t, highSeqResult)
-	require.Contains(t, highSeqResult.Details, "100.0 MB", "Should format size as MB")
+	require.Equal(t, "100.0MiB", highSeqResult.Table.Rows[0].Cells[5])
 }
 
-func Test_TableSeqScans_TruncationMessage(t *testing.T) {
+func Test_TableSeqScans_ListsEveryTable(t *testing.T) {
 	t.Parallel()
 
 	rows := make([]db.HighSeqScanTablesRow, 15)
@@ -465,7 +467,8 @@ func Test_TableSeqScans_TruncationMessage(t *testing.T) {
 	}
 
 	require.NotNil(t, highSeqResult)
-	require.Contains(t, highSeqResult.Details, "... and 5 more", "Should show truncation message")
+	require.Equal(t, "Found 15 tables with very high sequential scan ratios", highSeqResult.Details)
+	require.Len(t, highSeqResult.Table.Rows, 15)
 }
 
 func Test_TableSeqScans_QueryError(t *testing.T) {

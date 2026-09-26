@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -93,20 +94,84 @@ func TestPrintCheckSummary_InfoFindingsLeaveTheTally(t *testing.T) {
 	assert.Contains(t, buf.String(), "(1/1)", "two INFO findings must not make a healthy check read (1/3)")
 }
 
-func TestPrintSummary_InfoTallyComesFromFindings(t *testing.T) {
+func TestPrintCheckSummary_AllInfoFindingsHaveNoTally(t *testing.T) {
 	t.Parallel()
 
-	// An INFO finding never raises a report above PASS, so a tally that switched on
-	// report severity alone could never count one and reported "2 passed".
-	info := check.NewReport(check.Metadata{CheckID: "table-activity"})
-	info.AddFinding(check.Finding{ID: "high-churn-tables", Name: "High Churn Tables", Severity: check.SeverityInfo})
-	assert.Equal(t, check.SeverityPass, info.Severity)
-
-	pass := check.NewReport(check.Metadata{CheckID: "pg-version"})
-	pass.AddFinding(check.Finding{ID: "pg-version", Name: "PostgreSQL Version", Severity: check.SeverityPass})
+	report := check.NewReport(check.Metadata{CheckID: "table-activity", Name: "Table Activity"})
+	report.AddFinding(check.Finding{ID: "high-churn-tables", Name: "High Churn Tables", Severity: check.SeverityInfo})
 
 	var buf bytes.Buffer
-	printSummary(&buf, []*check.Report{info, pass})
+	printCheckSummary(&buf, report, &runOptions{detail: string(detailSummary)})
 
-	assert.Contains(t, buf.String(), "1 passed, 1 info")
+	assert.Equal(t, "[PASS] Table Activity (table-activity)\n", buf.String())
+}
+
+func reportWith(severities ...check.Severity) *check.Report {
+	report := check.NewReport(check.Metadata{CheckID: "demo", Name: "Demo Check"})
+	for i, severity := range severities {
+		report.AddFinding(check.Finding{ID: fmt.Sprintf("finding-%d", i), Name: fmt.Sprintf("Finding %d", i), Severity: severity})
+	}
+	return report
+}
+
+func TestPrintSummary_CountsEachCheckByHeaderSeverity(t *testing.T) {
+	t.Parallel()
+
+	reports := []*check.Report{
+		reportWith(check.SeverityInfo),
+		reportWith(check.SeverityPass, check.SeveritySkip),
+		reportWith(check.SeverityPass),
+		reportWith(check.SeverityPass, check.SeverityWarn),
+	}
+
+	var buf bytes.Buffer
+	printSummary(&buf, reports)
+
+	assert.Contains(t, buf.String(), "Summary: 1 warnings, 3 passed (4 checks")
+}
+
+func TestHidden(t *testing.T) {
+	t.Parallel()
+
+	skipped := reportWith(check.SeveritySkip)
+	skipped.Severity = check.SeveritySkip
+
+	tests := []struct {
+		name        string
+		report      *check.Report
+		hidePassing bool
+		want        bool
+	}{
+		{"all findings passed", reportWith(check.SeverityPass, check.SeverityPass), true, true},
+		{"no findings", reportWith(), true, true},
+		{"flag off", reportWith(check.SeverityPass), false, false},
+		{"info finding under pass header", reportWith(check.SeverityPass, check.SeverityInfo), true, false},
+		{"skip finding under pass header", reportWith(check.SeverityPass, check.SeveritySkip), true, false},
+		{"warn check", reportWith(check.SeverityPass, check.SeverityWarn), true, false},
+		{"skipped check", skipped, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, hidden(tt.report, &runOptions{hidePassing: tt.hidePassing}))
+		})
+	}
+}
+
+func TestPrintCheckReport_HidePassingDropsPassFindings(t *testing.T) {
+	t.Parallel()
+
+	report := reportWith(check.SeverityPass, check.SeverityWarn, check.SeverityInfo, check.SeveritySkip)
+
+	var buf bytes.Buffer
+	printCheckReport(&buf, report, &runOptions{detail: string(detailBrief), hidePassing: true})
+
+	out := buf.String()
+	assert.Contains(t, out, "[WARN] Demo Check (demo)")
+	assert.NotContains(t, out, "Finding 0")
+	assert.Contains(t, out, "[WARN] Finding 1")
+	assert.Contains(t, out, "[INFO] Finding 2")
+	assert.Contains(t, out, "[SKIP] Finding 3")
 }
