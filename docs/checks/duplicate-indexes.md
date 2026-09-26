@@ -49,6 +49,8 @@ CREATE INDEX idx_all_users_status ON users(status);
 
 This check excludes expression and partial indexes from prefix detection.
 
+**Other exclusions**: The shorter index is not a prefix duplicate if it is unique, backs an exclusion constraint, or has `INCLUDE` columns. It is also not a prefix duplicate if the two indexes use a different access method, or a different operator class, collation, or sort order on the shared columns.
+
 ### When to Keep Prefix Indexes
 
 In rare cases, a prefix index may be intentionally kept for:

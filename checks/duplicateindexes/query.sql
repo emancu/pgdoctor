@@ -10,7 +10,13 @@ WITH index_columns AS (
     , t.relname AS table_name
     , n.nspname AS schema_name
     , idx.indkey::int [] AS column_positions
+    , idx.indclass::oid [] AS column_opclasses
+    , idx.indcollation::oid [] AS column_collations
+    , idx.indoption::int [] AS column_options
     , idx.indnkeyatts AS num_key_columns
+    , i.relam AS access_method
+    , (idx.indisunique OR idx.indisexclusion) AS enforces_constraint
+    , (idx.indnatts > idx.indnkeyatts) AS has_include_columns
     -- Extract column list as array for prefix comparison
     , pg_get_indexdef(idx.indexrelid) AS index_def
     , pg_relation_size(i.oid) AS index_size_bytes
@@ -63,7 +69,14 @@ WITH index_columns AS (
     a.indrelid = b.indrelid
     AND a.indexrelid <> b.indexrelid
     AND a.num_key_columns < b.num_key_columns
-    AND a.column_positions = b.column_positions[0:a.num_key_columns]
+    AND a.access_method = b.access_method
+    AND NOT a.enforces_constraint
+    AND NOT a.has_include_columns
+    -- Vector columns start at index 0; a slice always has lower bound 1.
+    AND a.column_positions[0:a.num_key_columns - 1] = b.column_positions[0:a.num_key_columns - 1]
+    AND a.column_opclasses[0:a.num_key_columns - 1] = b.column_opclasses[0:a.num_key_columns - 1]
+    AND a.column_collations[0:a.num_key_columns - 1] = b.column_collations[0:a.num_key_columns - 1]
+    AND a.column_options[0:a.num_key_columns - 1] = b.column_options[0:a.num_key_columns - 1]
     AND NOT a.is_expression_index
     AND NOT b.is_expression_index
     AND NOT a.is_partial_index
