@@ -5,6 +5,7 @@
 A command-line tool and Go library for running health checks against PostgreSQL databases.
 It identifies misconfigurations, performance issues, and areas for optimization through
 read-only checks that are safe to run against production.
+It supports PostgreSQL 14 and newer.
 
 <br clear="left" />
 
