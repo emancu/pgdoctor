@@ -73,7 +73,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	// Every row carries the same database-wide values, so the first one answers for the set.
 	checkUnusedIndexes(rows, rows[0].StatsReset, report)
-	checkLowUsageIndexes(rows, rows[0].StatsAgeSeconds, report)
+	checkLowUsageIndexes(rows, rows[0].StatsReset, rows[0].StatsAgeSeconds, report)
 
 	return report, nil
 }
@@ -127,17 +127,20 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 	})
 }
 
-func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsAgeSeconds pgtype.Int8, report *check.Report) {
-	windowKnown := statsAgeSeconds.Valid
-	windowDays := 0
-	if windowKnown {
-		windowDays = int(statsAgeSeconds.Int64 / secondsPerDay)
-	}
+func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestamptz, statsAgeSeconds pgtype.Int8, report *check.Report) {
+	windowDays := int(statsAgeSeconds.Int64 / secondsPerDay)
 
-	// A NULL stats_reset means counters run since creation: an old window that
-	// trivially clears the age gate and the read-rate gate.
-	if windowKnown && windowDays < lowUsageMinWindowDays {
-		reportLowUsage(nil, report)
+	if windowDays < lowUsageMinWindowDays {
+		details := fmt.Sprintf("Statistics cover %d days, and a read rate needs at least %d days", windowDays, lowUsageMinWindowDays)
+		if !statsReset.Valid {
+			details = fmt.Sprintf("No statistics reset is recorded, and the server uptime of %d days is shorter than the %d days a read rate needs", windowDays, lowUsageMinWindowDays)
+		}
+		report.AddFinding(check.Finding{
+			ID:       "low-usage-indexes",
+			Name:     "Low Usage Indexes",
+			Severity: check.SeveritySkip,
+			Details:  details,
+		})
 		return
 	}
 
@@ -156,7 +159,7 @@ func checkLowUsageIndexes(rows []db.IndexUsageStatsRow, statsAgeSeconds pgtype.I
 		if row.IndexSizeBytes.Int64 < lowUsageSizeFloorBytes {
 			continue
 		}
-		if windowKnown && row.IdxScan.Int64*7 >= int64(windowDays) {
+		if row.IdxScan.Int64*7 >= int64(windowDays) {
 			continue
 		}
 		lowUsage = append(lowUsage, row)

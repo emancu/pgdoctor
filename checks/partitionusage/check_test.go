@@ -173,7 +173,8 @@ func Test_PartitionUsage_NoQueryStats(t *testing.T) {
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
-	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
+	require.Equal(t, check.SeverityPass, report.Severity)
+	require.Equal(t, check.SeveritySkip, keyFinding(t, report).Severity)
 	require.Contains(t, keyFinding(t, report).Details, "No query statistics available")
 }
 
@@ -814,14 +815,14 @@ func Test_PartitionUsage_ExtensionNotInstalled(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, check.SeverityWarn, report.Severity)
-	require.Equal(t, 2, len(report.Results)) // seq scan check + extension warning
+	require.Equal(t, 2, len(report.Results))
 
 	// Check that seq scan analysis still ran (doesn't need the extension)
 	seqScanFinding := findingByID(t, report, findingIDHighSeqScanRatio)
 	require.Equal(t, check.SeverityWarn, seqScanFinding.Severity)
 
 	extensionFinding := findingByID(t, report, findingIDExtensionUnavailable)
-	require.Equal(t, check.SeverityWarn, extensionFinding.Severity)
+	require.Equal(t, check.SeveritySkip, extensionFinding.Severity)
 	require.Contains(t, extensionFinding.Details, "cannot analyze query patterns")
 }
 

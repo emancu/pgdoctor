@@ -105,7 +105,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       "extension-unavailable",
 			Name:     "pg_stat_statements Unavailable or Outdated",
-			Severity: check.SeverityWarn,
+			Severity: check.SeveritySkip,
 			Details:  fmt.Sprintf("Found %d partitioned table(s) but cannot analyze query patterns: pg_stat_statements is unavailable or outdated", len(partitionedTables)),
 		})
 
@@ -138,7 +138,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		report.AddFinding(check.Finding{
 			ID:       "partition-key-unused",
 			Name:     "Queries Missing Partition Key",
-			Severity: check.SeverityPass,
+			Severity: check.SeveritySkip,
 			Details:  "No query statistics available (pg_stat_statements may be empty)",
 		})
 	} else {
