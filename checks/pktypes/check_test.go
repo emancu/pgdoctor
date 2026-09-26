@@ -7,6 +7,7 @@ import (
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,50 @@ func TestPKTypes(t *testing.T) {
 					assert.Contains(t, report.Results[0].Details, tt.wantDetailsSubstr)
 				}
 			}
+		})
+	}
+}
+
+func TestPKTypes_UnreadableSequences(t *testing.T) {
+	t.Parallel()
+
+	unreadable := makePKRowWithUsage("public.pk_serial", "id", "int4", 0, 0, 2_147_483_647, 0.0)
+	unreadable.SequenceUnreadable = pgtype.Bool{Bool: true, Valid: true}
+
+	tests := []struct {
+		name     string
+		data     []db.InvalidPrimaryKeyTypesRow
+		severity check.Severity
+	}{
+		{
+			name:     "unreadable only - PASS plus INFO",
+			data:     []db.InvalidPrimaryKeyTypesRow{unreadable},
+			severity: check.SeverityPass,
+		},
+		{
+			name: "unreadable next to a FAIL",
+			data: []db.InvalidPrimaryKeyTypesRow{
+				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_910_000_000, 2_147_483_647, 0.889),
+				unreadable,
+			},
+			severity: check.SeverityFail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := New(&mockQueryer{rows: tt.data}).Check(context.Background())
+
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+			assert.Equal(t, tt.severity, report.Severity)
+			require.Len(t, report.Results, 2)
+			info := report.Results[1]
+			assert.Equal(t, "unreadable-sequences", info.ID)
+			assert.Equal(t, check.SeverityInfo, info.Severity)
+			assert.Contains(t, info.Details, "1 table(s) use the row estimate")
 		})
 	}
 }

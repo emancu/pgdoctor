@@ -1065,6 +1065,7 @@ WITH pk_columns AS (
       WHEN has_sequence_privilege(so.sequence_oid, 'SELECT,USAGE')
         THEN pg_sequence_last_value(so.sequence_oid::regclass)
     END AS sequence_current
+    , (so.sequence_oid IS NOT NULL AND NOT has_sequence_privilege(so.sequence_oid, 'SELECT,USAGE')) AS sequence_unreadable
   FROM pk_tables AS p
   LEFT JOIN sequence_owners AS so
     ON
@@ -1079,6 +1080,7 @@ WITH pk_columns AS (
     , p.column_type
     , p.estimated_rows
     , p.sequence_current
+    , p.sequence_unreadable
     , p.type_max_value
     , CASE
       WHEN p.sequence_current IS NOT NULL AND p.type_max_value > 0
@@ -1097,6 +1099,7 @@ SELECT
   , column_type
   , estimated_rows
   , sequence_current
+  , sequence_unreadable
   , type_max_value
   , usage_pct
 FROM pk_with_usage
@@ -1106,13 +1109,14 @@ ORDER BY
 `
 
 type InvalidPrimaryKeyTypesRow struct {
-	TableName       string
-	ColumnName      string
-	ColumnType      string
-	EstimatedRows   int64
-	SequenceCurrent pgtype.Int8
-	TypeMaxValue    pgtype.Int8
-	UsagePct        pgtype.Numeric
+	TableName          string
+	ColumnName         string
+	ColumnType         string
+	EstimatedRows      int64
+	SequenceCurrent    pgtype.Int8
+	SequenceUnreadable pgtype.Bool
+	TypeMaxValue       pgtype.Int8
+	UsagePct           pgtype.Numeric
 }
 
 // Identifies tables with integer primary keys (int2/int4) that should use bigint.
@@ -1132,6 +1136,7 @@ func (q *Queries) InvalidPrimaryKeyTypes(ctx context.Context) ([]InvalidPrimaryK
 			&i.ColumnType,
 			&i.EstimatedRows,
 			&i.SequenceCurrent,
+			&i.SequenceUnreadable,
 			&i.TypeMaxValue,
 			&i.UsagePct,
 		); err != nil {
@@ -1914,14 +1919,24 @@ WITH sequence_info AS (
     , s.max_value
     , s.increment_by
     , s.cycle AS is_cyclic
-    , COALESCE(s.last_value, s.start_value) AS current_value
+    , cur.value AS current_value
+    , (cur.value IS NULL) AS is_unreadable
     , CASE
-      WHEN s.max_value > 0 AND COALESCE(s.last_value, s.start_value) > 0
-        THEN (COALESCE(s.last_value, s.start_value)::numeric / s.max_value::numeric) * 100
-      ELSE 0
+      WHEN s.max_value > 0 AND cur.value > 0
+        THEN (cur.value::numeric / s.max_value::numeric) * 100
+      WHEN cur.value IS NOT NULL
+        THEN 0
     END AS usage_percent
-    , (s.max_value - COALESCE(s.last_value, s.start_value)) / NULLIF(s.increment_by, 0) AS remaining_values
+    , (s.max_value - cur.value) / NULLIF(s.increment_by, 0) AS remaining_values
   FROM pg_sequences AS s
+  -- last_value is NULL both for a sequence never called and for one the role cannot read.
+  CROSS JOIN LATERAL (
+    SELECT CASE
+      WHEN s.last_value IS NOT NULL
+        OR has_sequence_privilege(quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename), 'SELECT,USAGE')
+        THEN COALESCE(s.last_value, s.start_value)
+    END AS value
+  ) AS cur
   WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
 )
 
@@ -1979,6 +1994,7 @@ SELECT
   , si.max_value
   , si.increment_by
   , si.is_cyclic
+  , si.is_unreadable
   , si.remaining_values
   , ROUND(si.usage_percent::numeric, 2) AS usage_percent
   , COALESCE(so.table_name, '') AS table_name
@@ -2007,7 +2023,7 @@ LEFT JOIN fk_references AS fkr
   ON
     so.table_oid = fkr.referenced_table_oid
     AND so.column_num = fkr.referenced_column_num
-ORDER BY si.usage_percent DESC, si.remaining_values ASC
+ORDER BY si.usage_percent DESC NULLS LAST, si.remaining_values ASC
 `
 
 type SequenceHealthRow struct {
@@ -2018,6 +2034,7 @@ type SequenceHealthRow struct {
 	MaxValue              pgtype.Int8
 	IncrementBy           pgtype.Int8
 	IsCyclic              pgtype.Bool
+	IsUnreadable          pgtype.Bool
 	RemainingValues       pgtype.Int8
 	UsagePercent          pgtype.Numeric
 	TableName             pgtype.Text
@@ -2051,6 +2068,7 @@ func (q *Queries) SequenceHealth(ctx context.Context) ([]SequenceHealthRow, erro
 			&i.MaxValue,
 			&i.IncrementBy,
 			&i.IsCyclic,
+			&i.IsUnreadable,
 			&i.RemainingValues,
 			&i.UsagePercent,
 			&i.TableName,
