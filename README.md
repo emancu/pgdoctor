@@ -57,6 +57,8 @@ pgdoctor run "postgres://..." --help
 
 Run health checks against a PostgreSQL database. The DSN can be passed as a positional argument or via the `PGDOCTOR_DSN` environment variable.
 
+pgdoctor always uses a connect timeout. When the DSN sets no positive `connect_timeout`, the timeout is 10 seconds. When the DSN sets no `application_name`, pgdoctor uses `pgdoctor`, so you can find its session in `pg_stat_activity`. A value in the DSN wins.
+
 | Flag | Description |
 |------|-------------|
 | `--only` | Only run these checks or categories |
@@ -66,6 +68,8 @@ Run health checks against a PostgreSQL database. The DSN can be passed as a posi
 | `--output` | Output format: `text` (default), `json` |
 | `--hide-passing` | Hide passing checks |
 | `--config` | YAML file with per-check settings, keyed by check ID |
+
+A preset other than `all` takes precedence over `--only`: pgdoctor ignores `--only` and prints a warning to stderr. `--ignore` still removes checks from the preset. For an unknown preset, pgdoctor prints a warning that names the valid presets and uses `all`.
 
 A config file changes the settings of a check. Each check README lists the keys it reads. A key that is not in the file keeps its default value:
 

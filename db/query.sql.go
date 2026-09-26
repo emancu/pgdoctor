@@ -2738,6 +2738,11 @@ SELECT
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count
   , ARRAY_TO_STRING(c.reloptions, ',') AS reloptions
+  , EXISTS (
+    SELECT 1
+    FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
+    WHERE o.option_name = 'autovacuum_enabled' AND NOT o.option_value::boolean
+  ) AS autovacuum_disabled
   -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
@@ -2772,6 +2777,7 @@ type TableVacuumHealthRow struct {
 	VacuumCount           pgtype.Int8
 	AutovacuumCount       pgtype.Int8
 	Reloptions            pgtype.Text
+	AutovacuumDisabled    pgtype.Bool
 	LastVacuumAgeSeconds  pgtype.Int8
 	LastAnalyzeAgeSeconds pgtype.Int8
 	NModSinceAnalyze      pgtype.Int8
@@ -2800,6 +2806,7 @@ func (q *Queries) TableVacuumHealth(ctx context.Context) ([]TableVacuumHealthRow
 			&i.VacuumCount,
 			&i.AutovacuumCount,
 			&i.Reloptions,
+			&i.AutovacuumDisabled,
 			&i.LastVacuumAgeSeconds,
 			&i.LastAnalyzeAgeSeconds,
 			&i.NModSinceAnalyze,
@@ -3055,7 +3062,7 @@ WITH toast_info AS (
   FROM pg_class AS c
   INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid
   INNER JOIN pg_class AS t ON c.reltoastrelid = t.oid
-  LEFT JOIN pg_stat_user_tables AS st ON t.oid = st.relid
+  LEFT JOIN pg_stat_all_tables AS st ON t.oid = st.relid
   WHERE
     c.relkind IN ('r', 'p')
     AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
