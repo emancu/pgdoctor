@@ -738,7 +738,7 @@ func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
 	require.NotNil(t, integerFinding.Table)
 
 	table := integerFinding.Table
-	require.Equal(t, []string{"Table", "Column", "Type", "Usage", "Current Value"}, table.Headers)
+	require.Equal(t, []string{"Table", "Column", "Type", "Usage", "Current Value", "FKs"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
 	require.Equal(t, "public.users", table.Rows[0].Cells[0])
@@ -961,4 +961,28 @@ func TestSequenceHealth_SmallintType(t *testing.T) {
 
 	require.Equal(t, check.SeverityWarn, findingIDs[findingIDNearExhaustion])
 	require.Equal(t, check.SeverityFail, findingIDs[findingIDIntegerColumns])
+}
+
+func TestSequenceHealth_IntegerColumns_FKCount(t *testing.T) {
+	t.Parallel()
+
+	rows := []db.SequenceHealthRow{
+		makeSequenceRow(
+			"public", "tenants_id_seq", "integer", "tenants", "id", "integer",
+			1610612735, 2147483647, 1, 536870912, 2147483647,
+			75.0, false, false, true, true, 3,
+		),
+	}
+
+	report, err := sequencehealth.New(&mockQueryer{rows: rows}).Check(context.Background())
+	require.NoError(t, err)
+
+	var integerFinding *check.Finding
+	for i := range report.Results {
+		if report.Results[i].ID == findingIDIntegerColumns {
+			integerFinding = &report.Results[i]
+		}
+	}
+	require.NotNil(t, integerFinding)
+	require.Equal(t, "3", integerFinding.Table.Rows[0].Cells[5])
 }
