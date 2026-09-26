@@ -2362,7 +2362,7 @@ func (q *Queries) TableActivity(ctx context.Context) ([]TableActivityRow, error)
 
 const tableBloat = `-- name: TableBloat :many
 SELECT
-  (schemaname || '.' || relname)::text AS table_name
+  (schemaname || '.' || s.relname)::text AS table_name
   , n_live_tup AS live_tuples
   , n_dead_tup AS dead_tuples
   , last_autovacuum
@@ -2378,8 +2378,9 @@ SELECT
     ELSE 0
   END AS dead_tuple_percent
   , pg_total_relation_size(relid) AS total_size_bytes
-  , pg_relation_size(relid) AS heap_size_bytes
-FROM pg_stat_user_tables
+  , NULLIF(c.relpages, 0)::bigint * current_setting('block_size')::bigint AS heap_size_bytes
+FROM pg_stat_user_tables AS s
+INNER JOIN pg_class AS c ON c.oid = s.relid
 WHERE
   schemaname NOT IN ('pg_catalog', 'information_schema')
   AND n_dead_tup > 1000  -- Ignore tiny tables with few dead tuples

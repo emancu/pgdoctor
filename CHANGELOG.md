@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`vacuum-settings`**: findings for a value above or below the recommended range are named "High <setting>" or "Low <setting>", not "Default <setting>". The finding IDs do not change ([#151](https://github.com/emancu/pgdoctor/pull/151)).
 - **`sequence-health`**, **`pk-types`**: a sequence that the role cannot read no longer counts as 0% used. `sequence-health` reports SKIP when it can read no sequence value, and adds an INFO `unreadable-sequences` finding when it can read only some. `pk-types` says in its finding how many tables use the row estimate ([#146](https://github.com/emancu/pgdoctor/pull/146)).
 - **`sequence-health`**: usage and remaining values follow the direction of the sequence, so a descending sequence near `min_value` is reported. A sequence with the full bigint range no longer makes the check fail with `bigint out of range` ([#167](https://github.com/emancu/pgdoctor/pull/167)).
-- **`table-bloat`**: `large-bloated-tables` estimates wasted space from the heap size, not from the total size with indexes and TOAST. `Size` and the size filters do not change ([#164](https://github.com/emancu/pgdoctor/pull/164)).
+- **`table-bloat`**: `large-bloated-tables` estimates wasted space from the heap size in `pg_class.relpages`, not from the total size with indexes and TOAST. A table that was never vacuumed or analyzed shows `-`. `Size` and the size filters do not change ([#164](https://github.com/emancu/pgdoctor/pull/164)).
 
 ## [0.5.0] - 2026-08-14
 

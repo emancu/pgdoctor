@@ -200,6 +200,26 @@ func TestTableBloat_LargeBloated_WastedSpaceUsesHeapSize(t *testing.T) {
 	assert.Equal(t, []string{"public.documents", "10.0GiB", "20.0%", "204.8MiB"}, largeBloatFinding.Table.Rows[0].Cells)
 }
 
+func TestTableBloat_LargeBloated_UnmeasuredHeapShowsDash(t *testing.T) {
+	t.Parallel()
+
+	const oneGB = 1024 * 1024 * 1024
+	recentVacuum := time.Now().Add(-1 * time.Hour)
+
+	row := makeTableRow("public.documents", 8000000, 2000000, 20.0, 10*oneGB, &recentVacuum, nil, 5)
+	row.HeapSizeBytes = pgtype.Int8{}
+	queryer := &mockQueryer{rows: []db.TableBloatRow{row}}
+
+	checker := tablebloat.New(queryer)
+	report, err := checker.Check(context.Background())
+
+	require.NoError(t, err)
+	largeBloatFinding := report.Results[1]
+	require.NotNil(t, largeBloatFinding.Table)
+	require.Len(t, largeBloatFinding.Table.Rows, 1)
+	assert.Equal(t, []string{"public.documents", "10.0GiB", "20.0%", "-"}, largeBloatFinding.Table.Rows[0].Cells)
+}
+
 func TestTableBloat_MixedSeverity(t *testing.T) {
 	t.Parallel()
 
