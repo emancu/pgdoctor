@@ -354,7 +354,7 @@ func TestSequenceHealth_IntegerShouldBeBigint_Warning(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "users_id_seq", "integer", "users", "id", "integer",
+			"public", "public.users_id_seq", "integer", "public.users", "id", "integer",
 			1073741824, 2147483647, 1, 1073741823, 2147483647,
 			50.01, false, false, true, true, 5,
 		),
@@ -391,7 +391,7 @@ func TestSequenceHealth_IntegerShouldBeBigint_Critical(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "bookings_id_seq", "integer", "bookings", "id", "integer",
+			"public", "public.bookings_id_seq", "integer", "public.bookings", "id", "integer",
 			1610612735, 2147483647, 1, 536870912, 2147483647,
 			75.0, false, false, true, true, 3,
 		),
@@ -473,7 +473,7 @@ func TestSequenceHealth_TypeMismatch(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "problem_seq", "bigint", "problem_table", "id", "integer",
+			"public", "public.problem_seq", "bigint", "public.problem_table", "id", "integer",
 			1000000, 9223372036854775807, 1, 9223372036853775807, 2147483647,
 			0.00001, false, true, false, true, 0, // sequence_exceeds_column = true
 		),
@@ -671,7 +671,7 @@ func TestSequenceHealth_TableFormatting_NearExhaustion(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "bookings_id_seq", "integer", "bookings", "id", "integer",
+			"public", "public.bookings_id_seq", "integer", "public.bookings", "id", "integer",
 			1932735283, 2147483647, 1, 214748364, 2147483647,
 			90.0, false, false, true, true, 5,
 		),
@@ -700,8 +700,8 @@ func TestSequenceHealth_TableFormatting_NearExhaustion(t *testing.T) {
 	require.Equal(t, []string{"Sequence", "Table.Column", "Usage", "Remaining", "Type"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
-	require.Equal(t, "bookings_id_seq", table.Rows[0].Cells[0])
-	require.Equal(t, "bookings.id", table.Rows[0].Cells[1])
+	require.Equal(t, "public.bookings_id_seq", table.Rows[0].Cells[0])
+	require.Equal(t, "public.bookings.id", table.Rows[0].Cells[1])
 	require.Contains(t, table.Rows[0].Cells[2], "90.0%")
 	require.NotEmpty(t, table.Rows[0].Cells[3]) // Remaining values (formatted)
 	require.Equal(t, "integer", table.Rows[0].Cells[4])
@@ -712,7 +712,7 @@ func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "users_id_seq", "integer", "users", "id", "integer",
+			"public", "public.users_id_seq", "integer", "public.users", "id", "integer",
 			1073741824, 2147483647, 1, 1073741823, 2147483647,
 			50.01, false, false, true, true, 3,
 		),
@@ -741,7 +741,7 @@ func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
 	require.Equal(t, []string{"Table", "Column", "Type", "Usage", "Current Value"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
-	require.Equal(t, "users", table.Rows[0].Cells[0])
+	require.Equal(t, "public.users", table.Rows[0].Cells[0])
 	require.Equal(t, "id", table.Rows[0].Cells[1])
 	require.Equal(t, "integer", table.Rows[0].Cells[2])
 	require.Contains(t, table.Rows[0].Cells[3], "50.0%")
@@ -753,7 +753,7 @@ func TestSequenceHealth_TableFormatting_TypeMismatch(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "problem_seq", "bigint", "problem_table", "id", "integer",
+			"public", "public.problem_seq", "bigint", "public.problem_table", "id", "integer",
 			1000000, 9223372036854775807, 1, 9223372036853775807, 2147483647,
 			0.00001, false, true, false, true, 0,
 		),
@@ -782,8 +782,8 @@ func TestSequenceHealth_TableFormatting_TypeMismatch(t *testing.T) {
 	require.Equal(t, []string{"Sequence", "Table.Column", "Column Type", "Seq Max", "Column Max"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
-	require.Equal(t, "problem_seq", table.Rows[0].Cells[0])
-	require.Equal(t, "problem_table.id", table.Rows[0].Cells[1])
+	require.Equal(t, "public.problem_seq", table.Rows[0].Cells[0])
+	require.Equal(t, "public.problem_table.id", table.Rows[0].Cells[1])
 	require.Equal(t, "integer", table.Rows[0].Cells[2])
 	require.NotEmpty(t, table.Rows[0].Cells[3]) // Seq Max (formatted)
 	require.NotEmpty(t, table.Rows[0].Cells[4]) // Column Max (formatted)
@@ -879,7 +879,7 @@ func TestSequenceHealth_PrescriptionContent_IntegerColumns(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "users_id_seq", "integer", "users", "id", "integer",
+			"public", "public.users_id_seq", "integer", "public.users", "id", "integer",
 			1073741824, 2147483647, 1, 1073741823, 2147483647,
 			50.01, false, false, true, true, 3,
 		),
@@ -909,7 +909,7 @@ func TestSequenceHealth_PrescriptionContent_TypeMismatch(t *testing.T) {
 
 	rows := []db.SequenceHealthRow{
 		makeSequenceRow(
-			"public", "problem_seq", "bigint", "problem_table", "id", "integer",
+			"public", "public.problem_seq", "bigint", "public.problem_table", "id", "integer",
 			1000000, 9223372036854775807, 1, 9223372036853775807, 2147483647,
 			0.00001, false, true, false, true, 0,
 		),

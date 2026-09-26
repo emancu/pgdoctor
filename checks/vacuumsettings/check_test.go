@@ -290,12 +290,12 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Overrides: map[string]string{"work_mem": "49152", "active_connections": "100", "max_connections": "500"},
 			FindingID: "work_mem",
 			Severity:  check.SeverityWarn,
-			Details: "work_mem 48MB × 100 backends → 4800MB (58.6% of 8GB RAM)\n" +
-				"Worst case at max_connections 500: 24000MB (293.0%) — only if every connection slot fills.",
+			Details: "work_mem 48.0MiB × 100 backends → 4.7GiB (58.6% of 8.0GiB RAM)\n" +
+				"Worst case at max_connections 500: 23.4GiB (293.0%) — only if every connection slot fills.",
 			DebugContains: []string{
-				"Instance: db.t4g.large (8GB RAM)",
-				"Observed backends: 100 using ~4800MB (58.6% of available RAM)",
-				"Worst case at max_connections 500: 24000MB (293.0%) — shown for context, not graded",
+				"Instance: db.t4g.large (8.0GiB RAM)",
+				"Observed backends: 100 using ~4.7GiB (58.6% of available RAM)",
+				"Worst case at max_connections 500: 23.4GiB (293.0%) — shown for context, not graded",
 				"Backend count is a single sample from pg_stat_activity; a quiet window under-reports.",
 				"Still safe today, but more backends or multi-sort queries could cause memory pressure.",
 			},
@@ -305,12 +305,12 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Overrides: map[string]string{"work_mem": "2097152"},
 			FindingID: "work_mem",
 			Severity:  check.SeverityFail,
-			Details: "work_mem 2048MB × 10 backends → 20480MB (250.0% of 8GB RAM)\n" +
-				"Worst case at max_connections 100: 204800MB (2500.0%) — only if every connection slot fills.",
+			Details: "work_mem 2.0GiB × 10 backends → 20.0GiB (250.0% of 8.0GiB RAM)\n" +
+				"Worst case at max_connections 100: 200.0GiB (2500.0%) — only if every connection slot fills.",
 			DebugContains: []string{
-				"Instance: db.t4g.large (8GB RAM)",
-				"Observed backends: 10 using ~20480MB (250.0% of available RAM)",
-				"Worst case at max_connections 100: 204800MB (2500.0%) — shown for context, not graded",
+				"Instance: db.t4g.large (8.0GiB RAM)",
+				"Observed backends: 10 using ~20.0GiB (250.0% of available RAM)",
+				"Worst case at max_connections 100: 200.0GiB (2500.0%) — shown for context, not graded",
 				"At the current backend count this can cause out-of-memory errors.",
 				"Note: Each query operation (sort/hash) can use work_mem multiple times.",
 			},
@@ -320,11 +320,11 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Overrides: map[string]string{"maintenance_work_mem": "524288"}, // 512MB × 4 workers = 2048MB = 25% of 8GB
 			FindingID: "maintenance_work_mem",
 			Severity:  check.SeverityWarn,
-			Details:   "maintenance_work_mem 512MB × autovacuum_max_workers 4 → total budget 2048MB (25.0% of 8GB RAM)",
+			Details:   "maintenance_work_mem 512.0MiB × autovacuum_max_workers 4 → total budget 2.0GiB (25.0% of 8.0GiB RAM)",
 			DebugContains: []string{
-				"Instance: db.t4g.large (8GB RAM)",
+				"Instance: db.t4g.large (8.0GiB RAM)",
 				"Total RAM = maintenance_work_mem × autovacuum_max_workers",
-				"Your config: 512MB × 4 workers = 2048MB",
+				"Your config: 512.0MiB × 4 workers = 2.0GiB",
 				"While not critical, consider keeping total under 12.5% RAM (1/8 of total).",
 			},
 		},
@@ -333,10 +333,10 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			Overrides: map[string]string{"maintenance_work_mem": "1048576"}, // 1024MB × 4 workers = 4096MB = 50% of 8GB
 			FindingID: "maintenance_work_mem",
 			Severity:  check.SeverityFail,
-			Details:   "maintenance_work_mem 1024MB × autovacuum_max_workers 4 → total budget 4096MB (50.0% of 8GB RAM)",
+			Details:   "maintenance_work_mem 1.0GiB × autovacuum_max_workers 4 → total budget 4.0GiB (50.0% of 8.0GiB RAM)",
 			DebugContains: []string{
-				"Instance: db.t4g.large (8GB RAM)",
-				"Your config: 1024MB × 4 workers = 4096MB",
+				"Instance: db.t4g.large (8.0GiB RAM)",
+				"Your config: 1.0GiB × 4 workers = 4.0GiB",
 				"This can cause memory pressure. Keep total under 25% RAM.",
 				"Manual VACUUM and CREATE INDEX operations also use this memory.",
 			},
@@ -363,6 +363,23 @@ func Test_VacuumSettings_RAMBudgetMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_VacuumSettings_LargeInstanceDefaultMaintenanceMem(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockVacuumSettingsQueries{rows: overrideOptimalWith("maintenance_work_mem", "65536")}
+	checker := vacuumsettings.New(queryer)
+
+	meta := &check.InstanceMetadata{InstanceClass: "db.r6g.4xlarge", VCPUCores: 16, MemoryGB: 128}
+	report, err := checker.Check(check.ContextWithInstanceMetadata(context.Background(), meta))
+	require.NoError(t, err)
+
+	finding := findResult(report.Results, "maintenance_work_mem")
+	require.NotNil(t, finding)
+	require.Contains(t, finding.Details, "maintenance_work_mem is 64.0MiB on very large instance db.r6g.4xlarge (128.0GiB RAM)")
+	require.Contains(t, finding.Details, "Current total budget: 64.0MiB × 4 workers = 256.0MiB (0.2% RAM)")
+	require.Contains(t, finding.Details, "Recommended total: 1.0GiB × 4 workers = 4.0GiB (3.1% RAM)")
 }
 
 func Test_VacuumSettings_WorkMemGuards(t *testing.T) {

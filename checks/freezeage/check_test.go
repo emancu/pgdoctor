@@ -363,7 +363,7 @@ func TestFreezeAge_NeverVacuumedSizeIsUnknownNotZero(t *testing.T) {
 	finding := findingByID(t, run(t, queryer), idTableFreeze)
 
 	require.NotNil(t, finding.Table)
-	assert.Equal(t, "unknown", finding.Table.Rows[0].Cells[4])
+	assert.Equal(t, "-", finding.Table.Rows[0].Cells[4])
 	assert.Equal(t, "never", finding.Table.Rows[0].Cells[5])
 }
 

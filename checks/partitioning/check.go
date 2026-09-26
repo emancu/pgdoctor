@@ -271,7 +271,7 @@ func checkInefficientPartitions(rows []db.LargeTablesRow, minRows int64, report 
 
 	var tableRows []check.TableRow
 	for _, row := range rows {
-		parentTable := "unknown"
+		parentTable := "-"
 		if row.ParentTable.Valid {
 			parentTable = row.ParentTable.String
 		}

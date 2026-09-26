@@ -692,7 +692,7 @@ func TestCheck_FormatBytes(t *testing.T) {
 		bytes    int64
 		expected string
 	}{
-		{500, "500B"},
+		{500, "500 bytes"},
 		{1024, "1.0KiB"},
 		{1024 * 1024, "1.0MiB"},
 		{1024 * 1024 * 1024, "1.0GiB"},

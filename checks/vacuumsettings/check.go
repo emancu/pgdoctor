@@ -192,7 +192,7 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			Name:     "Very low maintenance_work_mem",
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityWarn,
-			Details:  fmt.Sprintf("maintenance_work_mem is %dMB (below half the PostgreSQL default)\n\nMay cause slow VACUUM operations requiring multiple passes.", maintenanceMemMB),
+			Details:  fmt.Sprintf("maintenance_work_mem is %s (below half the PostgreSQL default)\n\nMay cause slow VACUUM operations requiring multiple passes.", check.FormatBytes(maintenanceMemMB*check.MiB)),
 		})
 		return
 	}
@@ -202,10 +202,10 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			Name:     "Excessive maintenance_work_mem",
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityWarn,
-			Details: fmt.Sprintf("maintenance_work_mem is %dMB (unusually high)\n\n"+
-				"Values above 2GB show diminishing returns for VACUUM performance.\n"+
-				"PostgreSQL has a 1GB limit for tracking dead tuples (though >1GB helps CREATE INDEX).",
-				maintenanceMemMB),
+			Details: fmt.Sprintf("maintenance_work_mem is %s (unusually high)\n\n"+
+				"Values above 2GiB show diminishing returns for VACUUM performance.\n"+
+				"PostgreSQL has a 1GiB limit for tracking dead tuples (though >1GiB helps CREATE INDEX).",
+				check.FormatBytes(maintenanceMemMB*check.MiB)),
 		})
 		return
 	}
@@ -230,14 +230,14 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityFail,
 			Details:  maintenanceBudgetDetails(maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB, budgetPercent, meta.MemoryGB),
-			Debug: fmt.Sprintf("Instance: %s (%.0fGB RAM)\n"+
+			Debug: fmt.Sprintf("Instance: %s (%s RAM)\n"+
 				"CRITICAL: When autovacuum runs, it allocates memory per worker:\n"+
 				"  Total RAM = maintenance_work_mem × autovacuum_max_workers\n"+
-				"  Your config: %dMB × %d workers = %dMB\n\n"+
+				"  Your config: %s × %d workers = %s\n\n"+
 				"This can cause memory pressure. Keep total under 25%% RAM.\n"+
 				"Manual VACUUM and CREATE INDEX operations also use this memory.",
-				meta.InstanceClass, meta.MemoryGB,
-				maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB),
+				meta.InstanceClass, formatRAM(meta.MemoryGB),
+				check.FormatBytes(maintenanceMemMB*check.MiB), autovacuumMaxWorkers, check.FormatBytes(totalBudgetMB*check.MiB)),
 		})
 		return
 	}
@@ -248,12 +248,12 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityWarn,
 			Details:  maintenanceBudgetDetails(maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB, budgetPercent, meta.MemoryGB),
-			Debug: fmt.Sprintf("Instance: %s (%.0fGB RAM)\n"+
+			Debug: fmt.Sprintf("Instance: %s (%s RAM)\n"+
 				"Total RAM = maintenance_work_mem × autovacuum_max_workers\n"+
-				"Your config: %dMB × %d workers = %dMB\n\n"+
+				"Your config: %s × %d workers = %s\n\n"+
 				"While not critical, consider keeping total under 12.5%% RAM (1/8 of total).",
-				meta.InstanceClass, meta.MemoryGB,
-				maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB),
+				meta.InstanceClass, formatRAM(meta.MemoryGB),
+				check.FormatBytes(maintenanceMemMB*check.MiB), autovacuumMaxWorkers, check.FormatBytes(totalBudgetMB*check.MiB)),
 		})
 		return
 	}
@@ -268,15 +268,15 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 			Name:     "Low maintenance_work_mem for large instance",
 			ID:       "maintenance_work_mem",
 			Severity: check.SeverityWarn,
-			Details: fmt.Sprintf("maintenance_work_mem is 64MB on very large instance %s (%.0fGB RAM)\n\n"+
+			Details: fmt.Sprintf("maintenance_work_mem is 64.0MiB on very large instance %s (%s RAM)\n\n"+
 				"Large instances typically have large tables with more dead tuples.\n"+
-				"64MB can track only ~400K dead tuples (may require multiple VACUUM passes).\n"+
-				"Consider %dMB (can track ~6M dead tuples in one pass).\n\n"+
-				"Current total budget: 64MB × %d workers = %dMB (%.1f%% RAM)\n"+
-				"Recommended total: %dMB × %d workers = %dMB (%.1f%% RAM)",
-				meta.InstanceClass, meta.MemoryGB, recommendedMB,
-				autovacuumMaxWorkers, 64*autovacuumMaxWorkers, (float64(64*autovacuumMaxWorkers)/float64(availableRAMMB))*100,
-				recommendedMB, autovacuumMaxWorkers, newTotalBudgetMB, newBudgetPercent),
+				"64.0MiB can track only ~400K dead tuples (may require multiple VACUUM passes).\n"+
+				"Consider %s (can track ~6M dead tuples in one pass).\n\n"+
+				"Current total budget: 64.0MiB × %d workers = %s (%.1f%% RAM)\n"+
+				"Recommended total: %s × %d workers = %s (%.1f%% RAM)",
+				meta.InstanceClass, formatRAM(meta.MemoryGB), check.FormatBytes(recommendedMB*check.MiB),
+				autovacuumMaxWorkers, check.FormatBytes(64*autovacuumMaxWorkers*check.MiB), (float64(64*autovacuumMaxWorkers)/float64(availableRAMMB))*100,
+				check.FormatBytes(recommendedMB*check.MiB), autovacuumMaxWorkers, check.FormatBytes(newTotalBudgetMB*check.MiB), newBudgetPercent),
 		})
 	}
 }
@@ -320,9 +320,9 @@ func checkWorkMem(s dbVacuumSettings, report *check.Report, meta *check.Instance
 			Name:     "Very low work_mem",
 			ID:       "work_mem",
 			Severity: check.SeverityFail,
-			Details: fmt.Sprintf("work_mem is %dMB (critically low)\n\n"+
+			Details: fmt.Sprintf("work_mem is %s (critically low)\n\n"+
 				"Will cause excessive temporary file usage for sorts and hash operations.",
-				workMemMB),
+				check.FormatBytes(workMemMB*check.MiB)),
 		})
 		return
 	}
@@ -373,26 +373,30 @@ func checkWorkMem(s dbVacuumSettings, report *check.Report, meta *check.Instance
 }
 
 func maintenanceBudgetDetails(maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB int64, budgetPercent, memoryGB float64) string {
-	return fmt.Sprintf("maintenance_work_mem %dMB × autovacuum_max_workers %d → total budget %dMB (%.1f%% of %.0fGB RAM)",
-		maintenanceMemMB, autovacuumMaxWorkers, totalBudgetMB, budgetPercent, memoryGB)
+	return fmt.Sprintf("maintenance_work_mem %s × autovacuum_max_workers %d → total budget %s (%.1f%% of %s RAM)",
+		check.FormatBytes(maintenanceMemMB*check.MiB), autovacuumMaxWorkers, check.FormatBytes(totalBudgetMB*check.MiB), budgetPercent, formatRAM(memoryGB))
 }
 
 func workMemBudgetDetails(workMemMB, observedBackends, observedRAMMB int64, observedPercent, memoryGB float64, maxConnections, worstCaseRAMMB int64, worstCasePercent float64) string {
-	return fmt.Sprintf("work_mem %dMB × %d backends → %dMB (%.1f%% of %.0fGB RAM)\n"+
-		"Worst case at max_connections %d: %dMB (%.1f%%) — only if every connection slot fills.",
-		workMemMB, observedBackends, observedRAMMB, observedPercent, memoryGB,
-		maxConnections, worstCaseRAMMB, worstCasePercent)
+	return fmt.Sprintf("work_mem %s × %d backends → %s (%.1f%% of %s RAM)\n"+
+		"Worst case at max_connections %d: %s (%.1f%%) — only if every connection slot fills.",
+		check.FormatBytes(workMemMB*check.MiB), observedBackends, check.FormatBytes(observedRAMMB*check.MiB), observedPercent, formatRAM(memoryGB),
+		maxConnections, check.FormatBytes(worstCaseRAMMB*check.MiB), worstCasePercent)
 }
 
 func workMemBudgetDebug(meta *check.InstanceMetadata, observedBackends, observedRAMMB int64, observedPercent float64, maxConnections, worstCaseRAMMB int64, worstCasePercent float64, advisory string) string {
-	return fmt.Sprintf("Instance: %s (%.0fGB RAM)\n"+
-		"Observed backends: %d using ~%dMB (%.1f%% of available RAM)\n"+
-		"Worst case at max_connections %d: %dMB (%.1f%%) — shown for context, not graded\n"+
+	return fmt.Sprintf("Instance: %s (%s RAM)\n"+
+		"Observed backends: %d using ~%s (%.1f%% of available RAM)\n"+
+		"Worst case at max_connections %d: %s (%.1f%%) — shown for context, not graded\n"+
 		"Backend count is a single sample from pg_stat_activity; a quiet window under-reports.\n\n%s",
-		meta.InstanceClass, meta.MemoryGB,
-		observedBackends, observedRAMMB, observedPercent,
-		maxConnections, worstCaseRAMMB, worstCasePercent,
+		meta.InstanceClass, formatRAM(meta.MemoryGB),
+		observedBackends, check.FormatBytes(observedRAMMB*check.MiB), observedPercent,
+		maxConnections, check.FormatBytes(worstCaseRAMMB*check.MiB), worstCasePercent,
 		advisory)
+}
+
+func formatRAM(memoryGB float64) string {
+	return check.FormatBytes(int64(memoryGB * check.GiB))
 }
 
 // Type functions

@@ -21,7 +21,7 @@ const (
 func FormatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
-		return fmt.Sprintf("%dB", bytes)
+		return fmt.Sprintf("%d bytes", bytes)
 	}
 	div, exp := int64(unit), 0
 	for n := bytes / unit; n >= unit; n /= unit {

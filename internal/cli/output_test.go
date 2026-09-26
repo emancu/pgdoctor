@@ -127,7 +127,24 @@ func TestPrintSummary_CountsEachCheckByHeaderSeverity(t *testing.T) {
 	var buf bytes.Buffer
 	printSummary(&buf, reports)
 
-	assert.Contains(t, buf.String(), "Summary: 1 warnings, 3 passed (4 checks")
+	assert.Contains(t, buf.String(), "Summary: 1 warning, 3 passed (4 checks")
+}
+
+func TestPrintSummary_Plurals(t *testing.T) {
+	t.Parallel()
+
+	var one bytes.Buffer
+	printSummary(&one, []*check.Report{reportWith(check.SeverityFail)})
+	assert.Contains(t, one.String(), "Summary: 1 failure (1 check in")
+
+	var many bytes.Buffer
+	printSummary(&many, []*check.Report{
+		reportWith(check.SeverityFail),
+		reportWith(check.SeverityFail),
+		reportWith(check.SeverityWarn),
+		reportWith(check.SeverityWarn),
+	})
+	assert.Contains(t, many.String(), "Summary: 2 failures, 2 warnings (4 checks in")
 }
 
 func TestHidden(t *testing.T) {

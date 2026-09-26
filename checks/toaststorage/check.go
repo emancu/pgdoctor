@@ -142,7 +142,7 @@ func checkToastHeavy(rows []db.ToastStorageRow, report *check.Report) {
 			ID:       "toast-ratio",
 			Name:     "TOAST-Heavy Tables",
 			Severity: check.SeverityPass,
-			Details:  "No TOAST-heavy tables (>50% ratio or >10GB)",
+			Details:  "No TOAST-heavy tables (>50% ratio or >10GiB)",
 		})
 		return
 	}
@@ -169,7 +169,7 @@ func checkToastHeavy(rows []db.ToastStorageRow, report *check.Report) {
 		ID:       "toast-ratio",
 		Name:     "TOAST-Heavy Tables",
 		Severity: check.SeverityInfo,
-		Details:  fmt.Sprintf("Found %d TOAST-heavy table(s) (>50%% ratio or >10GB)", len(heavy)),
+		Details:  fmt.Sprintf("Found %d TOAST-heavy table(s) (>50%% ratio or >10GiB)", len(heavy)),
 		Table: &check.Table{
 			Headers: headers,
 			Rows:    tableRows,

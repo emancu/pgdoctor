@@ -264,10 +264,10 @@ func printSummary(w io.Writer, reports []*check.Report) {
 
 	var summaryParts []string
 	if failCount > 0 {
-		summaryParts = append(summaryParts, colorForSeverity(check.SeverityFail)(fmt.Sprintf("%d failures", failCount)))
+		summaryParts = append(summaryParts, colorForSeverity(check.SeverityFail)(plural(failCount, "failure")))
 	}
 	if warnCount > 0 {
-		summaryParts = append(summaryParts, colorForSeverity(check.SeverityWarn)(fmt.Sprintf("%d warnings", warnCount)))
+		summaryParts = append(summaryParts, colorForSeverity(check.SeverityWarn)(plural(warnCount, "warning")))
 	}
 	if okCount > 0 {
 		summaryParts = append(summaryParts, colorForSeverity(check.SeverityPass)(fmt.Sprintf("%d passed", okCount)))
@@ -281,8 +281,15 @@ func printSummary(w io.Writer, reports []*check.Report) {
 
 	dimFunc := dimColor()
 	fmt.Fprintf(w, "Summary: %s %s\n", strings.Join(summaryParts, ", "),
-		dimFunc(fmt.Sprintf("(%d checks in %s)", len(reports), check.FormatDurationMs(float64(totalDuration.Milliseconds())))))
+		dimFunc(fmt.Sprintf("(%s in %s)", plural(len(reports), "check"), check.FormatDurationMs(float64(totalDuration.Milliseconds())))))
 	fmt.Fprintln(w)
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, word)
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 func severityDisplay(severity check.Severity) (string, func(string) string) {
