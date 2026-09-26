@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`cache-efficiency`**: reads tables and indexes in every non-system schema, not only `public` ([#94](https://github.com/emancu/pgdoctor/pull/94)).
 - **`table-seq-scans`**: reads tables in every non-system schema, not only `public` ([#95](https://github.com/emancu/pgdoctor/pull/95)).
 - **`table-vacuum-health`**: reads tables in every non-system schema, not only `public` ([#96](https://github.com/emancu/pgdoctor/pull/96)).
+- **CLI**: the `run` report header no longer shows the password of a keyword connection string ([#103](https://github.com/emancu/pgdoctor/pull/103)).
 
 ## [0.5.0] - 2026-08-14
 
