@@ -304,6 +304,8 @@ The CLI groups checks into presets (defined in `internal/cli/presets.go`), selec
 - `all` - every check (the default)
 - `triage` - the subset worth running during an active incident: runtime health and capacity signals (connection health/efficiency, replication lag/slots, table bloat, vacuum health, freeze age, invalid indexes, temp usage, cache efficiency) — not slow schema-design audits.
 
+A preset other than `all` takes precedence over `--only`: pgdoctor ignores `--only` and prints a warning to stderr. `--ignore` still removes checks from the preset. For an unknown preset, pgdoctor prints a warning that names the valid presets and uses `all`.
+
 When adding a check, ask: **is this useful during an active incident?** If yes, add its CheckID to `triageChecks` in `internal/cli/presets.go`. Schema-design and capacity-planning checks generally belong only in `all`.
 
 ## Common Tasks
