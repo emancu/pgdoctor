@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Library**: `Run` reads `server_version_num` from the database when the caller supplies no `InstanceMetadata` version. Caller metadata with a version wins, and the other fields stay caller-only ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 - **CLI**: `--detail verbose` and `--detail debug` show the details of PASS findings. Finding names still carry their headline value ([#138](https://github.com/emancu/pgdoctor/pull/138)).
+- **`duplicate-indexes`**, **`table-seq-scans`**: findings list every object in a table instead of at most 10 objects in `Details`. `Details` keeps the count. A `prefix-duplicates` row above 100 MiB is FAIL ([#161](https://github.com/emancu/pgdoctor/pull/161)).
 
 ### Fixed
 
