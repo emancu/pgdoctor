@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/fatih/color v1.19.0
 	github.com/hashicorp/go-version v1.9.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	gopkg.in/yaml.v3 v3.0.1
