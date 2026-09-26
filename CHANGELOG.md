@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`invalid-indexes`**: the table shows one schema-qualified `Table` column. Breaking for library consumers: `db.BrokenIndexesRow` drops `SchemaName` ([#89](https://github.com/emancu/pgdoctor/pull/89)).
 - **`table-activity`**: both findings show one schema-qualified `Table` column. Breaking for library consumers: `db.TableActivityRow` replaces `Schemaname` and `Relname` with `TableName` ([#90](https://github.com/emancu/pgdoctor/pull/90)).
 - **`db-statistics`**: breaking — the `statistics-freshness` check and its finding ID are renamed `db-statistics` ([#97](https://github.com/emancu/pgdoctor/pull/97)).
+- **Library**: `Run` reads `server_version_num` from the database when the caller supplies no `InstanceMetadata` version. Caller metadata with a version wins, and the other fields stay caller-only ([#131](https://github.com/emancu/pgdoctor/pull/131)).
+- **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 
 ### Fixed
 
@@ -37,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`table-vacuum-health`**: `autovacuum-disabled` reports a table whose `autovacuum_enabled` is `off`, `0`, or any other spelling of false, not only `false` ([#137](https://github.com/emancu/pgdoctor/pull/137)).
 - **`pk-types`**: finds the sequence behind a key by OID, so IDENTITY keys are reported and a sequence with the same name in another schema no longer supplies the value. The query takes about 100 ms at 10,000 tables, where it used to exceed the statement timeout. Breaking for library consumers: `db.InvalidPrimaryKeyTypesRow` fields `TableName`, `ColumnName`, `ColumnType` and `EstimatedRows` are `string`/`int64` instead of `pgtype` values ([#136](https://github.com/emancu/pgdoctor/pull/136)).
 - **CLI**: `--only` and `--ignore` accept the `category/check-id` form that `pgdoctor list` prints. Before, `--only configs/pg-version` ran the whole `configs` category ([#140](https://github.com/emancu/pgdoctor/pull/140)).
+- **CLI**: `connection-efficiency` no longer reports SKIP ("Server version unknown") on every standalone run, and `replication-slots` runs the query for the server version ([#131](https://github.com/emancu/pgdoctor/pull/131)).
+- **`vacuum-settings`**: `maintenance_work_mem` no longer reports a FAIL with a `+Inf%` budget when the metadata has no memory size ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 
 ## [0.5.0] - 2026-08-14
 

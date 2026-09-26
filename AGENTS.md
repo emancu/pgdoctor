@@ -206,6 +206,18 @@ Filtering happens at the runner level (`pgdoctor.go`):
 - A filter value is a category, a check ID, `check-id/finding-id`, or `category/check-id[/finding-id]`, which is the form `pgdoctor list` prints
 - Checks don't need to implement filtering logic themselves
 
+### Exit Codes
+
+`pgdoctor run` uses the same exit codes for text and JSON output:
+
+| Code | Meaning |
+|------|---------|
+| `0` | The checks ran. No check reported FAIL. |
+| `1` | The checks ran. At least one check reported FAIL. |
+| `2` | pgdoctor could not run: connection error, usage error, bad `--config`, unknown flag value, or zero checks selected. |
+
+A check never sets the exit code. The CLI maps a FAIL finding to `1`. Any error that a command returns exits `2`.
+
 ### Statistics-Dependent Checks
 
 Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):
@@ -237,7 +249,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 ```
 
-Metadata is supplied by the caller through `check.ContextWithInstanceMetadata` and is never read from the database, so every field carries whatever the caller knew — the standalone CLI supplies none of it. `IsReadReplica` is `false` both for a primary and for a caller that never determined the role: scope a check off `true`, and never infer "this is a primary" from `false`. Aurora readers are cluster members that expose no RDS read-replica source, so they report `false` too.
+Metadata is supplied by the caller through `check.ContextWithInstanceMetadata`. When the caller supplies no `EngineVersionMajor`, the runner reads `server_version_num` from the database once and fills `EngineVersion`, `EngineVersionMajor`, and `EngineVersionMinor`. Caller metadata with a version wins. All other fields are caller-only and carry whatever the caller knew — the standalone CLI supplies none of them, so a check must treat a zero value (for example `MemoryGB`) as unknown. `IsReadReplica` is `false` both for a primary and for a caller that never determined the role: scope a check off `true`, and never infer "this is a primary" from `false`. Aurora readers are cluster members that expose no RDS read-replica source, so they report `false` too.
 
 ## SQL Query Conventions
 

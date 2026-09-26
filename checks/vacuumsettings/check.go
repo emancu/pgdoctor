@@ -217,6 +217,9 @@ func checkMaintenanceWorkMem(s dbVacuumSettings, report *check.Report, meta *che
 
 	// Total budget calculation: maintenance_work_mem × autovacuum_max_workers = total RAM used
 	availableRAMMB := int64(meta.MemoryGB * 1024)
+	if availableRAMMB <= 0 {
+		return
+	}
 	totalBudgetMB := maintenanceMemMB * autovacuumMaxWorkers
 	budgetPercent := (float64(totalBudgetMB) / float64(availableRAMMB)) * 100
 
