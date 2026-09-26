@@ -85,7 +85,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 		if !slot.Active.Bool {
 			inactiveSlots = append(inactiveSlots, slot)
-			continue
 		}
 
 		if slot.RestartLsnLagBytes.Valid {

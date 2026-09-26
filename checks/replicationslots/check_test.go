@@ -253,6 +253,59 @@ func TestCheck_InactiveSlots(t *testing.T) {
 	assert.Contains(t, report.Results[0].Details, "1.0MiB") // formatBytes
 }
 
+func TestCheck_InactiveSlotLag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		lagBytes   int64
+		severity   check.Severity
+		findingIDs []string
+	}{
+		{
+			name:       "below warn threshold",
+			lagBytes:   1*1024*1024*1024 - 1,
+			severity:   check.SeverityWarn,
+			findingIDs: []string{"inactive-slots"},
+		},
+		{
+			name:       "high lag",
+			lagBytes:   2 * 1024 * 1024 * 1024,
+			severity:   check.SeverityWarn,
+			findingIDs: []string{"inactive-slots", "high-lag"},
+		},
+		{
+			name:       "critical lag",
+			lagBytes:   6 * 1024 * 1024 * 1024,
+			severity:   check.SeverityFail,
+			findingIDs: []string{"inactive-slots", "critical-lag"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				pg15Slots: []db.ReplicationSlotsPG15Row{
+					db.ReplicationSlotsPG15Row(inactiveSlot("idle_slot", 3600, tt.lagBytes)),
+				},
+			}
+
+			report, err := replicationslots.New(queryer).Check(context.Background())
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.severity, report.Severity)
+			var ids []string
+			for _, r := range report.Results {
+				ids = append(ids, r.ID)
+				assert.Contains(t, r.Details, "idle_slot")
+			}
+			assert.Equal(t, tt.findingIDs, ids)
+		})
+	}
+}
+
 func TestCheck_CategorizationPriority(t *testing.T) {
 	t.Parallel()
 
