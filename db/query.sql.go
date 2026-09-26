@@ -2782,8 +2782,12 @@ SELECT
   -- *waiting* AccessExclusiveLock, so it makes this check time out during a DDL
   -- pile-up. relpages is only refreshed by VACUUM/ANALYZE, so it is stale by
   -- definition and 0 on a never-vacuumed relation.
-  , (c.relpages::BIGINT + COALESCE(t.relpages::BIGINT, 0) + COALESCE(i.index_pages, 0))
-    * CURRENT_SETTING('block_size')::BIGINT AS table_size_bytes
+  -- A partitioned parent has no storage, and ANALYZE sets its relpages to -1.
+  , CASE
+    WHEN c.relkind = 'r'
+      THEN (c.relpages::BIGINT + COALESCE(t.relpages::BIGINT, 0) + COALESCE(i.index_pages, 0))
+      * CURRENT_SETTING('block_size')::BIGINT
+  END AS table_size_bytes
   , COALESCE(s.n_dead_tup, 0) AS n_dead_tup
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
   , COALESCE(s.autovacuum_count, 0) AS autovacuum_count

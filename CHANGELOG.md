@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`sequence-health`**: usage and remaining values follow the direction of the sequence, so a descending sequence near `min_value` is reported. A sequence with the full bigint range no longer makes the check fail with `bigint out of range` ([#167](https://github.com/emancu/pgdoctor/pull/167)).
 - **`table-vacuum-health`**: `large-table-defaults` computes "Trigger At" from the effective settings: a per-table value wins over the server value, and on PostgreSQL 18 `autovacuum_vacuum_max_threshold` caps it. The finding lists a large table only when it has no per-table scale factor and the server scale factor is 0.2 or higher. A partitioned parent has no trigger and is not listed. `Pending` counts dead tuples only. A threshold stored as `1e3` or `1000.0` no longer makes the check fail ([#166](https://github.com/emancu/pgdoctor/pull/166)).
 - **`table-bloat`**: `large-bloated-tables` estimates wasted space from the heap size in `pg_class.relpages`, not from the total size with indexes and TOAST. A table that was never vacuumed or analyzed shows `-`. `Size` and the size filters do not change ([#164](https://github.com/emancu/pgdoctor/pull/164)).
+- **`table-vacuum-health`**: a partitioned parent shows `-` in the `Size` column, not a negative size or `0 bytes`. A parent has no storage of its own ([#171](https://github.com/emancu/pgdoctor/pull/171)).
 
 ## [0.5.0] - 2026-08-14
 
