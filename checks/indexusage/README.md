@@ -20,7 +20,8 @@ Details disclose the statistics window (since `pg_stat_database.stats_reset`) so
 ### Low Usage Indexes (`low-usage-indexes`)
 Indexes larger than 500 MB with more than 10,000 table writes and at least one scan but a sustained rate
 below 1 per week, over a statistics window of at least 30 days. The window is measured by the server, so the
-clock on the host running pgdoctor does not affect which indexes are listed. Zero-scan indexes surface as unused-indexes.
+clock on the host running pgdoctor does not affect which indexes are listed. When no statistics reset is recorded,
+the server uptime is the window. With a shorter window, the check does not evaluate read rates. Zero-scan indexes surface as unused-indexes.
 These indexes have high maintenance costs relative to their query benefits.
 
 **Severity**: INFO
