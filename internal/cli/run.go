@@ -73,17 +73,10 @@ the level of detail, and --hide-passing to hide checks and findings that passed.
 
 			var cfg check.Config
 			if opts.config != "" {
-				var skipped []string
 				var err error
-				cfg, skipped, err = loadConfig(opts.config, pgdoctor.AllChecks())
+				cfg, err = loadConfig(opts.config, pgdoctor.AllChecks())
 				if err != nil {
 					return err
-				}
-				if opts.detail == string(detailDebug) {
-					dimFunc := dimColor()
-					for _, msg := range skipped {
-						fmt.Fprintln(os.Stderr, dimFunc(msg))
-					}
 				}
 			}
 
