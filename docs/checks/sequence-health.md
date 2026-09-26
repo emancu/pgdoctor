@@ -34,7 +34,7 @@ All INSERT operations fail until the sequence is migrated to bigint.
 
 ### near-exhaustion
 
-Identifies sequences approaching their maximum value:
+Identifies sequences approaching their limit: the maximum value for an ascending sequence, the minimum value for a descending one:
 - **FAIL**: Usage >90% (imminent failure, migrate immediately)
 - **WARN**: Usage >75% (plan migration soon)
 

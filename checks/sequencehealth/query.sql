@@ -10,13 +10,18 @@ WITH sequence_info AS (
     , s.cycle AS is_cyclic
     , cur.value AS current_value
     , (cur.value IS NULL) AS is_unreadable
-    , CASE
-      WHEN s.max_value > 0 AND cur.value > 0
-        THEN (cur.value::numeric / s.max_value::numeric) * 100
-      WHEN cur.value IS NOT NULL
-        THEN 0
-    END AS usage_percent
-    , (s.max_value - cur.value) / NULLIF(s.increment_by, 0) AS remaining_values
+    -- numeric: a full bigint range overflows bigint subtraction.
+    -- Usage counts from 0, or from the range bound when 0 is outside the range.
+    , CASE WHEN cur.value IS NOT NULL THEN GREATEST(0, CASE
+      WHEN s.increment_by > 0
+        THEN (cur.value - base.ascending::numeric) / NULLIF(s.max_value - base.ascending::numeric, 0)
+      ELSE (base.descending - cur.value::numeric) / NULLIF(base.descending - s.min_value::numeric, 0)
+    END) * 100 END AS usage_percent
+    , LEAST(TRUNC(CASE
+      WHEN s.increment_by > 0
+        THEN (s.max_value - cur.value::numeric) / s.increment_by
+      ELSE (cur.value - s.min_value::numeric) / -s.increment_by::numeric
+    END), 9223372036854775807)::bigint AS remaining_values
   FROM pg_sequences AS s
   -- last_value is NULL both for a sequence never called and for one the role cannot read.
   CROSS JOIN LATERAL (
@@ -27,6 +32,11 @@ WITH sequence_info AS (
         THEN s.start_value
     END AS value
   ) AS cur
+  CROSS JOIN LATERAL (
+    SELECT
+      CASE WHEN s.max_value > 0 THEN GREATEST(s.min_value, 0) ELSE s.min_value END AS ascending
+      , CASE WHEN s.min_value < 0 THEN LEAST(s.max_value, 0) ELSE s.max_value END AS descending
+  ) AS base
   WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
 )
 
