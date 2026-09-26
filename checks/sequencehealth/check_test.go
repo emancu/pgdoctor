@@ -230,6 +230,83 @@ func TestSequenceHealth_NearExhaustion_Critical(t *testing.T) {
 	require.Equal(t, check.SeverityFail, exhaustionFinding.Table.Rows[0].Severity)
 }
 
+func TestSequenceHealth_NearExhaustion_Direction(t *testing.T) {
+	t.Parallel()
+
+	const bigintMax = 9223372036854775807
+
+	tests := []struct {
+		name      string
+		row       db.SequenceHealthRow
+		severity  check.Severity
+		usage     string
+		remaining string
+	}{
+		{
+			name: "ascending",
+			row: makeSequenceRow("public", "public.asc_seq", "integer", "", "", "",
+				2000000000, 2147483647, 1, 147483647, 0, 93.13, false, false, false, false, 0),
+			severity: check.SeverityFail, usage: "93.1%", remaining: "147.5M",
+		},
+		{
+			name: "descending",
+			row: makeSequenceRow("public", "public.desc_seq", "integer", "", "", "",
+				-2100000000, -1, -1, 47483648, 0, 97.79, false, false, false, false, 0),
+			severity: check.SeverityFail, usage: "97.8%", remaining: "47.5M",
+		},
+		{
+			name: "descending never called",
+			row: makeSequenceRow("public", "public.desc_new_seq", "integer", "", "", "",
+				-1, -1, -1, 2147483647, 0, 0, false, false, false, false, 0),
+			severity: check.SeverityPass,
+		},
+		{
+			name: "ascending with increment 10",
+			row: makeSequenceRow("public", "public.step_seq", "integer", "", "", "",
+				2147000000, 2147483647, 10, 48364, 0, 99.98, false, false, false, false, 0),
+			severity: check.SeverityFail, usage: "100.0%", remaining: "48.4K",
+		},
+		{
+			name: "descending with increment -10",
+			row: makeSequenceRow("public", "public.desc_step_seq", "integer", "", "", "",
+				-2147000000, -1, -10, 48364, 0, 99.98, false, false, false, false, 0),
+			severity: check.SeverityFail, usage: "100.0%", remaining: "48.4K",
+		},
+		{
+			name: "full bigint range",
+			row: makeSequenceRow("public", "public.full_seq", "bigint", "", "", "",
+				-bigintMax-1, bigintMax, 1, bigintMax, 0, 0, false, false, false, false, 0),
+			severity: check.SeverityPass,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{tt.row}}).Check(context.Background())
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			var finding *check.Finding
+			for i := range report.Results {
+				if report.Results[i].ID == findingIDNearExhaustion {
+					finding = &report.Results[i]
+				}
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, tt.severity, finding.Severity)
+			if tt.severity == check.SeverityPass {
+				assert.Nil(t, finding.Table)
+				return
+			}
+			require.Len(t, finding.Table.Rows, 1)
+			assert.Equal(t, tt.usage, finding.Table.Rows[0].Cells[2])
+			assert.Equal(t, tt.remaining, finding.Table.Rows[0].Cells[3])
+		})
+	}
+}
+
 func TestSequenceHealth_NearExhaustion_Warning(t *testing.T) {
 	t.Parallel()
 

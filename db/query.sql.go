@@ -1921,13 +1921,17 @@ WITH sequence_info AS (
     , s.cycle AS is_cyclic
     , cur.value AS current_value
     , (cur.value IS NULL) AS is_unreadable
+    -- numeric: a full bigint range overflows bigint subtraction.
     , CASE
-      WHEN s.max_value > 0 AND cur.value > 0
-        THEN (cur.value::numeric / s.max_value::numeric) * 100
-      WHEN cur.value IS NOT NULL
-        THEN 0
-    END AS usage_percent
-    , (s.max_value - cur.value) / NULLIF(s.increment_by, 0) AS remaining_values
+      WHEN s.increment_by > 0
+        THEN (cur.value - s.min_value::numeric) / (s.max_value - s.min_value::numeric)
+      ELSE (s.max_value - cur.value::numeric) / (s.max_value - s.min_value::numeric)
+    END * 100 AS usage_percent
+    , LEAST(TRUNC(CASE
+      WHEN s.increment_by > 0
+        THEN (s.max_value - cur.value::numeric) / s.increment_by
+      ELSE (cur.value - s.min_value::numeric) / -s.increment_by::numeric
+    END), 9223372036854775807)::bigint AS remaining_values
   FROM pg_sequences AS s
   -- last_value is NULL both for a sequence never called and for one the role cannot read.
   CROSS JOIN LATERAL (
