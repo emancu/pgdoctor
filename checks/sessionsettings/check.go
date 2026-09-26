@@ -90,7 +90,7 @@ func ValidateSetting(key, value string) error {
 	switch {
 	case key == "roles":
 		return nil
-	case key == "timeout", strings.HasPrefix(key, "timeout."):
+	case key == "timeout", strings.HasPrefix(key, "timeout.") && key != "timeout.":
 		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
 			return fmt.Errorf("%s: %q is not an integer", key, value)
 		}

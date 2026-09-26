@@ -138,6 +138,11 @@ func TestLoadConfigInvalid(t *testing.T) {
 			want:    []string{`session-settings: timeout.dba_ro: "5m" is not an integer`},
 		},
 		{
+			name:    "role timeout without a role",
+			content: "session-settings:\n  timeout.: 1000\n",
+			want:    []string{`session-settings: unknown key "timeout."`},
+		},
+		{
 			name:    "unknown table-vacuum-health key",
 			content: "table-vacuum-health:\n  exclude: public.outbox\n",
 			want:    []string{`table-vacuum-health: unknown key "exclude"`},
