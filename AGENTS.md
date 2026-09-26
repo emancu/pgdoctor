@@ -198,6 +198,8 @@ report.AddFinding(check.Finding{
 })
 ```
 
+A check uses its own check ID as a finding ID only when that finding is the only finding in the report. The text output folds a single finding with the check ID into the check header. Next to other findings, it prints the check header twice.
+
 A finding `Name` can carry the headline value of the finding (for example `Cache Hit Ratio: 99.80%`), so the value is visible at every detail level and every severity. Put the explanation and the supporting values in `Details`. The text output shows the `Details` of a PASS finding only at `--detail verbose` and `--detail debug`.
 
 ### Filtering

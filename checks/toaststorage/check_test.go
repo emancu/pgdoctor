@@ -69,6 +69,8 @@ func Test_ToastStorage_NoIssues(t *testing.T) {
 	require.Equal(t, check.SeverityPass, report.Severity)
 	require.Equal(t, 2, len(report.Results))
 	require.Equal(t, "compression-default", report.Results[0].ID)
+	require.Equal(t, "toast-usage", report.Results[1].ID)
+	require.Equal(t, "TOAST Usage", report.Results[1].Name)
 	require.Contains(t, report.Results[1].Details, "No tables with significant TOAST storage")
 }
 

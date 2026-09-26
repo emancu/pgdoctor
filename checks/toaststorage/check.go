@@ -72,8 +72,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	if len(rows) == 0 {
 		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
+			ID:       "toast-usage",
+			Name:     "TOAST Usage",
 			Severity: check.SeverityPass,
 			Details:  "No tables with significant TOAST storage found",
 		})
