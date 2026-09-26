@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Library**: `Run` reads `server_version_num` from the database when the caller supplies no `InstanceMetadata` version. Caller metadata with a version wins, and the other fields stay caller-only ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **CLI**: breaking — `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, a bad `--config`, an unknown flag value, or zero checks selected. An unknown `--only` or `--ignore` value is an error, not a warning ([#133](https://github.com/emancu/pgdoctor/pull/133)).
 - **CLI**: `--detail verbose` and `--detail debug` show the details of PASS findings. Finding names still carry their headline value ([#138](https://github.com/emancu/pgdoctor/pull/138)).
+- **`toast-storage`**: breaking — the finding that reports no significant TOAST storage is renamed from `toast-storage` to `toast-usage` ("TOAST Usage"), so the text output prints the check header once ([#152](https://github.com/emancu/pgdoctor/pull/152)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 
 ### Fixed
