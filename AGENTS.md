@@ -198,6 +198,8 @@ report.AddFinding(check.Finding{
 })
 ```
 
+A finding `Name` is a static label, the same on every run. Put values (counts, ratios, durations) in `Details`. The text output shows the `Details` of a PASS finding at `--detail verbose` and `--detail debug`.
+
 ### Filtering
 
 Filtering happens at the runner level (`pgdoctor.go`):

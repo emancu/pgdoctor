@@ -115,19 +115,19 @@ func Test_EntryUsage(t *testing.T) {
 	tests := []struct {
 		name         string
 		row          db.QueryStatsCapacityRow
-		wantInName   string
+		wantDetail   string
 		wantSeverity check.Severity
 	}{
 		{
 			name:         "entries against max",
 			row:          capacityRow(4200, 10000, 0, 30*day),
-			wantInName:   "4.2K/10.0K entries",
+			wantDetail:   "4.2K/10.0K entries",
 			wantSeverity: check.SeverityPass,
 		},
 		{
 			name:         "at capacity",
 			row:          capacityRow(10000, 10000, 0, 30*day),
-			wantInName:   "10.0K/10.0K entries",
+			wantDetail:   "10.0K/10.0K entries",
 			wantSeverity: check.SeverityPass,
 		},
 		{
@@ -137,7 +137,7 @@ func Test_EntryUsage(t *testing.T) {
 			row: func() db.QueryStatsCapacityRow {
 				return unreadableMax(4200)
 			}(),
-			wantInName:   "4.2K entries, capacity unreadable",
+			wantDetail:   "4.2K entries, capacity unreadable",
 			wantSeverity: check.SeveritySkip,
 		},
 	}
@@ -150,7 +150,7 @@ func Test_EntryUsage(t *testing.T) {
 			result := finding(t, report, usageID)
 
 			assert.Equal(t, tt.wantSeverity, result.Severity)
-			assert.Contains(t, result.Name, tt.wantInName)
+			assert.Contains(t, result.Details, tt.wantDetail)
 		})
 	}
 }
@@ -167,7 +167,8 @@ func Test_EntryUsage_DoesNotRepeatTheCheckName(t *testing.T) {
 		assert.NotContains(t, result.Name, report.Name)
 	}
 
-	assert.Equal(t, "Entry Usage: 9/5.0K entries", finding(t, report, usageID).Name)
+	assert.Equal(t, "Entry Usage", finding(t, report, usageID).Name)
+	assert.Equal(t, "9/5.0K entries", finding(t, report, usageID).Details)
 }
 
 // A full table is a state, not a defect: a stable workload larger than max sits
@@ -222,14 +223,14 @@ func Test_EvictionRate(t *testing.T) {
 	tests := []struct {
 		name         string
 		row          db.QueryStatsCapacityRow
-		wantInName   string
+		wantDetail   string
 		wantSeverity check.Severity
 	}{
 		{
-			name:         "no evictions",
+			name:         "No evictions",
 			row:          capacityRow(4200, 10000, 0, 30*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "no evictions",
+			wantDetail:   "No evictions",
 		},
 		{
 			name:         "occasional churn stays below the display floor",
@@ -270,8 +271,8 @@ func Test_EvictionRate(t *testing.T) {
 			result := finding(t, report, rateID)
 
 			assert.Equal(t, tt.wantSeverity, result.Severity)
-			if tt.wantInName != "" {
-				assert.Contains(t, result.Name, tt.wantInName)
+			if tt.wantDetail != "" {
+				assert.Contains(t, result.Details, tt.wantDetail)
 			}
 			// Entries are held below capacity so the fill signal stays PASS and the
 			// report severity reflects the rate alone.
@@ -294,7 +295,7 @@ func Test_EvictionRate_SmallMaxUsesTheTenEntryBatchFloor(t *testing.T) {
 	result := finding(t, report, rateID)
 
 	assert.Equal(t, check.SeverityWarn, result.Severity)
-	assert.Contains(t, result.Name, "every 40.0h")
+	assert.Contains(t, result.Details, "every 40.0h")
 	// 60 events * 10 entries, not 60 * 5.
 	assert.Contains(t, result.Details, "600 entries")
 }
@@ -308,7 +309,7 @@ func Test_EvictionRate_LargeMaxUsesThePercentBatch(t *testing.T) {
 
 	// 6 events/day * 500 entries = 3000/day against 10000 = 0.3x.
 	assert.Equal(t, check.SeverityPass, result.Severity)
-	assert.Contains(t, result.Name, "every 3.3d")
+	assert.Contains(t, result.Details, "every 3.3d")
 }
 
 // The printed figure and the severity come from one value, so a run can never show
@@ -320,20 +321,20 @@ func Test_EvictionRate_DisplayNeverContradictsTheGrade(t *testing.T) {
 		report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(4200, 10000, int64(events), 100*day)})
 		result := finding(t, report, rateID)
 
-		hours := recycleHoursFromName(t, result.Name)
+		hours := recycleHoursFromDetails(t, result.Details)
 		warned := result.Severity == check.SeverityWarn
 
 		require.Equal(t, hours <= 48, warned,
-			"%d events printed %s but graded %s", events, result.Name, result.Severity)
+			"%d events printed %s but graded %s", events, result.Details, result.Severity)
 	}
 }
 
-// recycleHoursFromName reads back the figure the finding actually printed.
-func recycleHoursFromName(t *testing.T, name string) float64 {
+// recycleHoursFromDetails reads back the figure the finding actually printed.
+func recycleHoursFromDetails(t *testing.T, details string) float64 {
 	t.Helper()
 
-	m := regexp.MustCompile(`every ([0-9.]+)([mhd])`).FindStringSubmatch(name)
-	require.NotNil(t, m, "no recycle figure in %q", name)
+	m := regexp.MustCompile(`every ([0-9.]+)([mhd])`).FindStringSubmatch(details)
+	require.NotNil(t, m, "no recycle figure in %q", details)
 
 	v, err := strconv.ParseFloat(m[1], 64)
 	require.NoError(t, err)
@@ -366,7 +367,7 @@ func Test_EvictionRate_DisplayIsExactAtTenths(t *testing.T) {
 
 			report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, tt.events, 10*day)})
 
-			assert.Contains(t, finding(t, report, rateID).Name, tt.want)
+			assert.Contains(t, finding(t, report, rateID).Details, tt.want)
 		})
 	}
 }
@@ -391,15 +392,17 @@ func Test_EvictionRate_Details(t *testing.T) {
 	assert.Contains(t, result.Details, "pg_stat_statements.max = 10.0K")
 	assert.Contains(t, result.Details, "Infrequent statements are dropped first")
 	assert.Contains(t, result.Details, "partition-usage")
-	assert.LessOrEqual(t, strings.Count(result.Details, "\n"), 1, "details must stay short")
+	assert.LessOrEqual(t, strings.Count(result.Details, "\n"), 2, "details must stay short")
 }
 
-func Test_EvictionRate_NoDetailsWhenPassing(t *testing.T) {
+func Test_EvictionRate_NoEvictionDetailsWhenPassing(t *testing.T) {
 	t.Parallel()
 
-	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(4200, 10000, 0, 30*day)})
+	report := run(t, &mockQueryer{pgssOK: true, row: capacityRow(10000, 10000, 60, 10*day)})
+	result := finding(t, report, rateID)
 
-	assert.Empty(t, finding(t, report, rateID).Details)
+	assert.Equal(t, check.SeverityPass, result.Severity)
+	assert.Equal(t, "table recycled every 3.3d (10d average)", result.Details)
 }
 
 func Test_EvictionRate_UnusableWindowSkips(t *testing.T) {

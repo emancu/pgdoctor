@@ -73,7 +73,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	if !available.Bool {
 		report.AddFinding(check.Finding{
 			ID:       usageID,
-			Name:     usageName + ": pg_stat_statements unavailable or outdated",
+			Name:     usageName,
 			Severity: check.SeveritySkip,
 			Details:  "pg_stat_statements is unavailable or outdated, so its capacity cannot be inspected.",
 		})
@@ -114,19 +114,19 @@ func reportEntryUsage(row db.QueryStatsCapacityRow, report *check.Report) {
 	if row.UsageSkipReason.Valid {
 		report.AddFinding(check.Finding{
 			ID:       usageID,
-			Name:     fmt.Sprintf("%s: %s entries, capacity unreadable", usageName, check.FormatNumber(row.Entries.Int64)),
+			Name:     usageName,
 			Severity: check.SeveritySkip,
-			Details:  row.UsageSkipReason.String,
+			Details:  fmt.Sprintf("%s entries, capacity unreadable: %s", check.FormatNumber(row.Entries.Int64), row.UsageSkipReason.String),
 		})
 
 		return
 	}
 
 	report.AddFinding(check.Finding{
-		ID: usageID,
-		Name: fmt.Sprintf("%s: %s/%s entries",
-			usageName, check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64)),
+		ID:       usageID,
+		Name:     usageName,
 		Severity: check.SeverityPass,
+		Details:  fmt.Sprintf("%s/%s entries", check.FormatNumber(row.Entries.Int64), check.FormatNumber(row.MaxEntries.Int64)),
 	})
 }
 
@@ -147,8 +147,9 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	if !row.RecycleHours.Valid {
 		report.AddFinding(check.Finding{
 			ID:       rateID,
-			Name:     rateName + ": no evictions",
+			Name:     rateName,
 			Severity: check.SeverityPass,
+			Details:  "No evictions",
 		})
 
 		return
@@ -158,16 +159,16 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	// opposite sides of the threshold.
 	hours := displayedRecycleHours(row.RecycleHours.Float64)
 
-	severity, details := check.SeverityPass, ""
+	severity := check.SeverityPass
+	details := fmt.Sprintf("%s (%s average)", formatRecycle(hours), check.FormatDurationSec(int64(row.WindowSeconds.Float64)))
 	if hours <= warnRecycleHours {
 		severity = check.SeverityWarn
-		details = evictionDetails(row)
+		details += "\n" + evictionDetails(row)
 	}
 
 	report.AddFinding(check.Finding{
-		ID: rateID,
-		Name: fmt.Sprintf("%s: %s (%s average)", rateName, formatRecycle(hours),
-			check.FormatDurationSec(int64(row.WindowSeconds.Float64))),
+		ID:       rateID,
+		Name:     rateName,
 		Severity: severity,
 		Details:  details,
 	})

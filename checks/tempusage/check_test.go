@@ -177,8 +177,8 @@ func TestTempUsage_AllHealthy(t *testing.T) {
 	assert.Len(t, report.Results, 1)
 
 	assert.Equal(t, check.SeverityPass, report.Results[0].Severity)
-	// Both numbers ride on the name, since renderers drop Details on PASS.
-	assert.Equal(t, "Temp File Rate: 4.2 files/hour, 2.0MiB/hour", report.Results[0].Name)
+	assert.Equal(t, "Temp File Rate", report.Results[0].Name)
+	assert.Equal(t, "4.2 files/hour, 2.0MiB/hour", report.Results[0].Details)
 }
 
 func TestTempUsage_HighFileRate_Warning(t *testing.T) {
@@ -206,7 +206,7 @@ func TestTempUsage_HighFileRate_Warning(t *testing.T) {
 
 	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityWarn, findFinding(t, report, "temp-file-sources").Severity)
-	assert.Contains(t, findFinding(t, report, "temp-rate").Name, "10.0 files/hour")
+	assert.Contains(t, findFinding(t, report, "temp-rate").Details, "10.0 files/hour")
 }
 
 func TestTempUsage_HighFileRate_Critical(t *testing.T) {
@@ -235,7 +235,7 @@ func TestTempUsage_HighFileRate_Critical(t *testing.T) {
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity,
 		"the actionable finding carries the same grade")
-	assert.Contains(t, findFinding(t, report, "temp-rate").Name, "50.0 files/hour")
+	assert.Contains(t, findFinding(t, report, "temp-rate").Details, "50.0 files/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
@@ -263,10 +263,10 @@ func TestTempUsage_HighVolumeRate_Warning(t *testing.T) {
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 
 	// The file rate is below its threshold: the volume alone raises the finding, and
-	// both numbers stay on the name.
+	// both numbers stay in the details.
 	rateFinding := findFinding(t, report, "temp-rate")
 	assert.Equal(t, check.SeverityWarn, rateFinding.Severity)
-	assert.Equal(t, "Temp File Rate: 4.2 files/hour, 2.0GiB/hour", rateFinding.Name)
+	assert.Contains(t, rateFinding.Details, "4.2 files/hour, 2.0GiB/hour")
 }
 
 func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
@@ -295,7 +295,7 @@ func TestTempUsage_HighVolumeRate_Critical(t *testing.T) {
 
 	rateFinding := findFinding(t, report, "temp-rate")
 	assert.Equal(t, check.SeverityFail, rateFinding.Severity)
-	assert.Contains(t, rateFinding.Name, "8.0GiB/hour")
+	assert.Contains(t, rateFinding.Details, "8.0GiB/hour")
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
 }
 
@@ -327,7 +327,7 @@ func TestTempUsage_BothHighRates(t *testing.T) {
 	// Every finding carries the same grade: a rate over its threshold demands action.
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-rate").Severity)
 	assert.Equal(t, check.SeverityFail, findFinding(t, report, "temp-file-sources").Severity)
-	assert.Equal(t, "Temp File Rate: 833.0 files/hour, 6.2GiB/hour", findFinding(t, report, "temp-rate").Name)
+	assert.Contains(t, findFinding(t, report, "temp-rate").Details, "833.0 files/hour, 6.2GiB/hour")
 }
 
 func TestTempUsage_EdgeCases_ExactThresholds(t *testing.T) {

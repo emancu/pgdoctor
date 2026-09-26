@@ -163,8 +163,9 @@ func checkConnectionSaturation(stats db.ConnectionStatsRow, report *check.Report
 	if saturationPercent < saturationWarnPercent {
 		report.AddFinding(check.Finding{
 			ID:       "connection-saturation",
-			Name:     fmt.Sprintf("Connection Saturation: %.1f%% (%d/%d available)", saturationPercent, used, available),
+			Name:     "Connection Saturation",
 			Severity: check.SeverityPass,
+			Details:  fmt.Sprintf("Connection usage at %.1f%% (%d/%d available)", saturationPercent, used, available),
 		})
 		return
 	}
