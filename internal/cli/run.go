@@ -230,8 +230,7 @@ func parseDSN(dsn string) (*pgx.ConnConfig, error) {
 		return nil, err
 	}
 
-	// pgx parses connect_timeout=0 (no timeout) the same as an absent setting.
-	if cfg.ConnectTimeout == 0 && !strings.Contains(dsn, "connect_timeout") {
+	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
 	if _, ok := cfg.RuntimeParams["application_name"]; !ok {

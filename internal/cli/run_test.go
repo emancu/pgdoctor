@@ -61,7 +61,6 @@ func TestParseDSN_ConnectDefaults(t *testing.T) {
 		{"keyword defaults", "host=db.example.com dbname=app", 10 * time.Second, "pgdoctor"},
 		{"url overrides", "postgres://u@db.example.com/app?connect_timeout=3&application_name=ops", 3 * time.Second, "ops"},
 		{"keyword overrides", "host=db.example.com connect_timeout=3 application_name=ops", 3 * time.Second, "ops"},
-		{"explicit zero timeout", "postgres://u@db.example.com/app?connect_timeout=0", 0, "pgdoctor"},
 	}
 
 	for _, tt := range tests {
