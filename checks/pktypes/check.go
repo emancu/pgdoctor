@@ -128,13 +128,13 @@ func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
 
 	return tableEntry{
 		cells: []string{
-			row.TableName.String,
-			row.ColumnName.String,
-			row.ColumnType.String,
+			row.TableName,
+			row.ColumnName,
+			row.ColumnType,
 			usageStr,
-			check.FormatNumber(row.EstimatedRows.Int64),
+			check.FormatNumber(row.EstimatedRows),
 		},
-		severity: determineSeverity(usagePct, row.EstimatedRows.Int64),
+		severity: determineSeverity(usagePct, row.EstimatedRows),
 		usagePct: usagePct,
 	}
 }

@@ -27,10 +27,10 @@ func (m *mockQueryer) InvalidPrimaryKeyTypes(context.Context) ([]db.InvalidPrima
 
 func makePKRow(table, column, colType string, estRows, seqCurrent, maxValue int64, usagePct float64) db.InvalidPrimaryKeyTypesRow {
 	return db.InvalidPrimaryKeyTypesRow{
-		TableName:       pgtype.Text{String: table, Valid: true},
-		ColumnName:      pgtype.Text{String: column, Valid: true},
-		ColumnType:      pgtype.Text{String: colType, Valid: true},
-		EstimatedRows:   pgtype.Int8{Int64: estRows, Valid: estRows > 0},
+		TableName:       table,
+		ColumnName:      column,
+		ColumnType:      colType,
+		EstimatedRows:   estRows,
 		SequenceCurrent: pgtype.Int8{Int64: seqCurrent, Valid: seqCurrent > 0},
 		TypeMaxValue:    pgtype.Int8{Int64: maxValue, Valid: maxValue > 0},
 		UsagePct:        pgtype.Numeric{Valid: usagePct >= 0, Int: nil, Exp: 0, NaN: false, InfinityModifier: 0},
