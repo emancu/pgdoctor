@@ -7,7 +7,7 @@ Detects queries on partitioned tables that don't use partition keys in their WHE
 - **pg_stat_statements >= 1.9** (PostgreSQL 14+) for query pattern analysis; older versions lack `pg_stat_statements_info` and the `toplevel` column
 - PostgreSQL 15+
 
-If `pg_stat_statements` is not installed, this check reports SKIP for query pattern analysis. The sequential scan analysis will still run as it uses `pg_stat_user_tables` statistics.
+Without `pg_stat_statements`, query pattern analysis cannot run. The sequential scan analysis still runs, as it uses `pg_stat_user_tables` statistics.
 
 To enable the extension:
 
@@ -139,7 +139,7 @@ Just `SELECT`, `UPDATE`, `DELETE` and `WITH` statements are considered, matched 
 
 ### Query text visibility
 
-Only superusers and roles with `pg_read_all_stats` can read other users' query text; everyone else sees `<insufficient privilege>`. When any entry is hidden, the check reports `query-text-restricted` so a partial analysis is not mistaken for a clean bill of health.
+Only superusers and roles with `pg_read_all_stats` can read other users' query text; everyone else sees `<insufficient privilege>`. A statement with hidden text cannot be analyzed.
 
 ### Partition-leaf queries
 
@@ -239,3 +239,23 @@ For maintenance-oriented partitioning (data retention), you may accept query ove
 - Document the decision
 - Ensure indexes support the query patterns
 - Monitor query performance
+
+### For `extension-unavailable`
+
+Make `pg_stat_statements` 1.9 or later readable in the connected database:
+
+1. Add `pg_stat_statements` to `shared_preload_libraries` (on RDS, in the parameter group) and restart.
+2. Create the extension in a schema on the `search_path`, or update an old version:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+ALTER EXTENSION pg_stat_statements UPDATE;
+```
+
+### For `query-text-restricted`
+
+Grant `pg_read_all_stats` (or `pg_monitor`) to the role that runs pgdoctor, so the analysis covers every statement:
+
+```sql
+GRANT pg_read_all_stats TO pgdoctor_role;
+```

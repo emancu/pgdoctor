@@ -13,7 +13,6 @@ PostgreSQL 14 introduced session-level statistics in `pg_stat_database` that tra
 ## Requirements
 
 - PostgreSQL 14 or later (session statistics don't exist in earlier versions)
-- For versions < 14, the check reports OK and skips validation
 
 ## Subchecks
 

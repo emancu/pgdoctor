@@ -108,6 +108,10 @@ If the above options don't resolve the issue, contact the DBA or Data Engineerin
 - Evaluate if the table structure needs changes
 - Help with index strategy review
 
+### For `table-activity`
+
+The statistics hold no table writes yet. This is normal right after a restart or a statistics reset. Let the workload run, then run the check again.
+
 ## Thresholds Rationale
 
 | Subcheck | Threshold | Rationale |

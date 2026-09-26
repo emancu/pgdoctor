@@ -3,9 +3,9 @@
 Reports how full the `pg_stat_statements` entry table is and how fast it is discarding entries, because
 every other check that reads that view is only as good as the sample left in it.
 
-> **Note**: This check reads `pg_stat_statements`. When the extension is not installed, not preloaded, older than 1.9, or
-> not reachable through `search_path`, it reports SKIP: the table is cluster-wide, so its absence here says nothing
-> about whether the shared hash is evicting, and nothing was inspected.
+> **Note**: This check reads `pg_stat_statements`. The extension must be installed, preloaded, version 1.9 or later, and
+> reachable through `search_path`. The table is cluster-wide, so its absence from one database says nothing about
+> whether the shared hash is evicting.
 
 ## What It Checks
 
@@ -14,9 +14,7 @@ every other check that reads that view is only as good as the sample left in it.
 Prints the entries currently held against `pg_stat_statements.max`, as `9.9K/10.0K entries`. Both figures
 are cluster-wide, so neither is filtered by database.
 
-**Severity**: PASS, always. SKIP when `pg_stat_statements` cannot be read at all.
-
-Occupancy is reported, not graded. A full table is the normal steady state for any workload with more
+Occupancy alone is not a problem. A full table is the normal steady state for any workload with more
 distinct statements than `max`, and on its own it says nothing about whether entries are still being
 lost — that is what `statement-eviction-rate` measures.
 
@@ -42,15 +40,14 @@ below `max = 200` the floor of 10 exceeds 5%. At `max = 100` each event discards
 rather than a twentieth; assuming a flat 5% there would report half the real turnover and pass a
 saturated instance.
 
-**Severity**: WARN when the table recycles in **48 hours or less**, otherwise PASS. SKIP when the window
-is too short to distinguish a real rate from a single eviction event.
+**Threshold**: the table recycles in **48 hours or less**.
 
 Recycling the whole table in under two days is where the tracked set stops representing the workload.
 Eviction is not age-based: entries are ranked by a usage counter that gains 1.0 per execution and decays
 by 1% each pass, so the *least frequently executed* statements are dropped first regardless of how
 recently they ran. The tail therefore dies far sooner than the average recycle time suggests.
 
-The grade is capped at WARN. Eviction costs nothing at runtime and degrades no query. It degrades
+Eviction costs nothing at runtime and degrades no query. It degrades
 *observability*, and the fix requires a restart. That belongs in a sprint, not in a pager.
 
 **Threshold on the rate, never on `dealloc` itself.** The counter only grows. A three-year-old instance
@@ -63,7 +60,7 @@ discarding an old one, and the view gives no indication that it happened. Conseq
 
 - **Other checks silently analyse a fraction of the workload.** In pgdoctor that is `partition-usage`
   and `temp-usage`. A statement that is not run frequently is evicted before either check ever reads it,
-  so both can report a confident PASS on a truncated sample.
+  so both can look clean on a truncated sample.
 - **Rates and totals are understated.** Cumulative counters live on the entry. Evicting it zeroes its
   history; when the statement reappears it starts from zero, and the calls, time and temp bytes it
   accumulated before are gone for good. A surviving entry can therefore still be undercounted.
@@ -82,8 +79,8 @@ times its own size daily, or once every 1.9 hours.
 
 ### For `entry-usage`
 
-PASS is informational and never needs action. A SKIP does: it means `pg_stat_statements` could not be
-read, so `partition-usage` and `temp-usage` are running blind too. Install the extension and confirm the
+The entry count itself needs no action. When `pg_stat_statements` cannot be read, `partition-usage` and
+`temp-usage` are running blind too. Install the extension and confirm the
 library is preloaded — being installed is not sufficient, because `CREATE EXTENSION` succeeds without
 `shared_preload_libraries` and every subsequent read then errors.
 

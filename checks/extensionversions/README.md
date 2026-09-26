@@ -42,7 +42,7 @@ Each installed extension is classified against its policy entry:
 - **WARN**: installed version is below the policy `FailBelow` floor (unsupported) — upgrade before it
   blocks an engine upgrade or misses security fixes.
 
-Extensions with no policy entry, or already at a supported version, pass and are not listed.
+Extensions with no policy entry, or already at a supported version, are not listed.
 
 The seeded policies are:
 
@@ -53,9 +53,6 @@ The seeded policies are:
   2.x (below 3.0) is unsupported.
 - `pg_stat_statements` — warn below `1.9`, no fail floor. 1.9 is where `pg_stat_statements_info` and
   the `toplevel` column arrive, which `partition-usage`, `temp-usage` and `query-stats-capacity` read.
-
-Only extensions that need attention appear in the table; a clean run is just the PASS line. The
-finding summary reports how many extensions are installed.
 
 ### Pending Updates
 
@@ -70,9 +67,6 @@ on disk (`pg_available_extensions.default_version`):
 - Extensions with no bundled `default_version` (NULL) are skipped: managed providers may not expose
   control files for all extensions, so the ceiling is unknown.
 
-The finding's summary reports the PostgreSQL major version the bundled defaults belong to, for
-context (e.g. `behind the version bundled with PostgreSQL 17`).
-
 **Managed-provider caveat**: managed extensions typically only advance their bundled
 `default_version` alongside the engine version. A pending update flagged on such an extension is
 informational — you cannot run the update until the provider publishes the newer files for your
@@ -82,8 +76,7 @@ engine release — so treat it as a signal rather than an always-immediately-act
 
 The policy lives in `checks/extensionversions/policies.go`. To flag more extensions, add an
 `ExtensionPolicy` entry with the exact `pg_extension.extname`, a `WarnBelow` and/or `FailBelow`
-version floor, and a short `Reason`. Extensions with no policy entry are inventory-only and always
-report `OK`.
+version floor, and a short `Reason`. Extensions with no policy entry are inventory-only.
 
 ## How to Fix
 
@@ -97,7 +90,7 @@ first.
 - pg_partman — upgrade and migration docs: <https://github.com/pgpartman/pg_partman>
 - PostGIS — see "Upgrading PostGIS": <https://postgis.net/docs/>
 
-### Supported Versions
+### For `version-support`
 
 Once you have reviewed the migration steps, move the extension to a supported version:
 
@@ -112,7 +105,7 @@ release — you cannot jump past it without a PostgreSQL major-version upgrade.
 created before you upgraded pg_partman, or before you set the parent to `FULL`, are not
 retroactively fixed. You must audit and correct existing children manually.
 
-### Pending Updates
+### For `pending-update`
 
 The installed version trails the version bundled on disk. After confirming the bundled version's
 migration notes, register it into the catalog:
