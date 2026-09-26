@@ -50,8 +50,11 @@ func daysAgo(n int) window {
 	}
 }
 
-// noReset is a database whose counters were never reset: no timestamp, no age.
-func noReset() window { return window{} }
+// noReset is a database whose counters were never reset: no timestamp, and the
+// server uptime as the age.
+func noReset(uptimeDays int) window {
+	return window{age: pgInt8(int64(uptimeDays) * secondsPerDay)}
+}
 
 func row(table, index string, scans, writes, sizeBytes int64, w window) db.IndexUsageStatsRow {
 	return db.IndexUsageStatsRow{
@@ -166,7 +169,7 @@ func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
 	t.Parallel()
 
-	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), noReset())
+	r := row("public.users", "idx_users_unused", 0, 50000, mb(600), noReset(90))
 
 	report := runCheck(t, []db.IndexUsageStatsRow{r})
 	unused := finding(t, report, "unused-indexes")
@@ -223,18 +226,19 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 		writes int64
 		size   int64
 		reset  window
-		listed bool
+		want   check.Severity
 	}{
-		{"window 29d - not listed", 0, 50000, mb(600), daysAgo(29), false},
-		{"window 30d - listed", 1, 50000, mb(600), daysAgo(30), true},
-		{"zero scans - not listed (belongs to unused)", 0, 50000, mb(600), daysAgo(90), false},
-		{"rate under 1/week (9 scans, 70d) - listed", 9, 50000, mb(600), daysAgo(70), true},
-		{"rate at 1/week (10 scans, 70d) - not listed", 10, 50000, mb(600), daysAgo(70), false},
-		{"writes below floor (9999) - not listed", 5, 9999, mb(600), daysAgo(90), false},
-		{"writes at floor (10000) - listed", 5, 10000, mb(600), daysAgo(90), true},
-		{"size below floor (499MB) - not listed", 5, 50000, mb(499), daysAgo(90), false},
-		{"size at floor (500MB) - listed", 5, 50000, mb(500), daysAgo(90), true},
-		{"null stats_reset qualifies window and rate", 5, 50000, mb(600), noReset(), true},
+		{"window 29d - skipped", 1, 50000, mb(600), daysAgo(29), check.SeveritySkip},
+		{"window 30d - listed", 1, 50000, mb(600), daysAgo(30), check.SeverityInfo},
+		{"zero scans - not listed (belongs to unused)", 0, 50000, mb(600), daysAgo(90), check.SeverityPass},
+		{"rate under 1/week (9 scans, 70d) - listed", 9, 50000, mb(600), daysAgo(70), check.SeverityInfo},
+		{"rate at 1/week (10 scans, 70d) - not listed", 10, 50000, mb(600), daysAgo(70), check.SeverityPass},
+		{"writes below floor (9999) - not listed", 5, 9999, mb(600), daysAgo(90), check.SeverityPass},
+		{"writes at floor (10000) - listed", 5, 10000, mb(600), daysAgo(90), check.SeverityInfo},
+		{"size below floor (499MB) - not listed", 5, 50000, mb(499), daysAgo(90), check.SeverityPass},
+		{"size at floor (500MB) - listed", 5, 50000, mb(500), daysAgo(90), check.SeverityInfo},
+		{"no reset, uptime 90d - listed", 5, 50000, mb(600), noReset(90), check.SeverityInfo},
+		{"no reset, uptime 29d - skipped", 1, 50000, mb(600), noReset(29), check.SeveritySkip},
 	}
 
 	for _, tt := range tests {
@@ -245,11 +249,10 @@ func Test_LowUsageIndexes_Boundaries(t *testing.T) {
 			report := runCheck(t, []db.IndexUsageStatsRow{r})
 			low := finding(t, report, "low-usage-indexes")
 
-			if tt.listed {
-				require.Equal(t, check.SeverityInfo, low.Severity)
+			require.Equal(t, tt.want, low.Severity)
+			if tt.want == check.SeverityInfo {
 				require.Len(t, low.Table.Rows, 1)
 			} else {
-				require.Equal(t, check.SeverityPass, low.Severity)
 				require.Nil(t, low.Table)
 			}
 		})
@@ -298,8 +301,36 @@ func Test_LowUsageIndexes_WindowComesFromServerNotHostClock(t *testing.T) {
 				return
 			}
 
-			require.Equal(t, check.SeverityPass, low.Severity)
+			require.Equal(t, check.SeveritySkip, low.Severity)
 			require.Nil(t, low.Table)
+		})
+	}
+}
+
+func Test_ShortWindow_SkipsOnlyLowUsage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		w       window
+		details string
+	}{
+		{"recent reset", daysAgo(10), "Statistics cover 10 days"},
+		{"no reset and short uptime", noReset(10), "server uptime of 10 days"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := row("public.users", "idx_unused", 0, 50000, mb(600), tt.w)
+			report := runCheck(t, []db.IndexUsageStatsRow{r})
+
+			require.Equal(t, check.SeverityWarn, report.Severity)
+			require.Equal(t, check.SeverityWarn, finding(t, report, "unused-indexes").Severity)
+			low := finding(t, report, "low-usage-indexes")
+			require.Equal(t, check.SeveritySkip, low.Severity)
+			require.Contains(t, low.Details, tt.details)
 		})
 	}
 }

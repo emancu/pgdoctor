@@ -897,8 +897,9 @@ SELECT
   , coalesce(psai.idx_scan, 0) AS idx_scan
   , coalesce(ut.n_tup_ins, 0) + coalesce(ut.n_tup_upd, 0) + coalesce(ut.n_tup_del, 0) AS table_writes
   , (SELECT stats_reset FROM pg_stat_database WHERE datname = current_database())::timestamptz AS stats_reset
+  -- Counters survive a clean restart, so with no reset recorded the uptime is a lower bound of the window.
   , (
-    SELECT extract(EPOCH FROM (now() - stats_reset))::bigint
+    SELECT extract(EPOCH FROM (now() - coalesce(stats_reset, pg_postmaster_start_time())))::bigint
     FROM pg_stat_database WHERE datname = current_database()
   ) AS stats_age_seconds
 FROM pg_stat_user_indexes AS psai
@@ -1173,7 +1174,10 @@ LEFT JOIN inheritance_info AS ii ON c.oid = ii.child_oid
 WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
-  AND COALESCE(s.n_live_tup, 0) >= 10000000
+  AND COALESCE(s.n_live_tup, 0) >= CASE
+    WHEN ii.parent_table IS NULL THEN 10000000
+    ELSE $1::bigint
+  END
 `
 
 type LargeTablesRow struct {
@@ -1189,11 +1193,11 @@ type LargeTablesRow struct {
 	NTupDel        pgtype.Int8
 }
 
-// Identifies all large tables (>= 10M rows) with partitioning and transient status.
+// Identifies all large tables (>= 10M rows) and large partitions (>= min_partition_rows) with partitioning and transient status.
 // Returns both regular and partitioned tables for unified analysis.
 // Includes activity metrics (inserts/updates/deletes) for activity-aware thresholds.
-func (q *Queries) LargeTables(ctx context.Context) ([]LargeTablesRow, error) {
-	rows, err := q.db.Query(ctx, largeTables)
+func (q *Queries) LargeTables(ctx context.Context, minPartitionRows int64) ([]LargeTablesRow, error) {
+	rows, err := q.db.Query(ctx, largeTables, minPartitionRows)
 	if err != nil {
 		return nil, err
 	}

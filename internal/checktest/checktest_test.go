@@ -69,6 +69,31 @@ func TestAssertSeverityInvariant_Passing(t *testing.T) {
 				},
 			),
 		},
+		{
+			name: "fail row under warn finding keeps report at warn",
+			report: reportWith(check.Finding{
+				ID:       "chronic",
+				Severity: check.SeverityWarn,
+				Table: &check.Table{
+					Headers: []string{"Item"},
+					Rows: []check.TableRow{
+						{Cells: []string{"a"}, Severity: check.SeverityWarn},
+						{Cells: []string{"b"}, Severity: check.SeverityFail},
+					},
+				},
+			}),
+		},
+		{
+			name: "info finding with warn row keeps report at OK",
+			report: reportWith(check.Finding{
+				ID:       "informational",
+				Severity: check.SeverityInfo,
+				Table: &check.Table{
+					Headers: []string{"Item"},
+					Rows:    []check.TableRow{{Cells: []string{"a"}, Severity: check.SeverityWarn}},
+				},
+			}),
+		},
 	}
 
 	for _, tt := range tests {
@@ -96,33 +121,6 @@ func TestSeverityViolations(t *testing.T) {
 			name:   "report severity below max finding severity",
 			report: understatedReport,
 			expect: []string{`report "sample-check" severity is "pass", want "warn"`},
-		},
-		{
-			name: "row severity exceeds its finding",
-			report: reportWith(check.Finding{
-				ID:       "overstated-rows",
-				Severity: check.SeverityWarn,
-				Table: &check.Table{
-					Headers: []string{"Item"},
-					Rows: []check.TableRow{
-						{Cells: []string{"a"}, Severity: check.SeverityWarn},
-						{Cells: []string{"b"}, Severity: check.SeverityFail},
-					},
-				},
-			}),
-			expect: []string{`finding "overstated-rows" row 1 severity "fail" exceeds finding severity "warn"`},
-		},
-		{
-			name: "info finding with warn row",
-			report: reportWith(check.Finding{
-				ID:       "informational",
-				Severity: check.SeverityInfo,
-				Table: &check.Table{
-					Headers: []string{"Item"},
-					Rows:    []check.TableRow{{Cells: []string{"a"}, Severity: check.SeverityWarn}},
-				},
-			}),
-			expect: []string{`finding "informational" row 0 severity "warn" exceeds finding severity "info"`},
 		},
 	}
 

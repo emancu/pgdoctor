@@ -105,7 +105,7 @@ WHERE r.rolcanlogin = true
 | `timeout` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` are a `Too high` WARN | `5000` |
 | `timeout.<role>` | Threshold (ms) for one role, in place of `timeout` | `timeout` |
 
-A role without a `timeout.<role>` key uses `timeout`. A value that is not an integer is ignored. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
+A role without a `timeout.<role>` key uses `timeout`. In a `--config` file, a timeout value that is not an integer is an error. pgdoctor ignores spaces around a role name and empty entries in `roles`. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
 
 ```yaml
 session-settings:

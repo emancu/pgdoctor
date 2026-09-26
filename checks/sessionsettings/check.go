@@ -61,7 +61,11 @@ func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
 	if len(cfg) > 0 && cfg[0] != nil {
 		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
 			if roles, ok := myCfg["roles"]; ok {
-				c.roles = strings.Split(roles, ",")
+				for _, role := range strings.Split(roles, ",") {
+					if role = strings.TrimSpace(role); role != "" {
+						c.roles = append(c.roles, role)
+					}
+				}
 			}
 			if v, ok := myCfg["timeout"]; ok {
 				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -80,6 +84,19 @@ func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
 		}
 	}
 	return c
+}
+
+func ValidateSetting(key, value string) error {
+	switch {
+	case key == "roles":
+		return nil
+	case key == "timeout", strings.HasPrefix(key, "timeout.") && key != "timeout.":
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return fmt.Errorf("%s: %q is not an integer", key, value)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown key %q", key)
 }
 
 func (c *checker) Metadata() check.Metadata {

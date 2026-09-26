@@ -66,15 +66,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	// PostgreSQL versions below 15 are approaching or have reached end of life.
 	// See: https://www.postgresql.org/support/versioning/
 	severity := check.SeverityWarn
+	status := "approaching"
 	if version.Major < 14 {
 		severity = check.SeverityFail
+		status = "past"
 	}
 
 	report.AddFinding(check.Finding{
 		ID:       report.CheckID,
 		Name:     report.Name,
 		Severity: severity,
-		Details:  fmt.Sprintf("Running PostgreSQL %d which is approaching end of life. Upgrade to version 17+ recommended.\n", version.Major),
+		Details:  fmt.Sprintf("Running PostgreSQL %d which is %s end of life. Upgrade to version 17+ recommended.\n", version.Major, status),
 	})
 
 	return report, nil

@@ -92,12 +92,12 @@ func checkAutovacuumScaleFactors(s dbVacuumSettings, report *check.Report) {
 	}
 
 	if analyzeScale > 0.1 {
-		report.AddFinding(check.Finding{Name: "Default autovacuum_analyze_scale_factor",
+		report.AddFinding(check.Finding{Name: "High autovacuum_analyze_scale_factor",
 			ID: "autovacuum_analyze_scale_factor", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("autovacuum_analyze_scale_factor too high: %.2f (recommend 0.05-0.1)", analyzeScale),
 		})
 	} else if analyzeScale < 0.01 {
-		report.AddFinding(check.Finding{Name: "Default autovacuum_analyze_scale_factor",
+		report.AddFinding(check.Finding{Name: "Low autovacuum_analyze_scale_factor",
 			ID: "autovacuum_analyze_scale_factor", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("autovacuum_analyze_scale_factor too low: %.2f (may cause excessive analyze)", analyzeScale),
 		})
@@ -114,12 +114,12 @@ func checkAutovacuumScaleFactors(s dbVacuumSettings, report *check.Report) {
 	}
 
 	if vacuumScale > 0.2 {
-		report.AddFinding(check.Finding{Name: "Default autovacuum_vacuum_scale_factor",
+		report.AddFinding(check.Finding{Name: "High autovacuum_vacuum_scale_factor",
 			ID: "autovacuum_vacuum_scale_factor", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("autovacuum_vacuum_scale_factor too high: %.2f (recommend 0.1-0.2)", vacuumScale),
 		})
 	} else if vacuumScale < 0.02 {
-		report.AddFinding(check.Finding{Name: "Default autovacuum_vacuum_scale_factor",
+		report.AddFinding(check.Finding{Name: "Low autovacuum_vacuum_scale_factor",
 			ID: "autovacuum_vacuum_scale_factor", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("autovacuum_vacuum_scale_factor too low: %.2f (may cause excessive vacuum)", vacuumScale),
 		})
@@ -286,7 +286,7 @@ func checkVacuumCostSettings(s dbVacuumSettings, report *check.Report) {
 	costDelay := s.fetchInt64("vacuum_cost_delay", 2) // PostgreSQL default: 2ms
 
 	if costDelay > 20 {
-		report.AddFinding(check.Finding{Name: "Default vacuum_cost_delay",
+		report.AddFinding(check.Finding{Name: "High vacuum_cost_delay",
 			ID: "vacuum_cost_delay", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("vacuum_cost_delay too high: %dms (may slow vacuum, recommend 0-10ms)", costDelay),
 		})
@@ -296,12 +296,12 @@ func checkVacuumCostSettings(s dbVacuumSettings, report *check.Report) {
 	costLimit := s.fetchInt64("vacuum_cost_limit", 200) // PostgreSQL default: 200
 
 	if costLimit < 200 {
-		report.AddFinding(check.Finding{Name: "Default vacuum_cost_limit",
+		report.AddFinding(check.Finding{Name: "Low vacuum_cost_limit",
 			ID: "vacuum_cost_limit", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("vacuum_cost_limit too low: %d (may slow vacuum, default 200)", costLimit),
 		})
 	} else if costLimit > 10000 {
-		report.AddFinding(check.Finding{Name: "Default vacuum_cost_limit",
+		report.AddFinding(check.Finding{Name: "High vacuum_cost_limit",
 			ID: "vacuum_cost_limit", Severity: check.SeverityWarn,
 			Details: fmt.Sprintf("vacuum_cost_limit very high: %d (may cause I/O spikes)", costLimit),
 		})
