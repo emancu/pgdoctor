@@ -9,18 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/emancu/pgdoctor/check"
-	"github.com/emancu/pgdoctor/checks/partitioning"
-	"github.com/emancu/pgdoctor/checks/sessionsettings"
-	"github.com/emancu/pgdoctor/checks/tablevacuumhealth"
 )
-
-// A check that reads settings must be listed here, or loadConfig rejects
-// every key of that check as unknown.
-var settingValidators = map[string]func(key, value string) error{
-	partitioning.Metadata().CheckID:      partitioning.ValidateSetting,
-	sessionsettings.Metadata().CheckID:   sessionsettings.ValidateSetting,
-	tablevacuumhealth.Metadata().CheckID: tablevacuumhealth.ValidateSetting,
-}
 
 func loadConfig(path string, checks []check.Package) (check.Config, error) {
 	data, err := os.ReadFile(path)
@@ -33,15 +22,16 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
-	known := map[string]struct{}{}
+	known := map[string]func(key, value string) error{}
 	for _, pkg := range checks {
-		known[pkg.Metadata().CheckID] = struct{}{}
+		known[pkg.Metadata().CheckID] = pkg.ValidateSetting
 	}
 
 	cfg := check.Config{}
 	var problems []string
 	for checkID, node := range raw {
-		if _, ok := known[checkID]; !ok {
+		validate, ok := known[checkID]
+		if !ok {
 			problems = append(problems, fmt.Sprintf("unknown check %q", checkID))
 			continue
 		}
@@ -57,8 +47,7 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 				problems = append(problems, fmt.Sprintf("%s.%s: not a scalar value", checkID, key))
 				continue
 			}
-			validate, ok := settingValidators[checkID]
-			if !ok {
+			if validate == nil {
 				problems = append(problems, fmt.Sprintf("%s: unknown key %q", checkID, key))
 				continue
 			}

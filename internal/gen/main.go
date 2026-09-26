@@ -15,8 +15,9 @@ import (
 
 // checkDiscovery represents a discovered check package.
 type checkDiscovery struct {
-	PackageName string // e.g., "pg_version"
-	ImportPath  string // e.g., "github.com/emancu/pgdoctor/checks/pg_version"
+	PackageName        string // e.g., "pg_version"
+	ImportPath         string // e.g., "github.com/emancu/pgdoctor/checks/pg_version"
+	HasValidateSetting bool
 }
 
 func main() {
@@ -96,7 +97,7 @@ func discoverChecks(checksDir string) ([]checkDiscovery, error) {
 		checkPath := filepath.Join(checksDir, packageName)
 
 		// Check if this package has a Metadata() function
-		hasMetadata, err := packageHasMetadata(checkPath)
+		hasMetadata, err := packageHasFunc(checkPath, "Metadata")
 		if err != nil {
 			return nil, fmt.Errorf("checking %s: %w", packageName, err)
 		}
@@ -105,9 +106,15 @@ func discoverChecks(checksDir string) ([]checkDiscovery, error) {
 			continue
 		}
 
+		hasValidateSetting, err := packageHasFunc(checkPath, "ValidateSetting")
+		if err != nil {
+			return nil, fmt.Errorf("checking %s: %w", packageName, err)
+		}
+
 		checks = append(checks, checkDiscovery{
-			PackageName: packageName,
-			ImportPath:  fmt.Sprintf("github.com/emancu/pgdoctor/checks/%s", packageName),
+			PackageName:        packageName,
+			ImportPath:         fmt.Sprintf("github.com/emancu/pgdoctor/checks/%s", packageName),
+			HasValidateSetting: hasValidateSetting,
 		})
 	}
 
@@ -119,8 +126,8 @@ func discoverChecks(checksDir string) ([]checkDiscovery, error) {
 	return checks, nil
 }
 
-// packageHasMetadata checks if a package exports a Metadata() function.
-func packageHasMetadata(pkgPath string) (bool, error) {
+// packageHasFunc checks if a package exports a package-level function with the given name.
+func packageHasFunc(pkgPath, name string) (bool, error) {
 	fset := token.NewFileSet()
 
 	// Parse all .go files in the package (excluding _test.go)
@@ -134,15 +141,13 @@ func packageHasMetadata(pkgPath string) (bool, error) {
 	// Check each package (should only be one non-test package)
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
-			// Look for exported Metadata function
 			for _, decl := range file.Decls {
 				funcDecl, ok := decl.(*ast.FuncDecl)
 				if !ok {
 					continue
 				}
 
-				// Check if function is named "Metadata" and is exported
-				if funcDecl.Name.Name == "Metadata" && funcDecl.Name.IsExported() {
+				if funcDecl.Recv == nil && funcDecl.Name.Name == name {
 					return true, nil
 				}
 			}
@@ -196,6 +201,9 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return {{ .PackageName }}.New(db.New(conn), cfg)
 			},
+{{- if .HasValidateSetting }}
+			ValidateSetting: {{ .PackageName }}.ValidateSetting,
+{{- end }}
 		},
 {{- end }}
 	}
