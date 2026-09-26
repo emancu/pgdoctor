@@ -83,8 +83,8 @@ func withServerVersion(ctx context.Context, conn db.DBTX) context.Context {
 		return ctx
 	}
 
-	var versionNum int
-	if err := conn.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&versionNum); err != nil {
+	version, err := db.New(conn).PGVersion(ctx)
+	if err != nil {
 		return ctx
 	}
 
@@ -92,8 +92,8 @@ func withServerVersion(ctx context.Context, conn db.DBTX) context.Context {
 	if meta != nil {
 		filled = *meta
 	}
-	filled.EngineVersionMajor = versionNum / 10000
-	filled.EngineVersionMinor = versionNum % 10000
+	filled.EngineVersionMajor = int(version.Major)
+	filled.EngineVersionMinor = int(version.Minor)
 	filled.EngineVersion = fmt.Sprintf("%d.%d", filled.EngineVersionMajor, filled.EngineVersionMinor)
 
 	return check.ContextWithInstanceMetadata(ctx, &filled)

@@ -188,7 +188,8 @@ func (r fakeRow) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
-	*dest[0].(*int) = r.versionNum
+	*dest[0].(*int32) = int32(r.versionNum / 10000)
+	*dest[1].(*int32) = int32(r.versionNum % 100)
 	return nil
 }
 
