@@ -29,6 +29,7 @@ func Test_Version(t *testing.T) {
 		Name             string
 		Row              db.PGVersionRow
 		ExpectedSeverity check.Severity
+		ExpectedDetails  string
 	}
 
 	testCases := []testCase{
@@ -36,11 +37,13 @@ func Test_Version(t *testing.T) {
 			Name:             "PG 13 - end of life",
 			Row:              db.PGVersionRow{Major: 13, Minor: 0},
 			ExpectedSeverity: check.SeverityFail,
+			ExpectedDetails:  "PostgreSQL 13 which is past end of life",
 		},
 		{
 			Name:             "PG 14 - approaching EOL",
 			Row:              db.PGVersionRow{Major: 14, Minor: 0},
 			ExpectedSeverity: check.SeverityWarn,
+			ExpectedDetails:  "PostgreSQL 14 which is approaching end of life",
 		},
 		{
 			Name:             "PG 15 - supported",
@@ -72,6 +75,7 @@ func Test_Version(t *testing.T) {
 			results := report.Results
 			require.Equal(t, 1, len(results))
 			require.Equal(t, tc.ExpectedSeverity, results[0].Severity)
+			require.Contains(t, results[0].Details, tc.ExpectedDetails)
 		})
 	}
 }
