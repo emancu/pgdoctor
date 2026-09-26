@@ -67,7 +67,7 @@ pgdoctor always uses a connect timeout. When the DSN sets no positive `connect_t
 | `--preset` | Check preset: `all` (default), `triage` |
 | `--detail` | Detail level: `summary`, `brief` (default), `verbose`, `debug` |
 | `--output` | Output format: `text` (default), `json` |
-| `--hide-passing` | Hide passing checks |
+| `--hide-passing` | Hide checks and findings that passed |
 | `--config` | YAML file with per-check settings, keyed by check ID |
 
 `--only` and `--ignore` accept a check ID with or without its category, so the IDs that `pgdoctor list` prints work as they are: `--only configs/pg-version` is the same as `--only pg-version`.
