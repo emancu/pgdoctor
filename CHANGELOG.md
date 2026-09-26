@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: a `--preset` other than `all` takes precedence over `--only`, so `--preset triage --only indexes` runs the triage checks, not every check. An unknown preset prints a warning that names the valid presets ([#135](https://github.com/emancu/pgdoctor/pull/135)).
 - **`toast-storage`**: `toast-bloat` reads TOAST dead tuples from `pg_stat_all_tables`. `pg_stat_user_tables` excludes `pg_toast`, so the subcheck always reported PASS ([#134](https://github.com/emancu/pgdoctor/pull/134)).
 - **`table-vacuum-health`**: `autovacuum-disabled` reports a table whose `autovacuum_enabled` is `off`, `0`, or any other spelling of false, not only `false` ([#137](https://github.com/emancu/pgdoctor/pull/137)).
+- **`pk-types`**: finds the sequence behind a key by OID, so IDENTITY keys are reported and a sequence with the same name in another schema no longer supplies the value. The query takes about 100 ms at 10,000 tables, where it used to exceed the statement timeout. Breaking for library consumers: `db.InvalidPrimaryKeyTypesRow` fields `TableName`, `ColumnName`, `ColumnType` and `EstimatedRows` are `string`/`int64` instead of `pgtype` values ([#136](https://github.com/emancu/pgdoctor/pull/136)).
 
 ## [0.5.0] - 2026-08-14
 
