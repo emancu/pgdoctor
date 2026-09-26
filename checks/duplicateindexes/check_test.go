@@ -181,8 +181,9 @@ func Test_DuplicateIndexes_ExactDuplicates(t *testing.T) {
 	require.NotNil(t, exactDuplicateResult, "Should have exact-duplicates finding")
 	require.Equal(t, check.SeverityWarn, exactDuplicateResult.Severity)
 	require.Contains(t, exactDuplicateResult.Details, "2 exact duplicate")
-	require.Contains(t, exactDuplicateResult.Details, "users")
-	require.Contains(t, exactDuplicateResult.Details, "idx_users_email")
+	require.Equal(t, []string{"Table", "Index", "Duplicate Of", "Total Size"}, exactDuplicateResult.Table.Headers)
+	require.Len(t, exactDuplicateResult.Table.Rows, 2)
+	require.Equal(t, []string{"users", "idx_users_email", "idx_users_email_dup", "20.0MiB"}, exactDuplicateResult.Table.Rows[0].Cells)
 }
 
 func Test_DuplicateIndexes_PrefixDuplicates(t *testing.T) {
@@ -215,8 +216,8 @@ func Test_DuplicateIndexes_PrefixDuplicates(t *testing.T) {
 
 	require.NotNil(t, prefixDuplicateResult, "Should have prefix-duplicates finding")
 	require.Contains(t, prefixDuplicateResult.Details, "prefix duplicate")
-	require.Contains(t, prefixDuplicateResult.Details, "idx_orders_user")
-	require.Contains(t, prefixDuplicateResult.Details, "idx_orders_user_created")
+	require.Equal(t, []string{"Table", "Index", "Prefix Of", "Size"}, prefixDuplicateResult.Table.Headers)
+	require.Equal(t, []string{"orders", "idx_orders_user", "idx_orders_user_created", "20.0MiB"}, prefixDuplicateResult.Table.Rows[0].Cells)
 }
 
 func Test_DuplicateIndexes_PrefixSizeThreshold(t *testing.T) {
@@ -310,10 +311,10 @@ func Test_DuplicateIndexes_SizeFormatting(t *testing.T) {
 	}
 
 	require.NotNil(t, exactResult)
-	require.Contains(t, exactResult.Details, "200.0 MB", "Should format total size as MB")
+	require.Equal(t, "200.0MiB", exactResult.Table.Rows[0].Cells[3])
 }
 
-func Test_DuplicateIndexes_TruncationMessage(t *testing.T) {
+func Test_DuplicateIndexes_ListsEveryPair(t *testing.T) {
 	t.Parallel()
 
 	rows := make([]db.DuplicateIndexesRow, 15)
@@ -343,7 +344,8 @@ func Test_DuplicateIndexes_TruncationMessage(t *testing.T) {
 	}
 
 	require.NotNil(t, exactResult)
-	require.Contains(t, exactResult.Details, "... and 5 more", "Should show truncation message")
+	require.Equal(t, "Found 15 exact duplicate index pairs", exactResult.Details)
+	require.Len(t, exactResult.Table.Rows, 15)
 }
 
 func Test_DuplicateIndexes_QueryError(t *testing.T) {
