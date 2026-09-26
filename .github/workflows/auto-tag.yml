@@ -36,7 +36,8 @@ jobs:
       - uses: actions/setup-go@v7
         if: steps.check.outputs.exists == 'false'
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
 
       - name: Create and push tag
         if: steps.check.outputs.exists == 'false'
