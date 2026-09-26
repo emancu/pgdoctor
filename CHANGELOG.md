@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`duplicate-indexes`**, **`table-seq-scans`**: findings list every object in a table instead of at most 10 objects in `Details`. `Details` keeps the count. A `prefix-duplicates` row above 100 MiB is FAIL ([#161](https://github.com/emancu/pgdoctor/pull/161)).
 - **`toast-storage`**: breaking — the finding that reports no significant TOAST storage is renamed from `toast-storage` to `toast-usage` ("TOAST Usage"), so the text output prints the check header once ([#152](https://github.com/emancu/pgdoctor/pull/152)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding. The row color is only a visual signal, and the finding severity alone drives the report severity ([#142](https://github.com/emancu/pgdoctor/pull/142)).
+- **CLI**: breaking — counts print billions as `G` (`2.1G`), because `B` means bytes. Byte values in prose use IEC units, a missing table cell shows `-`, `sequence-health` prints schema-qualified names, and the summary line uses correct plurals ([#162](https://github.com/emancu/pgdoctor/pull/162)).
 
 ### Fixed
 
