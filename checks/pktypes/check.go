@@ -60,8 +60,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	if len(rows) == 0 {
 		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
+			ID:       "int-primary-keys",
+			Name:     "Integer Primary Keys",
 			Severity: check.SeverityPass,
 			Details:  "All tables use bigint or UUID primary keys",
 		})
@@ -100,15 +100,15 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
+			ID:       "int-primary-keys",
+			Name:     "Integer Primary Keys",
 			Severity: check.SeverityPass,
 			Details:  "All tables use bigint or UUID primary keys",
 		})
 	} else {
 		report.AddFinding(check.Finding{
-			ID:       report.CheckID,
-			Name:     report.Name,
+			ID:       "int-primary-keys",
+			Name:     "Integer Primary Keys",
 			Severity: maxSeverity,
 			Details:  formatDetails(criticalCount, warningCount),
 			Table: &check.Table{

@@ -229,6 +229,7 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 			checktest.AssertSeverityInvariant(t, report)
 			assert.Equal(t, tt.severity, report.Severity)
 			require.Len(t, report.Results, 2)
+			assert.Equal(t, "int-primary-keys", report.Results[0].ID)
 			info := report.Results[1]
 			assert.Equal(t, "unreadable-sequences", info.ID)
 			assert.Equal(t, check.SeverityInfo, info.Severity)

@@ -73,7 +73,7 @@ From the Database Architecture Guidelines:
 
 ## How to Fix
 
-### For `pk-types`
+### For `int-primary-keys`
 
 All tables with int4/int2 primary keys must be migrated to bigint or UUID.
 
