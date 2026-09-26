@@ -224,26 +224,30 @@ func Test_DuplicateIndexes_PrefixSizeThreshold(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
-		Name             string
-		SizeA            int64
-		ExpectedSeverity check.Severity
+		Name                string
+		SizeA               int64
+		ExpectedSeverity    check.Severity
+		ExpectedRowSeverity check.Severity
 	}
 
 	testCases := []testCase{
 		{
-			Name:             "small prefix duplicate (<100MB) - WARN",
-			SizeA:            52428800,
-			ExpectedSeverity: check.SeverityWarn,
+			Name:                "small prefix duplicate (<100MB) - WARN row",
+			SizeA:               52428800,
+			ExpectedSeverity:    check.SeverityWarn,
+			ExpectedRowSeverity: check.SeverityWarn,
 		},
 		{
-			Name:             "large prefix duplicate (>100MB) - FAIL",
-			SizeA:            157286400,
-			ExpectedSeverity: check.SeverityWarn,
+			Name:                "large prefix duplicate (>100MB) - FAIL row",
+			SizeA:               157286400,
+			ExpectedSeverity:    check.SeverityWarn,
+			ExpectedRowSeverity: check.SeverityFail,
 		},
 		{
-			Name:             "exactly 100MB threshold",
-			SizeA:            104857600,
-			ExpectedSeverity: check.SeverityWarn,
+			Name:                "exactly 100MB threshold",
+			SizeA:               104857600,
+			ExpectedSeverity:    check.SeverityWarn,
+			ExpectedRowSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -278,6 +282,7 @@ func Test_DuplicateIndexes_PrefixSizeThreshold(t *testing.T) {
 
 			require.NotNil(t, prefixResult)
 			require.Equal(t, tc.ExpectedSeverity, prefixResult.Severity)
+			require.Equal(t, tc.ExpectedRowSeverity, prefixResult.Table.Rows[0].Severity)
 		})
 	}
 }

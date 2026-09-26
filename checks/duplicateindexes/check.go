@@ -114,8 +114,6 @@ func checkExactDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
 
 func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) {
 	var tableRows []check.TableRow
-	failCount := 0
-	warnCount := 0
 
 	for _, row := range rows {
 		if row.DuplicateType.String != "prefix" {
@@ -123,12 +121,9 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 		}
 
 		sizeMB := float64(row.SizeA.Int64) / (1024 * 1024)
-		isLarge := sizeMB > prefixLargeSizeThresholdMB
-
-		if isLarge {
-			failCount++
-		} else {
-			warnCount++
+		rowSeverity := check.SeverityWarn
+		if sizeMB > prefixLargeSizeThresholdMB {
+			rowSeverity = check.SeverityFail
 		}
 
 		tableRows = append(tableRows, check.TableRow{
@@ -138,12 +133,11 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 				row.IndexNameB.String,
 				check.FormatBytes(row.SizeA.Int64),
 			},
-			Severity: check.SeverityWarn,
+			Severity: rowSeverity,
 		})
 	}
 
-	totalIssues := failCount + warnCount
-	if totalIssues == 0 {
+	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
 			ID:       "prefix-duplicates",
 			Name:     "Prefix Duplicate Indexes",
@@ -156,7 +150,7 @@ func checkPrefixDuplicates(rows []db.DuplicateIndexesRow, report *check.Report) 
 		ID:       "prefix-duplicates",
 		Name:     "Prefix Duplicate Indexes",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d prefix duplicate indexes", totalIssues),
+		Details:  fmt.Sprintf("Found %d prefix duplicate indexes", len(tableRows)),
 		Table: &check.Table{
 			Headers: []string{"Table", "Index", "Prefix Of", "Size"},
 			Rows:    tableRows,
