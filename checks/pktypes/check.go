@@ -60,8 +60,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	if len(rows) == 0 {
 		report.AddFinding(check.Finding{
-			ID:       "int-primary-keys",
-			Name:     "Integer Primary Keys",
+			ID:       report.CheckID,
+			Name:     report.Name,
 			Severity: check.SeverityPass,
 			Details:  "All tables use bigint or UUID primary keys",
 		})
@@ -100,17 +100,17 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	if len(tableRows) == 0 {
 		report.AddFinding(check.Finding{
-			ID:       "int-primary-keys",
-			Name:     "Integer Primary Keys",
+			ID:       report.CheckID,
+			Name:     report.Name,
 			Severity: check.SeverityPass,
-			Details:  "All tables use bigint or UUID primary keys",
+			Details:  withUnreadableNote("All tables use bigint or UUID primary keys", unreadableCount),
 		})
 	} else {
 		report.AddFinding(check.Finding{
-			ID:       "int-primary-keys",
-			Name:     "Integer Primary Keys",
+			ID:       report.CheckID,
+			Name:     report.Name,
 			Severity: maxSeverity,
-			Details:  formatDetails(criticalCount, warningCount),
+			Details:  withUnreadableNote(formatDetails(criticalCount, warningCount), unreadableCount),
 			Table: &check.Table{
 				Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
 				Rows:    tableRows,
@@ -118,17 +118,15 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		})
 	}
 
-	if unreadableCount > 0 {
-		report.AddFinding(check.Finding{
-			ID:       "unreadable-sequences",
-			Name:     "Unreadable Sequences",
-			Severity: check.SeverityInfo,
-			Details: fmt.Sprintf("%d table(s) use the row estimate: role cannot read sequence values (needs SELECT on the sequences)",
-				unreadableCount),
-		})
-	}
-
 	return report, nil
+}
+
+func withUnreadableNote(details string, unreadableCount int) string {
+	if unreadableCount == 0 {
+		return details
+	}
+	return fmt.Sprintf("%s\n%d table(s) use the row estimate: role cannot read sequence values (needs SELECT on the sequences)",
+		details, unreadableCount)
 }
 
 type tableEntry struct {
