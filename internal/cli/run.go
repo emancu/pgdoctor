@@ -94,15 +94,7 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			allChecks := pgdoctor.AllChecks()
 
-			// Apply preset filter
-			if opts.preset != presetAll {
-				presetChecks := getPresetChecks(opts.preset)
-				if len(opts.only) == 0 {
-					opts.only = presetChecks
-				} else {
-					opts.only = intersect(opts.only, presetChecks)
-				}
-			}
+			opts.only = applyPreset(os.Stderr, opts.preset, opts.only)
 
 			// Validate and apply filters
 			validOnly, invalidOnly := pgdoctor.ValidateFilters(allChecks, opts.only)
