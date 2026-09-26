@@ -292,7 +292,7 @@ All queries must be production-safe: read-only, no locks, < 1 second execution.
 
 - **CheckID**: kebab-case (`pg-version`, `invalid-indexes`)
 - **Directory**: single word or concatenated (`pgversion`, `invalidindexes`)
-- **Finding ID**: kebab-case for subchecks (`index-timestamp`, `single-table`)
+- **Finding ID**: kebab-case for subchecks (`index-timestamp`, `single-table`). Exception: a finding about one GUC uses the GUC name as its ID (`work_mem`, `autovacuum_max_workers`), so an operator can find the setting in `postgresql.conf` with the same string
 - **Consistency**: American English (`indexes` not `indices`)
 
 ### Categories
