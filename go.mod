@@ -2,7 +2,7 @@ module github.com/emancu/pgdoctor
 
 go 1.25.0
 
-toolchain go1.27.1
+toolchain go1.26.8
 
 require (
 	github.com/charmbracelet/glamour v1.0.0
