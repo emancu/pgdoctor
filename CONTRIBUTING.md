@@ -36,7 +36,7 @@ Create `checks/mycheck/README.md` covering what the check validates, why it matt
 
 Create `checks/mycheck/check.go`. Each check package exports:
 - `Metadata()` returning `check.Metadata`
-- `New(queryer)` returning `check.Checker`
+- `New(queryer, ...check.Config)` returning `check.Checker`
 
 See any existing check (e.g., `checks/pgversion/`) for the full pattern.
 

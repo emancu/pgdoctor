@@ -114,7 +114,7 @@ func Metadata() check.Metadata {
 }
 
 // New creates a new checker.
-func New(queryer MyQueryQueries) check.Checker {
+func New(queryer MyQueryQueries, _ ...check.Config) check.Checker {
     return &checker{
         queryer: queryer,
     }
