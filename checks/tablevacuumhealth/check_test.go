@@ -43,17 +43,19 @@ type rowBuilder struct {
 func makeRow(tableName string) *rowBuilder {
 	return &rowBuilder{
 		row: db.TableVacuumHealthRow{
-			TableName:        pgtype.Text{String: tableName, Valid: true},
-			EstimatedRows:    pgtype.Int8{Int64: 0, Valid: true},
-			TableSizeBytes:   pgtype.Int8{Int64: 0, Valid: true},
-			NDeadTup:         pgtype.Int8{Int64: 0, Valid: true},
-			VacuumCount:      pgtype.Int8{Int64: 0, Valid: true},
-			AutovacuumCount:  pgtype.Int8{Int64: 0, Valid: true},
-			Reloptions:       pgtype.Text{String: "", Valid: false},
-			NModSinceAnalyze: pgtype.Int8{Int64: 0, Valid: true},
-			AnalyzeCount:     pgtype.Int8{Int64: 0, Valid: true},
-			AutoanalyzeCount: pgtype.Int8{Int64: 0, Valid: true},
-			NInsSinceVacuum:  pgtype.Int8{Int64: 0, Valid: true},
+			TableName:         pgtype.Text{String: tableName, Valid: true},
+			EstimatedRows:     pgtype.Int8{Int64: 0, Valid: true},
+			TableSizeBytes:    pgtype.Int8{Int64: 0, Valid: true},
+			NDeadTup:          pgtype.Int8{Int64: 0, Valid: true},
+			VacuumCount:       pgtype.Int8{Int64: 0, Valid: true},
+			AutovacuumCount:   pgtype.Int8{Int64: 0, Valid: true},
+			Reloptions:        pgtype.Text{String: "", Valid: false},
+			NModSinceAnalyze:  pgtype.Int8{Int64: 0, Valid: true},
+			AnalyzeCount:      pgtype.Int8{Int64: 0, Valid: true},
+			AutoanalyzeCount:  pgtype.Int8{Int64: 0, Valid: true},
+			NInsSinceVacuum:   pgtype.Int8{Int64: 0, Valid: true},
+			VacuumScaleFactor: pgtype.Float8{Float64: 0.2, Valid: true},
+			VacuumTrigger:     pgtype.Int8{Int64: 50, Valid: true},
 		},
 	}
 }
@@ -75,6 +77,16 @@ func (b *rowBuilder) withDeadTuples(deadTup int64) *rowBuilder {
 
 func (b *rowBuilder) withReloptions(reloptions string) *rowBuilder {
 	b.row.Reloptions = pgtype.Text{String: reloptions, Valid: reloptions != ""}
+	return b
+}
+
+func (b *rowBuilder) withScaleFactor(scaleFactor float64) *rowBuilder {
+	b.row.VacuumScaleFactor = pgtype.Float8{Float64: scaleFactor, Valid: true}
+	return b
+}
+
+func (b *rowBuilder) withTrigger(trigger int64) *rowBuilder {
+	b.row.VacuumTrigger = pgtype.Int8{Int64: trigger, Valid: true}
 	return b
 }
 
@@ -394,6 +406,16 @@ func TestTableVacuumHealth_LargeTableDefaults_Detection(t *testing.T) {
 			row:    makeRow("public.partial").withRows(5_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAge(recent).build(),
 			listed: true,
 		},
+		{
+			name:   "tuned global scale factor is ignored",
+			row:    makeRow("public.global").withRows(5_000_000).withScaleFactor(0.05).withLastVacuumAge(recent).build(),
+			listed: false,
+		},
+		{
+			name:   "global scale factor above the default is listed",
+			row:    makeRow("public.lax").withRows(5_000_000).withScaleFactor(0.3).withLastVacuumAge(recent).build(),
+			listed: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -413,25 +435,18 @@ func TestTableVacuumHealth_LargeTableDefaults_Detection(t *testing.T) {
 	}
 }
 
-func TestTableVacuumHealth_LargeTableDefaults_TriggerAtMath(t *testing.T) {
+func TestTableVacuumHealth_LargeTableDefaults_TriggerAndPending(t *testing.T) {
 	t.Parallel()
 
-	// trigger = 0.2 * rows + 50. Custom threshold does not change the default formula.
+	// Inserts have their own autovacuum trigger, so they are not pending against the dead-tuple trigger.
 	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
-		makeRow("public.a").withRows(2_000_000).withDeadTuples(300_000).withInsSinceVacuum(50_000).withLastVacuumAge(recent).build(),
-		makeRow("public.b").withRows(1_000_000).withReloptions("autovacuum_vacuum_threshold=1000").withLastVacuumAge(recent).build(),
+		makeRow("public.a").withRows(2_000_000).withTrigger(401_000).withDeadTuples(300_000).withInsSinceVacuum(150_000).withLastVacuumAge(recent).build(),
 	})
 
-	byName := map[string]check.TableRow{}
-	for _, r := range finding.Table.Rows {
-		byName[r.Cells[0]] = r
-	}
-
-	// 0.2*2M+50 = 400050 -> "400.1K"; pending 300K+50K = 350K -> "350.0K".
-	assert.Equal(t, "400.1K", byName["public.a"].Cells[ltdTriggerAt])
-	assert.Equal(t, "350.0K", byName["public.a"].Cells[ltdPending])
-	// 0.2*1M+50 = 200050 -> "200.1K".
-	assert.Equal(t, "200.1K", byName["public.b"].Cells[ltdTriggerAt])
+	require.Len(t, finding.Table.Rows, 1)
+	assert.Equal(t, "401.0K", finding.Table.Rows[0].Cells[ltdTriggerAt])
+	assert.Equal(t, "300.0K", finding.Table.Rows[0].Cells[ltdPending])
+	assert.NotEqual(t, "overdue", finding.Table.Rows[0].Cells[ltdEstNext])
 }
 
 func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
@@ -444,14 +459,12 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
 	}{
 		{
 			name: "overdue when pending crosses trigger",
-			// trigger 200050, pending 250000 >= trigger.
-			row:  makeRow("public.over").withRows(1_000_000).withDeadTuples(250_000).withLastVacuumAge(recent).build(),
+			row:  makeRow("public.over").withRows(1_000_000).withTrigger(200_050).withDeadTuples(250_000).withLastVacuumAge(recent).build(),
 			want: "overdue",
 		},
 		{
 			name: "never vacuumed has no rate",
-			// pending below trigger, no last-vacuum timestamp.
-			row:  makeRow("public.new").withRows(2_000_000).withDeadTuples(100_000).build(),
+			row:  makeRow("public.new").withRows(2_000_000).withTrigger(400_050).withDeadTuples(100_000).build(),
 			want: noEstimate,
 		},
 		{
@@ -475,9 +488,9 @@ func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum(t *testing.T) {
 func TestTableVacuumHealth_LargeTableDefaults_EstNextVacuum_DaysEstimate(t *testing.T) {
 	t.Parallel()
 
-	// trigger 2,000,050; pending 100K accrued over 10 days -> a coarse day estimate.
+	// Pending 100K accrued over 10 days -> a coarse day estimate.
 	finding := largeTableFinding(t, []db.TableVacuumHealthRow{
-		makeRow("public.slow").withRows(10_000_000).withDeadTuples(100_000).withLastVacuumAge(staleWarn).build(),
+		makeRow("public.slow").withRows(10_000_000).withTrigger(2_000_050).withDeadTuples(100_000).withLastVacuumAge(staleWarn).build(),
 	})
 
 	require.Len(t, finding.Table.Rows, 1)

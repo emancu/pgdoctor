@@ -33,7 +33,6 @@ const (
 	largeTableMinRows = 1_000_000
 
 	defaultVacuumScaleFactor = 0.2
-	defaultVacuumThreshold   = 50
 
 	secondsPerDay = 24 * 60 * 60
 	secondsPerHr  = 60 * 60
@@ -176,11 +175,13 @@ type largeDefaultEntry struct {
 func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Report) {
 	var entries []largeDefaultEntry
 	for _, row := range rows {
-		if row.EstimatedRows.Int64 >= largeTableMinRows && isUsingDefaultSettings(row.Reloptions.String) {
+		if row.EstimatedRows.Int64 >= largeTableMinRows &&
+			isUsingDefaultSettings(row.Reloptions.String) &&
+			row.VacuumScaleFactor.Float64 >= defaultVacuumScaleFactor {
 			entries = append(entries, largeDefaultEntry{
 				row:     row,
-				trigger: defaultVacuumTrigger(row.EstimatedRows.Int64),
-				pending: row.NDeadTup.Int64 + row.NInsSinceVacuum.Int64,
+				trigger: row.VacuumTrigger.Int64,
+				pending: row.NDeadTup.Int64,
 			})
 		}
 	}
@@ -224,11 +225,6 @@ func checkLargeTableDefaults(rows []db.TableVacuumHealthRow, report *check.Repor
 			Rows:    tableRows,
 		},
 	})
-}
-
-// defaultVacuumTrigger is the dead-tuple count default autovacuum waits for.
-func defaultVacuumTrigger(estimatedRows int64) int64 {
-	return int64(defaultVacuumScaleFactor*float64(estimatedRows)) + defaultVacuumThreshold
 }
 
 // estNextVacuum assumes dead tuples keep accumulating at their post-vacuum rate.

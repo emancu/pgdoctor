@@ -21,6 +21,12 @@ SELECT
     FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
     WHERE o.option_name = 'autovacuum_enabled' AND NOT o.option_value::boolean
   ) AS autovacuum_disabled
+  , av.scale_factor AS vacuum_scale_factor
+  -- autovacuum_vacuum_max_threshold is PG18+; -1 disables the cap.
+  , LEAST(
+    av.threshold + av.scale_factor * GREATEST(c.reltuples, 0)
+    , NULLIF(av.max_threshold, -1)
+  )::bigint AS vacuum_trigger
   -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
@@ -39,6 +45,22 @@ LEFT JOIN LATERAL (
   INNER JOIN pg_class AS ic ON ic.oid = x.indexrelid
   WHERE x.indrelid IN (c.oid, c.reltoastrelid)
 ) AS i ON TRUE
+LEFT JOIN LATERAL (
+  SELECT
+    COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_scale_factor')
+      , CURRENT_SETTING('autovacuum_vacuum_scale_factor')
+    )::float8 AS scale_factor
+    , COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_threshold')
+      , CURRENT_SETTING('autovacuum_vacuum_threshold')
+    )::bigint AS threshold
+    , COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_max_threshold')
+      , CURRENT_SETTING('autovacuum_vacuum_max_threshold', TRUE)
+    )::bigint AS max_threshold
+  FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
+) AS av ON TRUE
 WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')

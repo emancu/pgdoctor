@@ -24,7 +24,7 @@ To stop the report of a table that has autovacuum disabled on purpose, use the `
 
 ### large-table-defaults
 
-Identifies tables with more than 1 million rows using default autovacuum scale factors.
+Identifies tables with more than 1 million rows that have no per-table `autovacuum_vacuum_scale_factor`, when the server value is the default (0.2) or higher.
 
 The default `autovacuum_vacuum_scale_factor` is 0.2 (20%), meaning autovacuum triggers when dead tuples exceed 20% of the table size:
 
