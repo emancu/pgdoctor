@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: `--only` and `--ignore` accept the `category/check-id` form that `pgdoctor list` prints. Before, `--only configs/pg-version` ran the whole `configs` category ([#140](https://github.com/emancu/pgdoctor/pull/140)).
 - **CLI**: `connection-efficiency` no longer reports SKIP ("Server version unknown") on every standalone run, and `replication-slots` runs the query for the server version ([#131](https://github.com/emancu/pgdoctor/pull/131)).
 - **`vacuum-settings`**: `maintenance_work_mem` no longer reports a FAIL with a `+Inf%` budget when the metadata has no memory size ([#131](https://github.com/emancu/pgdoctor/pull/131)).
+- **`replication-slots`**: an inactive slot also appears in `critical-lag` (FAIL) or `high-lag` (WARN) when its WAL lag reaches the threshold, not only in `inactive-slots` ([#147](https://github.com/emancu/pgdoctor/pull/147)).
 
 ## [0.5.0] - 2026-08-14
 
