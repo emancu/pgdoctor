@@ -118,14 +118,13 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 |-------|-------------|
 | `pg-version` | PostgreSQL version support status |
 | `session-settings` | Role-level timeout and logging configurations |
-| `vacuum-settings` | Autovacuum, maintenance memory, and vacuum cost settings |
 | `replication-slots` | Replication slot configuration and health |
 | `connection-health` | Connection pool saturation, idle ratios, stuck transactions |
 | `connection-efficiency` | Session statistics for connection pool efficiency (PG 14+) |
-| `replication-lag` | Active replication stream lag |
 | `temp-usage` | Temporary file creation indicating `work_mem` exhaustion |
 | `db-statistics` | Statistics maturity for usage-based analysis |
 | `query-stats-capacity` | `pg_stat_statements` entry usage and eviction rate |
+| `extension-versions` | Installed extension versions no longer supported upstream |
 
 ### indexes
 | Check | Description |
@@ -141,13 +140,13 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `freeze-age` | Transaction ID age approaching wraparound |
 | `table-bloat` | Dead tuple percentages indicating vacuum issues |
 | `table-vacuum-health` | Per-table autovacuum configuration and activity |
+| `vacuum-settings` | Autovacuum, maintenance memory, and vacuum cost settings |
 
 ### schema
 | Check | Description |
 |-------|-------------|
 | `pk-types` | Primary keys using bigint or UUID for growth capacity |
 | `uuid-types` | UUID columns using native `uuid` type vs varchar/text |
-| `uuid-defaults` | UUID columns using v4 random defaults (B-tree bloat) |
 | `sequence-health` | Sequences approaching exhaustion |
 | `toast-storage` | TOAST storage usage optimization |
 | `partitioning` | Large/transient tables needing partitioning |
@@ -159,6 +158,8 @@ pgdoctor completion bash > /etc/bash_completion.d/pgdoctor
 | `table-seq-scans` | Tables with excessive sequential scans |
 | `partition-usage` | Queries not using partition keys |
 | `table-activity` | Table write activity and HOT update efficiency |
+| `replication-lag` | Active replication stream lag |
+| `uuid-defaults` | UUID columns using v4 random defaults (B-tree bloat) |
 
 ## Using as a Library
 
@@ -172,6 +173,7 @@ import (
     "fmt"
 
     "github.com/emancu/pgdoctor"
+    "github.com/emancu/pgdoctor/check"
     "github.com/jackc/pgx/v5"
 )
 
@@ -181,6 +183,7 @@ func main() {
     defer conn.Close(ctx)
 
     pgdoctor.Run(ctx, conn, pgdoctor.Options{
+        Checks: pgdoctor.AllChecks(),
         OnReport: func(report *check.Report) {
             fmt.Printf("[%s] %s\n", report.CheckID, report.Name)
         },

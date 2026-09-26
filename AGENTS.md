@@ -37,7 +37,7 @@ type Checker interface {
 
 Each check package exports:
 - `Metadata()` function returning `check.Metadata`
-- `New(queryer)` constructor returning `check.Checker`
+- `New(queryer, ...check.Config)` constructor returning `check.Checker`. The generated registry passes the per-check config; a check that has no settings names it `_`.
 
 ### Check Structure
 
@@ -93,7 +93,7 @@ func Metadata() check.Metadata {
     }
 }
 
-func New(queryer MyQueryQueries) check.Checker {
+func New(queryer MyQueryQueries, _ ...check.Config) check.Checker {
     return &checker{queryer: queryer}
 }
 
@@ -296,6 +296,8 @@ Five categories:
 - `check.SeverityFail` - Issue found, urgent action required
 
 Report severity is automatically the maximum across all findings. `SeverityInfo` and `SeveritySkip` are ordered below `SeverityPass` so they don't affect severity comparisons.
+
+A `TableRow` can have a higher severity than its finding. A FAIL row under a WARN finding is intentional: the row color draws the eye to the worst object, and the finding severity, which drives the report severity and the exit code, stays at the level the check intends. Only the finding severity counts. Row severities never escalate the report.
 
 ### Presets
 
