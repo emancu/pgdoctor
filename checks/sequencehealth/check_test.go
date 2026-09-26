@@ -8,6 +8,7 @@ import (
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/sequencehealth"
 	"github.com/emancu/pgdoctor/db"
+	"github.com/emancu/pgdoctor/internal/checktest"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -104,6 +105,78 @@ func TestSequenceHealth_AllHealthy(t *testing.T) {
 	// All three subchecks should be OK
 	for _, finding := range report.Results {
 		require.Equal(t, check.SeverityPass, finding.Severity)
+	}
+}
+
+func unreadableRow(seqName, tableName string) db.SequenceHealthRow {
+	return db.SequenceHealthRow{
+		SchemaName:   pgtype.Text{String: "public", Valid: true},
+		SequenceName: pgtype.Text{String: seqName, Valid: true},
+		SeqDataType:  pgtype.Text{String: "integer", Valid: true},
+		MaxValue:     pgtype.Int8{Int64: 2147483647, Valid: true},
+		IncrementBy:  pgtype.Int8{Int64: 1, Valid: true},
+		IsCyclic:     pgtype.Bool{Bool: false, Valid: true},
+		IsUnreadable: pgtype.Bool{Bool: true, Valid: true},
+		TableName:    pgtype.Text{String: tableName, Valid: true},
+		ColumnName:   pgtype.Text{String: "id", Valid: true},
+		ColumnType:   pgtype.Text{String: "integer", Valid: true},
+	}
+}
+
+func TestSequenceHealth_UnreadableSequences(t *testing.T) {
+	t.Parallel()
+
+	critical := makeSequenceRow(
+		"public", "orders_id_seq", "integer", "orders", "id", "integer",
+		1932735283, 2147483647, 1, 214748364, 2147483647,
+		90.0, false, false, true, true, 2,
+	)
+
+	tests := []struct {
+		name         string
+		rows         []db.SequenceHealthRow
+		severity     check.Severity
+		findingIDs   []string
+		wantInfoText string
+	}{
+		{
+			name:       "all unreadable - SKIP",
+			rows:       []db.SequenceHealthRow{unreadableRow("a_id_seq", "a"), unreadableRow("b_id_seq", "b")},
+			severity:   check.SeveritySkip,
+			findingIDs: []string{"sequence-health"},
+		},
+		{
+			name:         "some unreadable - readable ones evaluated plus INFO",
+			rows:         []db.SequenceHealthRow{critical, unreadableRow("a_id_seq", "a"), unreadableRow("b_id_seq", "b")},
+			severity:     check.SeverityFail,
+			findingIDs:   []string{findingIDNearExhaustion, findingIDIntegerColumns, findingIDTypeMismatch, "unreadable-sequences"},
+			wantInfoText: "2 sequence(s) not evaluated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			report, err := sequencehealth.New(&mockQueryer{rows: tt.rows}).Check(context.Background())
+
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+			assert.Equal(t, tt.severity, report.Severity)
+
+			var ids []string
+			for _, finding := range report.Results {
+				ids = append(ids, finding.ID)
+			}
+			assert.Equal(t, tt.findingIDs, ids)
+
+			last := report.Results[len(report.Results)-1]
+			assert.Contains(t, last.Details, "role cannot read sequence values (needs SELECT on the sequences)")
+			if tt.wantInfoText != "" {
+				assert.Equal(t, check.SeverityInfo, last.Severity)
+				assert.Contains(t, last.Details, tt.wantInfoText)
+			}
+		})
 	}
 }
 

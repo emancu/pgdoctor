@@ -72,8 +72,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	maxSeverity := check.SeverityWarn
 	criticalCount := 0
 	warningCount := 0
+	unreadableCount := 0
 
 	for _, row := range rows {
+		if row.SequenceUnreadable.Bool {
+			unreadableCount++
+		}
+
 		entry := analyzeRow(row)
 		if entry.usagePct < usagePercentFloor {
 			continue
@@ -100,19 +105,28 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			Severity: check.SeverityPass,
 			Details:  "All tables use bigint or UUID primary keys",
 		})
-		return report, nil
+	} else {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: maxSeverity,
+			Details:  formatDetails(criticalCount, warningCount),
+			Table: &check.Table{
+				Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
+				Rows:    tableRows,
+			},
+		})
 	}
 
-	report.AddFinding(check.Finding{
-		ID:       report.CheckID,
-		Name:     report.Name,
-		Severity: maxSeverity,
-		Details:  formatDetails(criticalCount, warningCount),
-		Table: &check.Table{
-			Headers: []string{"Table", "Column", "Type", "Usage %", "Rows"},
-			Rows:    tableRows,
-		},
-	})
+	if unreadableCount > 0 {
+		report.AddFinding(check.Finding{
+			ID:       "unreadable-sequences",
+			Name:     "Unreadable Sequences",
+			Severity: check.SeverityInfo,
+			Details: fmt.Sprintf("%d table(s) use the row estimate: role cannot read sequence values (needs SELECT on the sequences)",
+				unreadableCount),
+		})
+	}
 
 	return report, nil
 }

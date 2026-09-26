@@ -24,6 +24,8 @@ type checker struct {
 	queries SequenceHealthQueries
 }
 
+const unreadableReason = "role cannot read sequence values (needs SELECT on the sequences)"
+
 func Metadata() check.Metadata {
 	return check.Metadata{
 		Category:    check.CategorySchema,
@@ -62,9 +64,36 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	checkNearExhaustion(rows, report)
-	checkIntegerShouldBeBigint(rows, report)
+	var readable []db.SequenceHealthRow
+	for _, row := range rows {
+		if !row.IsUnreadable.Bool {
+			readable = append(readable, row)
+		}
+	}
+
+	if len(readable) == 0 {
+		report.AddFinding(check.Finding{
+			ID:       report.CheckID,
+			Name:     report.Name,
+			Severity: check.SeveritySkip,
+			Details:  unreadableReason,
+		})
+		report.Severity = check.SeveritySkip
+		return report, nil
+	}
+
+	checkNearExhaustion(readable, report)
+	checkIntegerShouldBeBigint(readable, report)
 	checkSequenceTypeMismatch(rows, report)
+
+	if unreadable := len(rows) - len(readable); unreadable > 0 {
+		report.AddFinding(check.Finding{
+			ID:       "unreadable-sequences",
+			Name:     "Unreadable Sequences",
+			Severity: check.SeverityInfo,
+			Details:  fmt.Sprintf("%d sequence(s) not evaluated: %s", unreadable, unreadableReason),
+		})
+	}
 
 	return report, nil
 }
