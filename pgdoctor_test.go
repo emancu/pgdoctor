@@ -65,6 +65,18 @@ func TestValidateFilters(t *testing.T) {
 			expectedInval: nil,
 		},
 		{
+			name:          "category-qualified check ID from list output",
+			filters:       []string{"configs/pg-version", "configs/connection-efficiency/sessions-fatal"},
+			expectedValid: []string{"pg-version", "connection-efficiency"},
+			expectedInval: nil,
+		},
+		{
+			name:          "category-qualified check ID in the wrong category",
+			filters:       []string{"vacuum/pg-version", "configs/nonexistent-check"},
+			expectedValid: nil,
+			expectedInval: []string{"vacuum/pg-version", "configs/nonexistent-check"},
+		},
+		{
 			name:          "category and check from same category",
 			filters:       []string{"configs", "pg-version"},
 			expectedValid: []string{"configs", "pg-version"},

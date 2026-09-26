@@ -69,6 +69,8 @@ pgdoctor always uses a connect timeout. When the DSN sets no positive `connect_t
 | `--hide-passing` | Hide passing checks |
 | `--config` | YAML file with per-check settings, keyed by check ID |
 
+`--only` and `--ignore` accept a check ID with or without its category, so the IDs that `pgdoctor list` prints work as they are: `--only configs/pg-version` is the same as `--only pg-version`.
+
 A preset other than `all` takes precedence over `--only`: pgdoctor ignores `--only` and prints a warning to stderr. `--ignore` still removes checks from the preset. For an unknown preset, pgdoctor prints a warning that names the valid presets and uses `all`.
 
 A config file changes the settings of a check. Each check README lists the keys it reads. A key that is not in the file keeps its default value:

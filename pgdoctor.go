@@ -151,16 +151,17 @@ func toSet(items []string) map[string]struct{} {
 //   - "check-id" -> "check-id" (exact match)
 //   - "check-id/subcheck-id" -> "check-id" (extracts check ID from subcheck)
 //   - "category" -> "category" (exact match)
+//   - "category/check-id[/subcheck-id]" -> "check-id" (the form `pgdoctor list` prints)
 //
 // Invalid filters are those that don't match any check ID or category.
 func ValidateFilters(checks []check.Package, filters []string) (valid, invalid []string) {
 	// Build set of valid check IDs and categories
-	validCheckIDs := map[string]struct{}{}
+	checkCategories := map[string]string{}
 	validCategories := map[string]struct{}{}
 
 	for _, pkg := range checks {
 		metadata := pkg.Metadata()
-		validCheckIDs[metadata.CheckID] = struct{}{}
+		checkCategories[metadata.CheckID] = string(metadata.Category)
 		validCategories[string(metadata.Category)] = struct{}{}
 	}
 
@@ -169,14 +170,18 @@ func ValidateFilters(checks []check.Package, filters []string) (valid, invalid [
 
 	for _, filter := range filters {
 		// Normalize: extract check ID from subcheck format (check-id/subcheck-id)
-		normalized := filter
-		if strings.Contains(filter, "/") {
-			parts := strings.SplitN(filter, "/", 2)
-			normalized = parts[0]
+		parts := strings.Split(filter, "/")
+		normalized := parts[0]
+		if _, isCategory := validCategories[parts[0]]; isCategory && len(parts) > 1 {
+			normalized = parts[1]
+			if checkCategories[normalized] != parts[0] {
+				invalid = append(invalid, filter)
+				continue
+			}
 		}
 
 		// Check if normalized filter is valid (check ID or category)
-		if _, isCheckID := validCheckIDs[normalized]; isCheckID {
+		if _, isCheckID := checkCategories[normalized]; isCheckID {
 			if _, alreadySeen := seen[normalized]; !alreadySeen {
 				valid = append(valid, normalized)
 				seen[normalized] = struct{}{}
