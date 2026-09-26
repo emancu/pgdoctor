@@ -202,7 +202,7 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 		return
 	}
 
-	headers := []string{"Table", "Column", "Type", "Usage", "Current Value"}
+	headers := []string{"Table", "Column", "Type", "Usage", "Current Value", "FKs"}
 	var tableRows []check.TableRow
 	severity := check.SeverityWarn
 
@@ -221,6 +221,7 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 				row.ColumnType.String,
 				fmt.Sprintf("%.1f%%", usage),
 				check.FormatNumber(row.CurrentValue.Int64),
+				check.FormatNumber(row.FkReferenceCount.Int64),
 			},
 			Severity: rowSeverity,
 		})

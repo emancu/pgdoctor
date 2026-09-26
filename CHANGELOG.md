@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`table-vacuum-health`**: new `autovacuum_disabled_exclude` config key stops `autovacuum-disabled` from reporting tables whose schema-qualified names start with the given prefixes ([#100](https://github.com/emancu/pgdoctor/pull/100)).
 - **CLI**: a `--config` setting value can be a YAML list of scalars, which pgdoctor joins with commas ([#102](https://github.com/emancu/pgdoctor/pull/102)).
 - **`partitioning`**: new `inefficient_partitions_min_rows` config key sets the row count at which `inefficient-partitions` reports a partition (default 10M). The finding prints that value instead of a fixed 25M. Breaking for library consumers: `db.Queries.LargeTables` takes `minPartitionRows` ([#149](https://github.com/emancu/pgdoctor/pull/149)).
+- **`sequence-health`**: the `integer-columns` table shows `FKs`, the number of foreign-key constraints that reference the column ([#165](https://github.com/emancu/pgdoctor/pull/165)).
 
 ### Changed
 
