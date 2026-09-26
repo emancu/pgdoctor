@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
-	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -222,7 +221,7 @@ func checkIntegerShouldBeBigint(rows []db.SequenceHealthRow, report *check.Repor
 				row.ColumnType.String,
 				fmt.Sprintf("%.1f%%", usage),
 				check.FormatNumber(row.CurrentValue.Int64),
-				strconv.FormatInt(row.FkReferenceCount.Int64, 10),
+				check.FormatNumber(row.FkReferenceCount.Int64),
 			},
 			Severity: rowSeverity,
 		})
