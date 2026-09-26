@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`table-seq-scans`**: reads tables in every non-system schema, not only `public` ([#95](https://github.com/emancu/pgdoctor/pull/95)).
 - **`table-vacuum-health`**: reads tables in every non-system schema, not only `public` ([#96](https://github.com/emancu/pgdoctor/pull/96)).
 - **CLI**: the `run` report header no longer shows the password of a keyword connection string ([#103](https://github.com/emancu/pgdoctor/pull/103)).
+- **CLI**: a `--preset` other than `all` takes precedence over `--only`, so `--preset triage --only indexes` runs the triage checks, not every check. An unknown preset prints a warning that names the valid presets ([#135](https://github.com/emancu/pgdoctor/pull/135)).
 
 ## [0.5.0] - 2026-08-14
 
