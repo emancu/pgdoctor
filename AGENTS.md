@@ -198,7 +198,7 @@ report.AddFinding(check.Finding{
 })
 ```
 
-A finding `Name` is a static label, the same on every run. Put values (counts, ratios, durations) in `Details`. The text output shows the `Details` of a PASS finding at `--detail verbose` and `--detail debug`.
+A finding `Name` can carry the headline value of the finding (for example `Cache Hit Ratio: 99.80%`), so the value is visible at every detail level and every severity. Put the explanation and the supporting values in `Details`. The text output shows the `Details` of a PASS finding only at `--detail verbose` and `--detail debug`.
 
 ### Filtering
 

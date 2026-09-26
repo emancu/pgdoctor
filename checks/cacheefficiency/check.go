@@ -107,9 +107,8 @@ func checkCacheHitRatio(row db.DatabaseCacheEfficiencyRow, report *check.Report)
 	if cacheRatio >= cacheLowThreshold {
 		report.AddFinding(check.Finding{
 			ID:       "cache-hit-ratio",
-			Name:     "Cache Hit Ratio",
+			Name:     fmt.Sprintf("Cache Hit Ratio: %.2f%%", cacheRatio),
 			Severity: check.SeverityPass,
-			Details:  fmt.Sprintf("Cache hit ratio: %.2f%%", cacheRatio),
 		})
 		return
 	}

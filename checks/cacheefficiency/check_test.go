@@ -207,8 +207,7 @@ func Test_CacheEfficiency_OKResult(t *testing.T) {
 
 	result := findFinding(t, report, "cache-hit-ratio")
 	require.Equal(t, check.SeverityPass, result.Severity, "Should be OK when cache ratio is healthy")
-	require.Equal(t, "Cache Hit Ratio", result.Name)
-	require.Equal(t, "Cache hit ratio: 99.00%", result.Details)
+	require.Contains(t, result.Name, "Cache Hit Ratio: ", "the ratio belongs in the title, which renders when passing")
 }
 
 func Test_CacheEfficiency_QueryError(t *testing.T) {

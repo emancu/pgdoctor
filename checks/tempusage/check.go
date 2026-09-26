@@ -161,7 +161,7 @@ func (c *checker) reportTopStatements(ctx context.Context, report *check.Report,
 
 	report.AddFinding(check.Finding{
 		ID:       "temp-file-sources",
-		Name:     "Statements Spilling To Disk",
+		Name:     fmt.Sprintf("Statements Spilling To Disk: %d", len(rows)),
 		Severity: severity,
 		Details: fmt.Sprintf(
 			"Top %d by temp write volume, which counts rewrites and so will not sum to the totals reported by the rate.",
@@ -360,16 +360,11 @@ func tempVolumeRateSeverity(row db.TempUsageRow, maxSeverity check.Severity) che
 // what separates a few enormous sorts from a flood of small ones. Reporting them as
 // two findings made one condition look like two problems.
 func reportTempRate(row db.TempUsageRow, report *check.Report, severity check.Severity, details string) {
-	rate := fmt.Sprintf("%.1f files/hour, %s/hour",
-		getTempFilesPerHour(row), check.FormatBytes(int64(getTempBytesPerHour(row))))
-	if details != "" {
-		rate += "\n\n" + details
-	}
-
 	report.AddFinding(check.Finding{
-		ID:       "temp-rate",
-		Name:     "Temp File Rate",
+		ID: "temp-rate",
+		Name: fmt.Sprintf("Temp File Rate: %.1f files/hour, %s/hour",
+			getTempFilesPerHour(row), check.FormatBytes(int64(getTempBytesPerHour(row)))),
 		Severity: severity,
-		Details:  rate,
+		Details:  details,
 	})
 }
