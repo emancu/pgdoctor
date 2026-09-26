@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: byte values under 1 KiB print as `512 bytes`, so `B` means only billions in counts (`2.1B`). Byte values in prose use IEC units, a missing table cell shows `-`, `sequence-health` prints schema-qualified names, and the summary line uses correct plurals ([#162](https://github.com/emancu/pgdoctor/pull/162)).
 - **Docs**: every finding ID that a check emits as INFO, WARN or FAIL has a `### For \`finding-id\`` heading in its check README, and `readme_test.go` enforces it. A PASS-only or SKIP-only ID has a heading only when the operator can act, for example to install an extension, grant a privilege, or wait for statistics. `**Severity**` lines and SKIP/PASS narration are removed from the READMEs ([#163](https://github.com/emancu/pgdoctor/pull/163)).
 - **Release**: release binaries compile with the latest stable Go. `go.mod` keeps `go 1.25.0` as the minimum and adds `toolchain go1.26.8`, and CI also tests Go 1.27 ([#170](https://github.com/emancu/pgdoctor/pull/170)).
+- **Library**: `check.Package` has an optional `ValidateSetting` field. The generator sets it for each check that exports `ValidateSetting`, and `--config` reads it instead of a list in the CLI. A package that leaves it nil accepts no settings ([#173](https://github.com/emancu/pgdoctor/pull/173)).
 
 ### Fixed
 
