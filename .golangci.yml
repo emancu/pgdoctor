@@ -16,6 +16,11 @@ linters:
     - fatcontext
 
   settings:
+    goconst:
+      # Finding IDs, names and table headers repeat inside composite literals by design.
+      exclude-types:
+        - Call
+        - CompositeLit
     forbidigo:
       forbid:
         - pattern: ^print(ln)?$

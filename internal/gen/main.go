@@ -130,26 +130,31 @@ func discoverChecks(checksDir string) ([]checkDiscovery, error) {
 func packageHasFunc(pkgPath, name string) (bool, error) {
 	fset := token.NewFileSet()
 
-	// Parse all .go files in the package (excluding _test.go)
-	pkgs, err := parser.ParseDir(fset, pkgPath, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go") && strings.HasSuffix(fi.Name(), ".go")
-	}, 0)
+	entries, err := os.ReadDir(pkgPath)
 	if err != nil {
 		return false, err
 	}
 
-	// Check each package (should only be one non-test package)
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				funcDecl, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
+	// Parse all .go files in the package (excluding _test.go)
+	for _, entry := range entries {
+		fileName := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(fileName, ".go") || strings.HasSuffix(fileName, "_test.go") {
+			continue
+		}
 
-				if funcDecl.Recv == nil && funcDecl.Name.Name == name {
-					return true, nil
-				}
+		file, err := parser.ParseFile(fset, filepath.Join(pkgPath, fileName), nil, 0)
+		if err != nil {
+			return false, err
+		}
+
+		for _, decl := range file.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+
+			if funcDecl.Recv == nil && funcDecl.Name.Name == name {
+				return true, nil
 			}
 		}
 	}
