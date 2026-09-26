@@ -73,7 +73,7 @@ From the Database Architecture Guidelines:
 
 ## How to Fix
 
-### For `int-primary-keys`
+### For `pk-types`
 
 All tables with int4/int2 primary keys must be migrated to bigint or UUID.
 
@@ -96,9 +96,7 @@ COMMIT;
 
 For large tables (>1M rows), complex foreign key relationships, or zero-downtime requirements, see detailed migration strategies in the "Migration Guide" section below.
 
-### For `unreadable-sequences`
-
-The role cannot read the current value of some sequences. `pg_monitor` does not give this privilege. `SELECT` on a sequence lets the role read its value, but not advance it:
+When the finding says that some tables use the row estimate, the role cannot read the current value of their sequences. `pg_monitor` does not give this privilege. `SELECT` on a sequence lets the role read its value, but not advance it:
 
 ```sql
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO monitoring_role;

@@ -205,7 +205,7 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 		severity check.Severity
 	}{
 		{
-			name:     "unreadable only - PASS plus INFO",
+			name:     "unreadable only - PASS with a note",
 			data:     []db.InvalidPrimaryKeyTypesRow{unreadable},
 			severity: check.SeverityPass,
 		},
@@ -228,12 +228,9 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 			assert.Equal(t, tt.severity, report.Severity)
-			require.Len(t, report.Results, 2)
-			assert.Equal(t, "int-primary-keys", report.Results[0].ID)
-			info := report.Results[1]
-			assert.Equal(t, "unreadable-sequences", info.ID)
-			assert.Equal(t, check.SeverityInfo, info.Severity)
-			assert.Contains(t, info.Details, "1 table(s) use the row estimate")
+			require.Len(t, report.Results, 1)
+			assert.Equal(t, "pk-types", report.Results[0].ID)
+			assert.Contains(t, report.Results[0].Details, "1 table(s) use the row estimate")
 		})
 	}
 }
