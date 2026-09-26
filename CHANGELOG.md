@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`index-usage`**, **`partition-usage`**: a finding that cannot be computed reports SKIP with a reason, not PASS or WARN. `low-usage-indexes` uses the server uptime as the window when no statistics reset is recorded, where it used to judge read rates over any window ([#143](https://github.com/emancu/pgdoctor/pull/143)).
 - **`vacuum-settings`**: findings for a value above or below the recommended range are named "High <setting>" or "Low <setting>", not "Default <setting>". The finding IDs do not change ([#151](https://github.com/emancu/pgdoctor/pull/151)).
 - **`sequence-health`**, **`pk-types`**: a sequence that the role cannot read no longer counts as 0% used. `sequence-health` reports SKIP when it can read no sequence value, and both checks add an INFO `unreadable-sequences` finding with the count ([#146](https://github.com/emancu/pgdoctor/pull/146)).
+- **`sequence-health`**, **`pk-types`**: a sequence that the role cannot read no longer counts as 0% used. `sequence-health` reports SKIP when it can read no sequence value, and both checks add an INFO `unreadable-sequences` finding with the count. Breaking: the main `pk-types` finding ID is now `int-primary-keys`, because the check can emit two findings ([#146](https://github.com/emancu/pgdoctor/pull/146)).
 
 ## [0.5.0] - 2026-08-14
 
