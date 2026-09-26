@@ -42,7 +42,7 @@ func newRunCommand() *cobra.Command {
 		Long: `Run a suite of health checks against a PostgreSQL database to identify
 potential issues, misconfigurations, or areas for optimization.
 
-By default, all checks are shown in summary mode. Use --detail to control
+By default, each check is shown in brief mode. Use --detail to control
 the level of detail, and --hide-passing to only show failures and warnings.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,6 +55,15 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 			}
 			if dsn == "" {
 				return fmt.Errorf("connection string required: pgdoctor run <DSN> or set PGDOCTOR_DSN environment variable")
+			}
+
+			switch detailLevel(opts.detail) {
+			case detailSummary, detailBrief, detailVerbose, detailDebug:
+			default:
+				return fmt.Errorf("unknown --detail value %q: use summary, brief, verbose, or debug", opts.detail)
+			}
+			if opts.output != "text" && opts.output != "json" {
+				return fmt.Errorf("unknown --output value %q: use text or json", opts.output)
 			}
 
 			// Default to 'brief' detail when --only is used
@@ -78,6 +87,28 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				}
 			}
 
+			allChecks := pgdoctor.AllChecks()
+
+			opts.only = applyPreset(os.Stderr, opts.preset, opts.only)
+
+			// Validate and apply filters
+			validOnly, invalidOnly := pgdoctor.ValidateFilters(allChecks, opts.only)
+			validIgnored, invalidIgnored := pgdoctor.ValidateFilters(allChecks, opts.ignored)
+
+			var allInvalid []string
+			allInvalid = append(allInvalid, invalidOnly...)
+			allInvalid = append(allInvalid, invalidIgnored...)
+
+			if len(allInvalid) > 0 {
+				return fmt.Errorf("unknown check or category in --only or --ignore: %v", allInvalid)
+			}
+
+			checks := pgdoctor.Filter(allChecks, validOnly, validIgnored)
+			if len(checks) == 0 {
+				return fmt.Errorf("no checks selected: --ignore removes every selected check")
+			}
+			sortChecksByCategory(checks)
+
 			ctx := cmd.Context()
 
 			connConfig, err := parseDSN(dsn)
@@ -99,30 +130,6 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				return &SilentError{ExitCode: 2}
 			}
 
-			allChecks := pgdoctor.AllChecks()
-
-			opts.only = applyPreset(os.Stderr, opts.preset, opts.only)
-
-			// Validate and apply filters
-			validOnly, invalidOnly := pgdoctor.ValidateFilters(allChecks, opts.only)
-			validIgnored, invalidIgnored := pgdoctor.ValidateFilters(allChecks, opts.ignored)
-
-			var allInvalid []string
-			allInvalid = append(allInvalid, invalidOnly...)
-			allInvalid = append(allInvalid, invalidIgnored...)
-
-			if len(allInvalid) > 0 {
-				fmt.Fprintf(os.Stderr, "Warning: ignoring invalid filter(s): %v\n\n", allInvalid)
-			}
-
-			if len(opts.only) > 0 && len(validOnly) == 0 {
-				fmt.Fprintf(os.Stderr, "Error: no valid checks found for --only filter(s): %v\n", invalidOnly)
-				return &SilentError{ExitCode: 1}
-			}
-
-			checks := pgdoctor.Filter(allChecks, validOnly, validIgnored)
-			sortChecksByCategory(checks)
-
 			runOpts := pgdoctor.Options{
 				Checks: checks,
 				Config: cfg,
@@ -136,10 +143,9 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 				w := cmd.OutOrStdout()
 				if err := formatJSON(w, reports); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-					return &SilentError{ExitCode: 1}
+					return err
 				}
-				return nil
+				return exitStatus(reports)
 			}
 
 			// Text output: stream results with category headers
@@ -149,13 +155,9 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 
 			var reports []*check.Report
 			var currentCategory string
-			maxSeverity := check.SeverityPass
 
 			runOpts.OnReport = func(r *check.Report) {
 				reports = append(reports, r)
-				if r.Severity > maxSeverity {
-					maxSeverity = r.Severity
-				}
 
 				// Print category header on transition
 				cat := string(r.Category)
@@ -191,23 +193,28 @@ the level of detail, and --hide-passing to only show failures and warnings.`,
 				fmt.Fprintln(w)
 			}
 
-			if maxSeverity == check.SeverityFail {
-				return &SilentError{ExitCode: 1}
-			}
-
-			return nil
+			return exitStatus(reports)
 		},
 	}
 
 	cmd.Flags().StringSliceVar(&opts.ignored, "ignore", nil, "Checks or categories to ignore")
 	cmd.Flags().StringSliceVar(&opts.only, "only", nil, "Only run these checks or categories")
-	cmd.Flags().StringVar(&opts.preset, "preset", presetAll, "Check preset: all (default), triage")
-	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief (default), verbose, debug")
+	cmd.Flags().StringVar(&opts.preset, "preset", presetAll, "Check preset: all, triage")
+	cmd.Flags().StringVar(&opts.detail, "detail", string(detailBrief), "Detail level: summary, brief, verbose, debug")
 	cmd.Flags().BoolVar(&opts.hidePassing, "hide-passing", false, "Hide passing checks")
-	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text (default), json")
+	cmd.Flags().StringVar(&opts.output, "output", "text", "Output format: text, json")
 	cmd.Flags().StringVar(&opts.config, "config", "", "YAML file with per-check settings, keyed by check ID")
 
 	return cmd
+}
+
+func exitStatus(reports []*check.Report) error {
+	for _, r := range reports {
+		if r.Severity == check.SeverityFail {
+			return &SilentError{ExitCode: 1}
+		}
+	}
+	return nil
 }
 
 func sortChecksByCategory(checks []check.Package) {
