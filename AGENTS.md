@@ -203,6 +203,7 @@ report.AddFinding(check.Finding{
 Filtering happens at the runner level (`pgdoctor.go`):
 - `--only check1,check2` - Only run specified checks
 - `--ignore check1,check2` - Skip specified checks
+- A filter value is a category, a check ID, `check-id/finding-id`, or `category/check-id[/finding-id]`, which is the form `pgdoctor list` prints
 - Checks don't need to implement filtering logic themselves
 
 ### Statistics-Dependent Checks
