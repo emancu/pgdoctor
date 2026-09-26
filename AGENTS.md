@@ -205,6 +205,18 @@ Filtering happens at the runner level (`pgdoctor.go`):
 - `--ignore check1,check2` - Skip specified checks
 - Checks don't need to implement filtering logic themselves
 
+### Exit Codes
+
+`pgdoctor run` uses the same exit codes for text and JSON output:
+
+| Code | Meaning |
+|------|---------|
+| `0` | The checks ran. No check reported FAIL. |
+| `1` | The checks ran. At least one check reported FAIL. |
+| `2` | pgdoctor could not run: connection error, usage error, bad `--config`, unknown flag value, or zero checks selected. |
+
+A check never sets the exit code. The CLI maps a FAIL finding to `1`. Any error that a command returns exits `2`.
+
 ### Statistics-Dependent Checks
 
 Some checks rely on PostgreSQL runtime statistics (`pg_stat_*` views):

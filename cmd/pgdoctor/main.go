@@ -17,7 +17,7 @@ func main() {
 			os.Exit(silent.ExitCode)
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		os.Exit(2)
 	}
 }
 
