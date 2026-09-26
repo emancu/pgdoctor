@@ -22,8 +22,9 @@ WITH sequence_info AS (
   CROSS JOIN LATERAL (
     SELECT CASE
       WHEN s.last_value IS NOT NULL
-        OR has_sequence_privilege(quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename), 'SELECT,USAGE')
-        THEN COALESCE(s.last_value, s.start_value)
+        THEN s.last_value
+      WHEN has_sequence_privilege(quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename), 'SELECT,USAGE')
+        THEN s.start_value
     END AS value
   ) AS cur
   WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
