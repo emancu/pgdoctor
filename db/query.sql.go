@@ -2782,7 +2782,7 @@ SELECT
   -- *waiting* AccessExclusiveLock, so it makes this check time out during a DDL
   -- pile-up. relpages is only refreshed by VACUUM/ANALYZE, so it is stale by
   -- definition and 0 on a never-vacuumed relation.
-  , (c.relpages + COALESCE(t.relpages, 0) + COALESCE(i.index_pages, 0))::BIGINT
+  , (c.relpages::BIGINT + COALESCE(t.relpages::BIGINT, 0) + COALESCE(i.index_pages, 0))
     * CURRENT_SETTING('block_size')::BIGINT AS table_size_bytes
   , COALESCE(s.n_dead_tup, 0) AS n_dead_tup
   , COALESCE(s.vacuum_count, 0) AS vacuum_count
@@ -2793,6 +2793,16 @@ SELECT
     FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
     WHERE o.option_name = 'autovacuum_enabled' AND NOT o.option_value::boolean
   ) AS autovacuum_disabled
+  , av.scale_factor AS vacuum_scale_factor
+  -- autovacuum_vacuum_max_threshold is PG18+; -1 disables the cap.
+  -- Autovacuum never processes a partitioned parent, so it has no trigger.
+  , CASE
+    WHEN c.relkind = 'r'
+      THEN LEAST(
+        av.threshold + av.scale_factor * GREATEST(c.reltuples, 0)
+        , NULLIF(av.max_threshold, -1)
+      )::bigint
+  END AS vacuum_trigger
   -- NULL means never.
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_vacuum, s.last_autovacuum)))::bigint AS last_vacuum_age_seconds
   , EXTRACT(EPOCH FROM (now() - GREATEST(s.last_analyze, s.last_autoanalyze)))::bigint AS last_analyze_age_seconds
@@ -2811,6 +2821,22 @@ LEFT JOIN LATERAL (
   INNER JOIN pg_class AS ic ON ic.oid = x.indexrelid
   WHERE x.indrelid IN (c.oid, c.reltoastrelid)
 ) AS i ON TRUE
+LEFT JOIN LATERAL (
+  SELECT
+    COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_scale_factor')
+      , CURRENT_SETTING('autovacuum_vacuum_scale_factor')
+    )::float8 AS scale_factor
+    , COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_threshold')
+      , CURRENT_SETTING('autovacuum_vacuum_threshold')
+    )::float8::bigint AS threshold
+    , COALESCE(
+      MAX(o.option_value) FILTER (WHERE o.option_name = 'autovacuum_vacuum_max_threshold')
+      , CURRENT_SETTING('autovacuum_vacuum_max_threshold', TRUE)
+    )::float8::bigint AS max_threshold
+  FROM PG_OPTIONS_TO_TABLE(c.reloptions) AS o
+) AS av ON TRUE
 WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
@@ -2828,6 +2854,8 @@ type TableVacuumHealthRow struct {
 	AutovacuumCount       pgtype.Int8
 	Reloptions            pgtype.Text
 	AutovacuumDisabled    pgtype.Bool
+	VacuumScaleFactor     pgtype.Float8
+	VacuumTrigger         pgtype.Int8
 	LastVacuumAgeSeconds  pgtype.Int8
 	LastAnalyzeAgeSeconds pgtype.Int8
 	NModSinceAnalyze      pgtype.Int8
@@ -2857,6 +2885,8 @@ func (q *Queries) TableVacuumHealth(ctx context.Context) ([]TableVacuumHealthRow
 			&i.AutovacuumCount,
 			&i.Reloptions,
 			&i.AutovacuumDisabled,
+			&i.VacuumScaleFactor,
+			&i.VacuumTrigger,
 			&i.LastVacuumAgeSeconds,
 			&i.LastAnalyzeAgeSeconds,
 			&i.NModSinceAnalyze,
