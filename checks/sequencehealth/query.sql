@@ -95,6 +95,7 @@ SELECT
   , (si.schema_name || '.' || si.sequence_name)::text AS sequence_name
   , si.seq_data_type
   , si.current_value
+  , si.min_value
   , si.max_value
   , si.increment_by
   , si.is_cyclic
@@ -110,12 +111,18 @@ SELECT
     so.column_max_value IS NOT NULL
     AND (si.max_value > so.column_max_value OR si.min_value < -so.column_max_value - 1)
   ) AS sequence_exceeds_column
-  -- Usage of the column type range, from 0 toward the limit in the sequence direction
-  , CASE WHEN so.column_type IN ('integer', 'smallint') THEN ROUND(GREATEST(0, CASE
-    WHEN si.increment_by > 0
-      THEN si.current_value::numeric / so.column_max_value
-    ELSE -si.current_value::numeric / (so.column_max_value + 1)
-  END) * 100, 2) END AS column_usage_percent
+  -- Usage of the column type range, from 0 toward the limit in the sequence direction.
+  -- A value already outside the range fails inserts in either direction, so it is above 100.
+  , CASE WHEN so.column_type IN ('integer', 'smallint') THEN ROUND(GREATEST(
+    0
+    , CASE
+      WHEN si.increment_by > 0
+        THEN si.current_value::numeric / so.column_max_value
+      ELSE -si.current_value::numeric / (so.column_max_value + 1)
+    END
+    , CASE WHEN si.current_value > so.column_max_value THEN si.current_value::numeric / so.column_max_value END
+    , CASE WHEN si.current_value < -so.column_max_value - 1 THEN -si.current_value::numeric / (so.column_max_value + 1) END
+  ) * 100, 2) END AS column_usage_percent
   -- Flag if column is a primary key
   , (pk.table_oid IS NOT NULL) AS is_primary_key
   -- Count of foreign keys referencing this column

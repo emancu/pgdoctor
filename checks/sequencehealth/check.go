@@ -312,7 +312,7 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, usageWarnPercent, us
 		return
 	}
 
-	headers := []string{"Sequence", "Table.Column", "Column Type", "Seq Max", "Column Max", "Column Usage"}
+	headers := []string{"Sequence", "Table.Column", "Column Type", "Seq Min", "Seq Max", "Column Max", "Column Usage"}
 	var tableRows []check.TableRow
 	severity := check.SeverityInfo
 
@@ -330,6 +330,7 @@ func checkSequenceTypeMismatch(rows []db.SequenceHealthRow, usageWarnPercent, us
 				row.SequenceName.String,
 				formatTableColumn(row.TableName.String, row.ColumnName.String),
 				row.ColumnType.String,
+				check.FormatNumber(row.MinValue.Int64),
 				check.FormatNumber(row.MaxValue.Int64),
 				check.FormatNumber(row.ColumnMaxValue.Int64),
 				usage,

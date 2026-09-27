@@ -44,11 +44,16 @@ func makeSequenceRow(
 
 	var columnUsage pgtype.Numeric
 	if columnType == "integer" || columnType == "smallint" {
-		limit := float64(columnMaxValue)
+		up := float64(currentValue) / float64(columnMaxValue) * 100
+		down := -float64(currentValue) / (float64(columnMaxValue) + 1) * 100
+		usage := max(0, up)
 		if incrementBy < 0 {
-			limit = -float64(columnMaxValue) - 1
+			usage = max(0, down)
 		}
-		_ = columnUsage.Scan(fmt.Sprintf("%.2f", max(0, float64(currentValue)/limit*100)))
+		if up > 100 || down > 100 {
+			usage = max(up, down)
+		}
+		_ = columnUsage.Scan(fmt.Sprintf("%.2f", usage))
 	}
 
 	return db.SequenceHealthRow{
@@ -791,6 +796,12 @@ func TestSequenceHealth_ColumnCapacity(t *testing.T) {
 			integerColumns: check.SeverityFail, typeMismatch: check.SeverityFail, columnUsageCell: "95.0%",
 		},
 		{
+			name: "ascending bigint sequence already below the integer column range",
+			row: makeSequenceRow("public", "public.t_id_seq", "bigint", "public.t", "id", "integer",
+				-3000000000, bigintMax, 1, bigintMax, 2147483647, 0.00, false, true, true, 0),
+			integerColumns: check.SeverityFail, typeMismatch: check.SeverityFail, columnUsageCell: "139.7%",
+		},
+		{
 			name: "descending integer sequence at 50% of the column",
 			row: makeSequenceRow("public", "public.t_id_seq", "integer", "public.t", "id", "integer",
 				-1073741824, -1, -1, 1073741824, 2147483647, 50, false, false, true, 0),
@@ -810,7 +821,7 @@ func TestSequenceHealth_ColumnCapacity(t *testing.T) {
 			mismatch := findingByID(t, report, findingIDTypeMismatch)
 			assert.Equal(t, tt.typeMismatch, mismatch.Severity)
 			if tt.columnUsageCell != "" {
-				assert.Equal(t, tt.columnUsageCell, mismatch.Table.Rows[0].Cells[5])
+				assert.Equal(t, tt.columnUsageCell, mismatch.Table.Rows[0].Cells[6])
 			}
 		})
 	}
@@ -834,7 +845,7 @@ func TestSequenceHealth_TypeMismatch_Unreadable(t *testing.T) {
 
 	mismatch := findingByID(t, report, findingIDTypeMismatch)
 	assert.Equal(t, check.SeverityInfo, mismatch.Severity)
-	assert.Equal(t, "-", mismatch.Table.Rows[0].Cells[5])
+	assert.Equal(t, "-", mismatch.Table.Rows[0].Cells[6])
 }
 
 func TestSequenceHealth_Config(t *testing.T) {
@@ -1046,15 +1057,15 @@ func TestSequenceHealth_TableFormatting_TypeMismatch(t *testing.T) {
 	require.NotNil(t, mismatchFinding.Table)
 
 	table := mismatchFinding.Table
-	require.Equal(t, []string{"Sequence", "Table.Column", "Column Type", "Seq Max", "Column Max", "Column Usage"}, table.Headers)
+	require.Equal(t, []string{"Sequence", "Table.Column", "Column Type", "Seq Min", "Seq Max", "Column Max", "Column Usage"}, table.Headers)
 	require.Equal(t, 1, len(table.Rows))
 
 	require.Equal(t, "public.problem_seq", table.Rows[0].Cells[0])
 	require.Equal(t, "public.problem_table.id", table.Rows[0].Cells[1])
 	require.Equal(t, "integer", table.Rows[0].Cells[2])
 	require.NotEmpty(t, table.Rows[0].Cells[3]) // Seq Max (formatted)
-	require.NotEmpty(t, table.Rows[0].Cells[4]) // Column Max (formatted)
-	require.Equal(t, "0.1%", table.Rows[0].Cells[5])
+	require.NotEmpty(t, table.Rows[0].Cells[5]) // Column Max (formatted)
+	require.Equal(t, "0.1%", table.Rows[0].Cells[6])
 }
 
 func TestSequenceHealth_SequenceWithoutColumn(t *testing.T) {
