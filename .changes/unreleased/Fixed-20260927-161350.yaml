@@ -1,5 +1,5 @@
 kind: Fixed
-body: alias expansion in `--config` no longer changes YAML nodes that check sections share, so each section is validated against the file as written
+body: "`--config` hardening: alias expansion no longer changes YAML nodes that check sections share; an alias to an empty map is accepted for a check without settings; every invalid per-role or per-replica threshold is reported, in order; and `DecodeConfig` rejects a second YAML document"
 time: 2026-09-27T16:13:50.219305+01:00
 custom:
     Component: CLI

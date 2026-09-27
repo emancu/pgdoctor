@@ -4,7 +4,9 @@ package sessionsettings
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 
@@ -47,10 +49,14 @@ func (c Config) Validate() error {
 	if c.Timeout <= 0 {
 		return fmt.Errorf("timeout: %d is not a positive integer", c.Timeout)
 	}
-	for role, n := range c.TimeoutByRole {
-		if n <= 0 {
-			return fmt.Errorf("timeout_by_role.%s: %d is not a positive integer", role, n)
+	var errs []error
+	for _, role := range slices.Sorted(maps.Keys(c.TimeoutByRole)) {
+		if n := c.TimeoutByRole[role]; n <= 0 {
+			errs = append(errs, fmt.Errorf("timeout_by_role.%s: %d is not a positive integer", role, n))
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }

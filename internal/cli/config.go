@@ -46,7 +46,8 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			continue
 		}
 		if pkg.DecodeConfig == nil {
-			if node.Kind != yaml.MappingNode || len(node.Content) > 0 {
+			var settings map[string]any
+			if err := node.Decode(&settings); err != nil || len(settings) > 0 {
 				problems = append(problems, fmt.Sprintf("%s: the check accepts no settings", checkID))
 			}
 			continue
@@ -79,7 +80,9 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			continue
 		}
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
+			for _, msg := range strings.Split(err.Error(), "\n") {
+				problems = append(problems, fmt.Sprintf("%s: %s", checkID, msg))
+			}
 			continue
 		}
 		cfg[checkID] = value

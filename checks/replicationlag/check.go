@@ -4,8 +4,11 @@ package replicationlag
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -64,10 +67,15 @@ func (c Config) Validate() error {
 	if err := validatePair(c.PhysicalLagWarnSeconds, c.PhysicalLagFailSeconds); err != nil {
 		return err
 	}
-	for name, t := range c.PhysicalLagByApplication {
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(c.PhysicalLagByApplication)) {
+		t := c.PhysicalLagByApplication[name]
 		if err := validatePair(t.WarnSeconds, t.FailSeconds); err != nil {
-			return fmt.Errorf("physical_lag_by_application.%s: %w", name, err)
+			errs = append(errs, fmt.Errorf("physical_lag_by_application.%s: %w", name, err))
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }

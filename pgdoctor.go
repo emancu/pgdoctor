@@ -86,8 +86,14 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 func decodeConfig(data []byte, dst any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
 		return err
+	}
+	if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+		return errors.New("expected one YAML document")
 	}
 	return nil
 }
