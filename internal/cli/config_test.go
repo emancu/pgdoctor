@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/emancu/pgdoctor"
 	"github.com/emancu/pgdoctor/check"
@@ -336,4 +337,25 @@ func TestLoadConfigLongListWithoutAliases(t *testing.T) {
 	_, err := loadConfig(writeConfig(t, b.String()), pgdoctor.AllChecks())
 
 	require.NoError(t, err)
+}
+
+func TestResolveAliasesLeavesTheSharedTreeUnchanged(t *testing.T) {
+	t.Parallel()
+
+	var doc yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("a: {x: 1, <<: &d {x: *d}}\nb: {y: *d}\n"), &doc))
+	root := doc.Content[0]
+	sectionA, sectionB := root.Content[1], root.Content[3]
+	shared := sectionB.Content[1]
+	require.Equal(t, yaml.AliasNode, shared.Kind)
+
+	expanded := 0
+	_, err := resolveAliases(sectionA, false, &expanded)
+	require.ErrorContains(t, err, "YAML aliases expand too far")
+	assert.Equal(t, yaml.AliasNode, shared.Kind)
+	assert.Equal(t, yaml.AliasNode, shared.Alias.Content[1].Kind)
+
+	expanded = 0
+	_, err = resolveAliases(sectionB, false, &expanded)
+	require.ErrorContains(t, err, "YAML aliases expand too far")
 }
