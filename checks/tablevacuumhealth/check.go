@@ -42,8 +42,8 @@ func (c Config) Validate() error {
 }
 
 type checker struct {
-	queries                    TableVacuumHealthQueries
-	autovacuumDisabledExcludes []string
+	queries      TableVacuumHealthQueries
+	ignoreTables []string
 }
 
 const (
@@ -80,7 +80,7 @@ func Metadata() check.Metadata {
 }
 
 func New(queries TableVacuumHealthQueries, cfg Config) check.Checker {
-	return &checker{queries: queries, autovacuumDisabledExcludes: cfg.IgnoreTables}
+	return &checker{queries: queries, ignoreTables: cfg.IgnoreTables}
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -95,9 +95,16 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return nil, fmt.Errorf("running %s/%s: %w", check.CategoryVacuum, report.CheckID, err)
 	}
 
-	checkAutovacuumDisabled(rows, c.autovacuumDisabledExcludes, report)
-	checkLargeTableDefaults(rows, report)
-	checkVacuumStale(rows, report)
+	var included []db.TableVacuumHealthRow
+	for _, row := range rows {
+		if !isExcluded(row.TableName.String, c.ignoreTables) {
+			included = append(included, row)
+		}
+	}
+
+	checkAutovacuumDisabled(included, report)
+	checkLargeTableDefaults(included, report)
+	checkVacuumStale(included, report)
 
 	return report, nil
 }
@@ -113,10 +120,10 @@ func maxRowSeverity(rows []check.TableRow) check.Severity {
 	return severity
 }
 
-func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, excludes []string, report *check.Report) {
+func checkAutovacuumDisabled(rows []db.TableVacuumHealthRow, report *check.Report) {
 	var disabled []db.TableVacuumHealthRow
 	for _, row := range rows {
-		if row.AutovacuumDisabled.Bool && !isExcluded(row.TableName.String, excludes) {
+		if row.AutovacuumDisabled.Bool {
 			disabled = append(disabled, row)
 		}
 	}

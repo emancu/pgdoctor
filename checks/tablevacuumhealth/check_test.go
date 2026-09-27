@@ -360,36 +360,34 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 	assert.Nil(t, disabled.Table)
 }
 
-func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testing.T) {
+func TestTableVacuumHealth_ExcludeCoversEveryFinding(t *testing.T) {
 	t.Parallel()
 
-	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}
-	rows := []db.TableVacuumHealthRow{
-		makeRow("public.outbox_events").
+	stale := func(name string) db.TableVacuumHealthRow {
+		return makeRow(name).
 			withAutovacuumDisabled().
 			withRows(5_000_000).
 			withDeadTuples(600_000).
 			withLastVacuumAge(staleFail).
 			withLastAnalyzeAge(recent).
-			build(),
+			build()
+	}
+	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events_"}}
+	rows := []db.TableVacuumHealthRow{
+		stale("public.outbox_events_p20260101"),
+		stale("public.orders"),
 	}
 
 	report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
 
-	assert.Equal(t, check.SeverityPass, findingByID(t, report, findingIDAutovacuumDisabled).Severity)
-
-	large := findingByID(t, report, findingIDLargeTableDefaults)
-	require.NotNil(t, large.Table)
-	require.Len(t, large.Table.Rows, 1)
-	assert.Equal(t, "public.outbox_events", large.Table.Rows[0].Cells[0])
-
-	stale := findingByID(t, report, findingIDVacuumStale)
-	assert.Equal(t, check.SeverityFail, stale.Severity)
-	require.NotNil(t, stale.Table)
-	require.Len(t, stale.Table.Rows, 1)
-	assert.Equal(t, "public.outbox_events", stale.Table.Rows[0].Cells[0])
+	for _, id := range []string{findingIDAutovacuumDisabled, findingIDLargeTableDefaults, findingIDVacuumStale} {
+		finding := findingByID(t, report, id)
+		require.NotNil(t, finding.Table, id)
+		require.Len(t, finding.Table.Rows, 1, id)
+		assert.Equal(t, "public.orders", finding.Table.Rows[0].Cells[0], id)
+	}
 }
 
 // Column indices for the large-table-defaults table:

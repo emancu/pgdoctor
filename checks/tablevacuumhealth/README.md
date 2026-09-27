@@ -167,11 +167,13 @@ When the analyze arm is the one tripping, run `ANALYZE schema.table_name` (or lo
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `ignore_tables` | List of table-name prefixes that the `autovacuum-disabled` finding does not report. The other findings still report these tables | None |
+| `ignore_tables` | List of table-name prefixes that the check does not examine | None |
 
-A prefix matches the schema-qualified table name (`schema.table`). A prefix matches every name that starts with it: `public.outbox` also matches `public.outbox_archive`. The match is case-sensitive. An empty prefix is an error. The key changes only the `autovacuum-disabled` finding: the other findings still report an excluded table.
+A prefix matches the schema-qualified table name (`schema.table`). A prefix matches every name that starts with it: `public.outbox` also matches `public.outbox_archive`. The match is case-sensitive. An empty prefix is an error. No finding of this check reports an excluded table. Other checks, such as `freeze-age`, still examine it.
 
 A partition leaf matches only when its name starts with the prefix. `public.outbox_events` matches `public.outbox_events_p20260101`, but not a leaf with a different name or in another schema.
+
+`autovacuum_enabled=false` also turns off auto-analyze. If queries still read an excluded table, run `ANALYZE` on it manually. For daily partitions, use a prefix that ends before the date, such as `public.outbox_events_p`. The check then still examines the `_default` partition, which grows when a partition is missing.
 
 ```yaml
 table-vacuum-health:
@@ -192,7 +194,7 @@ pgdoctor.Run(ctx, conn, pgdoctor.Options{
 })
 ```
 
-When no config is provided, `autovacuum-disabled` reports every table with autovacuum disabled.
+When no config is provided, the check examines every table.
 
 ## Related Checks
 
