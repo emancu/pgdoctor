@@ -164,6 +164,7 @@ func Test_UnusedIndexes_StatsWindowInDetails(t *testing.T) {
 	unused := finding(t, report, "unused-indexes")
 	require.Contains(t, unused.Details, "0 scans since 2026-06-01")
 	require.Contains(t, unused.Details, ">500MiB")
+	require.Contains(t, unused.Details, "Scan counts cover this instance only. Before you drop an index, confirm 0 scans on the primary and on every replica.")
 }
 
 func Test_UnusedIndexes_NullStatsReset_OmitsDate(t *testing.T) {
