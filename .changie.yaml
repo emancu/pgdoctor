@@ -1,0 +1,24 @@
+changesDir: .changes
+unreleasedDir: unreleased
+headerPath: header.tpl.md
+changelogPath: CHANGELOG.md
+versionExt: md
+versionFormat: '## [{{.Version}}] - {{.Time.Format "2006-01-02"}}'
+kindFormat: '### {{.Kind}}'
+changeFormat: '- **{{.Custom.Component}}**: {{.Body}} ([#{{.Custom.PR}}](https://github.com/emancu/pgdoctor/pull/{{.Custom.PR}})).'
+kinds:
+  - label: Breaking
+    format: '### Breaking changes'
+  - label: Added
+  - label: Changed
+  - label: Fixed
+custom:
+  - key: Component
+    type: string
+  - key: PR
+    type: int
+newlines:
+  beforeKind: 1
+  afterKind: 1
+  beforeChangelogVersion: 1
+  endOfVersion: 1
