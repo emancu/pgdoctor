@@ -151,7 +151,7 @@ A value that is not a positive integer is ignored.
 
 ```yaml
 partitioning:
-  inefficient_partitions_min_rows: "25000000"
+  inefficient_partitions_min_rows: 25000000
 ```
 
 As a library, pass the same key in `check.Config`:
