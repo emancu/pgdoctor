@@ -127,7 +127,7 @@ This check identifies UUID columns where:
 3. Column is indexed (PK or regular index)
 4. Table has more than 100K rows (smaller tables are negligible)
 
-A partitioned table reports one row for its root, not one per partition. The column counts as indexed when an index on the root or on any partition covers it.
+A partitioned table reports one row for its root, not one per partition. A partition also reports a row when its default differs from the default of its parent. The column counts as indexed when an index on that table or on any partition below it covers it.
 
 **Why the 100K row threshold:**
 - Index bloat is proportional to table size
