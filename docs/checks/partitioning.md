@@ -165,6 +165,7 @@ cfg := check.Config{
     },
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Checks: pgdoctor.AllChecks(),
     Config: cfg,
 })
 ```
