@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -21,13 +22,10 @@ type PKTypesQueries interface {
 }
 
 type checker struct {
-	queries PKTypesQueries
+	queries          PKTypesQueries
+	usageWarnPercent float64
+	usageFailPercent float64
 }
-
-const (
-	usagePercentFail  = 85.0 // FAIL: >=85% of capacity used (urgent migration needed)
-	usagePercentFloor = 45.0 // Below this, capacity pressure is not worth reporting yet
-)
 
 func Metadata() check.Metadata {
 	return check.Metadata{
@@ -40,10 +38,43 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries PKTypesQueries, _ ...check.Config) check.Checker {
-	return &checker{
-		queries: queries,
+func New(queries PKTypesQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
+		queries:          queries,
+		usageWarnPercent: 50,
+		usageFailPercent: 90,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		warn, fail := c.usageWarnPercent, c.usageFailPercent
+		if v, err := parsePercent(cfg[0][Metadata().CheckID]["usage_warn_percent"]); err == nil {
+			warn = v
+		}
+		if v, err := parsePercent(cfg[0][Metadata().CheckID]["usage_fail_percent"]); err == nil {
+			fail = v
+		}
+		if warn < fail {
+			c.usageWarnPercent, c.usageFailPercent = warn, fail
+		}
+	}
+	return c
+}
+
+func ValidateSetting(key, value string) error {
+	if key != "usage_warn_percent" && key != "usage_fail_percent" {
+		return fmt.Errorf("unknown key %q", key)
+	}
+	if _, err := parsePercent(value); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	return nil
+}
+
+func parsePercent(value string) (float64, error) {
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil || !(v > 0 && v <= 100) {
+		return 0, fmt.Errorf("%q is not a percent in (0, 100]", value)
+	}
+	return v, nil
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -79,8 +110,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 			unreadableCount++
 		}
 
-		entry := analyzeRow(row)
-		if entry.usagePct < usagePercentFloor {
+		entry := analyzeRow(row, c.usageFailPercent)
+		if entry.usagePct < c.usageWarnPercent {
 			continue
 		}
 
@@ -135,7 +166,7 @@ type tableEntry struct {
 	usagePct float64
 }
 
-func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
+func analyzeRow(row db.InvalidPrimaryKeyTypesRow, usageFailPercent float64) tableEntry {
 	usageStr, usagePct := calculateUsage(row)
 
 	return tableEntry{
@@ -146,7 +177,7 @@ func analyzeRow(row db.InvalidPrimaryKeyTypesRow) tableEntry {
 			usageStr,
 			check.FormatNumber(row.EstimatedRows),
 		},
-		severity: determineSeverity(usagePct, row.EstimatedRows),
+		severity: determineSeverity(usagePct, usageFailPercent, row.SequenceCurrent.Valid),
 		usagePct: usagePct,
 	}
 }
@@ -162,8 +193,10 @@ func calculateUsage(row db.InvalidPrimaryKeyTypesRow) (string, float64) {
 	return fmt.Sprintf("~%.1f%%", pct), pct
 }
 
-func determineSeverity(usagePct float64, estRows int64) check.Severity {
-	if usagePct >= usagePercentFail {
+// A row estimate says how many ids exist, not how close the next id is to the
+// type limit, so it never reaches FAIL.
+func determineSeverity(usagePct, usageFailPercent float64, fromSequence bool) check.Severity {
+	if fromSequence && usagePct >= usageFailPercent {
 		return check.SeverityFail
 	}
 	return check.SeverityWarn
