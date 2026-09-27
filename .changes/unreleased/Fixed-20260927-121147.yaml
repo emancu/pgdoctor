@@ -1,0 +1,6 @@
+kind: Fixed
+body: Report a random UUID default that is set on a partition and not on its parent
+time: 2026-09-27T12:11:47.615267+01:00
+custom:
+    Component: '`uuid-defaults`'
+    PR: "194"
