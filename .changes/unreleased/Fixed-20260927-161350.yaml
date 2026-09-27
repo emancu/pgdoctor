@@ -1,0 +1,6 @@
+kind: Fixed
+body: alias expansion in `--config` no longer changes YAML nodes that check sections share, so each section is validated against the file as written
+time: 2026-09-27T16:13:50.219305+01:00
+custom:
+    Component: CLI
+    PR: "202"
