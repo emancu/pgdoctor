@@ -119,7 +119,7 @@ func checkUnusedIndexes(rows []db.IndexUsageStatsRow, statsReset pgtype.Timestam
 		ID:       "unused-indexes",
 		Name:     "Unused Indexes",
 		Severity: check.SeverityWarn,
-		Details:  fmt.Sprintf("Found %d unused indexes (0 scans%s, >500MiB)", len(unused), since),
+		Details:  fmt.Sprintf("Found %d unused indexes (0 scans%s, >500MiB).\nScan counts cover this instance only. Before you drop an index, confirm 0 scans on the primary and on every replica.", len(unused), since),
 		Table: &check.Table{
 			Headers: []string{"Table", "Index", "Size"},
 			Rows:    tableRows,
