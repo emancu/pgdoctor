@@ -105,6 +105,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return partitioning.New(db.New(conn), cfg)
 			},
+			ValidateSetting: partitioning.ValidateSetting,
 		},
 		{
 			Metadata: partitionusage.Metadata,
@@ -153,6 +154,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return sessionsettings.New(db.New(conn), cfg)
 			},
+			ValidateSetting: sessionsettings.ValidateSetting,
 		},
 		{
 			Metadata: tableactivity.Metadata,
@@ -177,6 +179,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return tablevacuumhealth.New(db.New(conn), cfg)
 			},
+			ValidateSetting: tablevacuumhealth.ValidateSetting,
 		},
 		{
 			Metadata: tempusage.Metadata,

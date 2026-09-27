@@ -66,6 +66,8 @@ type Config map[string]map[string]string
 type Package struct {
 	Metadata func() Metadata
 	New      func(DBTX, Config) Checker
+	// ValidateSetting is nil for a check that accepts no settings.
+	ValidateSetting func(key, value string) error
 }
 
 type Metadata struct {

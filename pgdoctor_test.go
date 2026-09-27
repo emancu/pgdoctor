@@ -3,6 +3,12 @@ package pgdoctor
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -94,6 +100,36 @@ func TestValidateFilters(t *testing.T) {
 			assert.ElementsMatch(t, tt.expectedInval, invalid, "invalid filters should match")
 		})
 	}
+}
+
+func TestAllChecks_RegistersValidateSetting(t *testing.T) {
+	t.Parallel()
+
+	files, err := filepath.Glob("checks/*/*.go")
+	require.NoError(t, err)
+
+	exported := regexp.MustCompile(`(?m)^func ValidateSetting\(`)
+	var want []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		require.NoError(t, err)
+		if exported.Match(src) {
+			want = append(want, "github.com/emancu/pgdoctor/checks/"+filepath.Base(filepath.Dir(file))+".ValidateSetting")
+		}
+	}
+	require.NotEmpty(t, want)
+
+	var got []string
+	for _, pkg := range AllChecks() {
+		if pkg.ValidateSetting != nil {
+			got = append(got, runtime.FuncForPC(reflect.ValueOf(pkg.ValidateSetting).Pointer()).Name())
+		}
+	}
+
+	assert.ElementsMatch(t, want, got)
 }
 
 // fakeChecker is a test double that implements check.Checker.

@@ -38,6 +38,7 @@ type Checker interface {
 Each check package exports:
 - `Metadata()` function returning `check.Metadata`
 - `New(queryer, ...check.Config)` constructor returning `check.Checker`. The generated registry passes the per-check config; a check that has no settings names it `_`.
+- Optional: `ValidateSetting(key, value string) error` to accept `--config` keys. The generator registers it in `AllChecks()`. A check without it rejects every key.
 
 ### Check Structure
 
