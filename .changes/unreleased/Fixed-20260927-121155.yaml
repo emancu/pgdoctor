@@ -1,0 +1,6 @@
+kind: Fixed
+body: a `--config` alias to an anchor in another check section works. It failed with "unknown anchor"
+time: 2026-09-27T12:11:55.208015+01:00
+custom:
+    Component: CLI
+    PR: "195"
