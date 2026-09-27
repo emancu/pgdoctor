@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -219,6 +220,16 @@ func TestLoadConfigInvalid(t *testing.T) {
 			content: "pk-types: &limits\n  usage_warn_percent: *limits\n",
 			want:    []string{"pk-types: yaml: anchor 'limits' value contains itself"},
 		},
+		{
+			name:    "alias cycle inside an overridden merge key",
+			content: "session-settings: {timeout: 1000, <<: &d {timeout: *d}}\n",
+			want:    []string{"session-settings: YAML aliases expand too far (an alias cycle or too many aliases)"},
+		},
+		{
+			name:    "alias bomb inside an overridden merge key",
+			content: "session-settings: {timeout: 1000, <<: {timeout: [&a [x, x, x, x, x, x, x, x, x, x], &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a], &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b], &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c], [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]]}}\n",
+			want:    []string{"session-settings: YAML aliases expand too far (an alias cycle or too many aliases)"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -311,4 +322,18 @@ func TestLoadConfigReachesCheck(t *testing.T) {
 	report, err = sessionsettings.New(rows, cfg["session-settings"].(sessionsettings.Config)).Check(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
+}
+
+func TestLoadConfigLongListWithoutAliases(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString("table-vacuum-health:\n  ignore_tables:\n")
+	for i := range 12000 {
+		b.WriteString("    - public.t" + strconv.Itoa(i) + "\n")
+	}
+
+	_, err := loadConfig(writeConfig(t, b.String()), pgdoctor.AllChecks())
+
+	require.NoError(t, err)
 }
