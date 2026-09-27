@@ -229,7 +229,7 @@ func Test_EvictionRate(t *testing.T) {
 			name:         "no evictions",
 			row:          capacityRow(4200, 10000, 0, 30*day),
 			wantSeverity: check.SeverityPass,
-			wantInName:   "no evictions",
+			wantInName:   "no evictions in 30d",
 		},
 		{
 			name:         "occasional churn stays below the display floor",
