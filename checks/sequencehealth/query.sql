@@ -5,6 +5,7 @@ WITH sequence_info AS (
     s.schemaname::text AS schema_name
     , s.sequencename::text AS sequence_name
     , s.data_type::text AS seq_data_type
+    , s.min_value
     , s.max_value
     , s.increment_by
     , s.cycle AS is_cyclic
@@ -105,9 +106,16 @@ SELECT
   , COALESCE(so.column_type, '') AS column_type
   , COALESCE(so.column_max_value, 0) AS column_max_value
   -- Flag if sequence can generate values that exceed column type
-  , (so.column_max_value IS NOT NULL AND si.max_value > so.column_max_value) AS sequence_exceeds_column
-  -- Flag if this is an integer column that should probably be bigint
-  , (so.column_type != 'bigint' AND si.usage_percent > 50) AS should_be_bigint
+  , (
+    so.column_max_value IS NOT NULL
+    AND (si.max_value > so.column_max_value OR si.min_value < -so.column_max_value - 1)
+  ) AS sequence_exceeds_column
+  -- Usage of the column type range, from 0 toward the limit in the sequence direction
+  , CASE WHEN so.column_type IN ('integer', 'smallint') THEN ROUND(GREATEST(0, CASE
+    WHEN si.increment_by > 0
+      THEN si.current_value::numeric / so.column_max_value
+    ELSE -si.current_value::numeric / (so.column_max_value + 1)
+  END) * 100, 2) END AS column_usage_percent
   -- Flag if column is a primary key
   , (pk.table_oid IS NOT NULL) AS is_primary_key
   -- Count of foreign keys referencing this column
