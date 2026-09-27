@@ -14,7 +14,9 @@ import (
 	"github.com/emancu/pgdoctor"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/partitioning"
+	"github.com/emancu/pgdoctor/checks/pktypes"
 	"github.com/emancu/pgdoctor/checks/replicationlag"
+	"github.com/emancu/pgdoctor/checks/sequencehealth"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/checks/tablevacuumhealth"
 	"github.com/emancu/pgdoctor/db"
@@ -80,6 +82,34 @@ func TestLoadConfig(t *testing.T) {
 				PhysicalLagFailSeconds:   60,
 				PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 305, FailSeconds: 360}},
 			}},
+		},
+		{
+			name:    "alias across sections",
+			content: "pk-types: &limits\n  usage_warn_percent: 40\nsequence-health: *limits\n",
+			want: check.Config{
+				"pk-types":        pktypes.Config{UsageWarnPercent: 40, UsageFailPercent: 90},
+				"sequence-health": sequencehealth.Config{UsageWarnPercent: 40, UsageFailPercent: 90},
+			},
+		},
+		{
+			name:    "alias inside one section",
+			content: "replication-lag:\n  physical_lag_by_application:\n    a: &lag {warn_seconds: 305, fail_seconds: 360}\n    b: *lag\n",
+			want: check.Config{"replication-lag": replicationlag.Config{
+				PhysicalLagWarnSeconds: 5,
+				PhysicalLagFailSeconds: 60,
+				PhysicalLagByApplication: map[string]replicationlag.LagThresholds{
+					"a": {WarnSeconds: 305, FailSeconds: 360},
+					"b": {WarnSeconds: 305, FailSeconds: 360},
+				},
+			}},
+		},
+		{
+			name:    "merge key with an explicit key that wins",
+			content: "pk-types: &limits\n  usage_warn_percent: 40\n  usage_fail_percent: 80\nsequence-health:\n  usage_warn_percent: 30\n  <<: *limits\n",
+			want: check.Config{
+				"pk-types":        pktypes.Config{UsageWarnPercent: 40, UsageFailPercent: 80},
+				"sequence-health": sequencehealth.Config{UsageWarnPercent: 30, UsageFailPercent: 80},
+			},
 		},
 	}
 
@@ -167,6 +197,27 @@ func TestLoadConfigInvalid(t *testing.T) {
 				"session-settings: field timeuot not found in type sessionsettings.Config",
 				`unknown check "no-such-check"`,
 			},
+		},
+		{
+			name:    "unknown key through an alias",
+			content: "pk-types: &limits\n  usage_warn_percnt: 40\nsequence-health: *limits\n",
+			want: []string{
+				"pk-types: field usage_warn_percnt not found in type pktypes.Config",
+				"sequence-health: field usage_warn_percnt not found in type sequencehealth.Config",
+			},
+		},
+		{
+			name:    "unknown key through a merge key",
+			content: "replication-lag:\n  physical_lag_by_application:\n    a: &lag {warn_seconds: 305, fial_seconds: 360}\n    b:\n      <<: *lag\n",
+			want: []string{
+				"replication-lag: field fial_seconds not found in type replicationlag.LagThresholds",
+				"replication-lag: field fial_seconds not found in type replicationlag.LagThresholds",
+			},
+		},
+		{
+			name:    "anchor that contains itself",
+			content: "pk-types: &limits\n  usage_warn_percent: *limits\n",
+			want:    []string{"pk-types: yaml: anchor 'limits' value contains itself"},
 		},
 	}
 

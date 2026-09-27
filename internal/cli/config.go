@@ -51,6 +51,13 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			}
 			continue
 		}
+		// Decode rejects an anchor that contains itself and excessive aliasing.
+		// resolveAliases does not stop on the first and expands the second in full.
+		if err := node.Decode(new(any)); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
+			continue
+		}
+		resolveAliases(&node)
 		settings, err := yaml.Marshal(&node)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
@@ -76,4 +83,13 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 		return nil, fmt.Errorf("invalid config %s:\n  %s", path, strings.Join(problems, "\n  "))
 	}
 	return cfg, nil
+}
+
+func resolveAliases(n *yaml.Node) {
+	if n.Kind == yaml.AliasNode {
+		*n = *n.Alias
+	}
+	for _, child := range n.Content {
+		resolveAliases(child)
+	}
 }
