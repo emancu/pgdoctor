@@ -459,7 +459,7 @@ WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.relpersistence <> 't'
-  AND coalesce(s.n_live_tup, 0) > 10000
+  AND coalesce(s.n_live_tup, 0) >= $1::bigint
   AND coalesce(s.seq_scan, 0) > 100
 ORDER BY
   coalesce(s.seq_scan, 0) DESC
@@ -476,9 +476,9 @@ type HighSeqScanTablesRow struct {
 }
 
 // Identifies tables with excessive sequential scans relative to index scans.
-// Excludes: small tables, system schemas, temporary tables, tables with no indexes.
-func (q *Queries) HighSeqScanTables(ctx context.Context) ([]HighSeqScanTablesRow, error) {
-	rows, err := q.db.Query(ctx, highSeqScanTables)
+// Excludes: tables below min_rows, system schemas, temporary tables, tables with no indexes.
+func (q *Queries) HighSeqScanTables(ctx context.Context, minRows int64) ([]HighSeqScanTablesRow, error) {
+	rows, err := q.db.Query(ctx, highSeqScanTables, minRows)
 	if err != nil {
 		return nil, err
 	}
