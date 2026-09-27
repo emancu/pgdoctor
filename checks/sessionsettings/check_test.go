@@ -474,47 +474,6 @@ func Test_SessionSettings_ArbitraryRoleNames(t *testing.T) {
 	require.Equal(t, check.SeverityPass, results[0].Severity, "Arbitrary role names with optimal settings should be OK")
 }
 
-func Test_SessionSettings_ConfiguredRoleMissing(t *testing.T) {
-	t.Parallel()
-
-	settings := map[string]map[string]string{
-		"api_user": {
-			"statement_timeout":                   "3000",
-			"idle_in_transaction_session_timeout": "60000",
-			"transaction_timeout":                 "3000",
-			"log_min_duration_statement":          "2000",
-		},
-	}
-
-	cfg := sessionsettings.DefaultConfig()
-	cfg.Roles = []string{"api_user", "nonexistent"}
-
-	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
-
-	checker := sessionsettings.New(queryer, cfg)
-	report, err := checker.Check(context.Background())
-	require.NoError(t, err)
-	checktest.AssertSeverityInvariant(t, report)
-
-	results := report.Results
-	require.Equal(t, 1, len(results), "Should have exactly 1 result")
-
-	result := results[0]
-	require.Equal(t, check.SeverityWarn, result.Severity, "Missing configured role should warn")
-	require.NotNil(t, result.Table, "Result should have a table")
-
-	// Find the "Role not found" row
-	var foundRow *check.TableRow
-	for _, row := range result.Table.Rows {
-		if len(row.Cells) >= 5 && row.Cells[0] == "nonexistent" && row.Cells[4] == "Role not found" {
-			foundRow = &row
-			break
-		}
-	}
-	require.NotNil(t, foundRow, "Should find 'Role not found' row for nonexistent role")
-	require.Equal(t, "-", foundRow.Cells[2])
-}
-
 func Test_SessionSettings_CustomThreshold(t *testing.T) {
 	t.Parallel()
 
@@ -528,7 +487,7 @@ func Test_SessionSettings_CustomThreshold(t *testing.T) {
 		},
 	}
 
-	cfg := sessionsettings.Config{Roles: []string{"app_ro"}, Timeout: 2000}
+	cfg := sessionsettings.Config{Timeout: 2000}
 
 	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
 	checker := sessionsettings.New(queryer, cfg)
@@ -579,7 +538,7 @@ func Test_SessionSettings_DefaultThreshold(t *testing.T) {
 	}
 }
 
-func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
+func Test_SessionSettings_IgnoreRoles(t *testing.T) {
 	t.Parallel()
 
 	// DB has both api_user and worker_user
@@ -598,9 +557,8 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 		},
 	}
 
-	// Config only specifies api_user — worker_user should be ignored
 	cfg := sessionsettings.DefaultConfig()
-	cfg.Roles = []string{"api_user"}
+	cfg.IgnoreRoles = []string{"worker_user", "", "nonexistent"}
 
 	queryer := newStaticSessionSettingsQueryer(mapToSessionSettingsRows(settings))
 
@@ -612,8 +570,7 @@ func Test_SessionSettings_ConfigOverridesDiscovery(t *testing.T) {
 	results := report.Results
 	require.Equal(t, 1, len(results), "Should have exactly 1 result")
 
-	// Only api_user is checked (which has good settings), worker_user is ignored
-	require.Equal(t, check.SeverityPass, results[0].Severity, "Should only check configured roles")
+	require.Equal(t, check.SeverityPass, results[0].Severity, "Should skip ignored roles")
 }
 
 func Test_SessionSettings_RoleTimeout(t *testing.T) {
@@ -704,7 +661,7 @@ func TestConfig_Validate(t *testing.T) {
 		{"defaults", sessionsettings.DefaultConfig(), false},
 		{"zero timeout", sessionsettings.Config{}, true},
 		{"negative role timeout", sessionsettings.Config{Timeout: 5000, TimeoutByRole: map[string]int64{"dba_ro": -1}}, true},
-		{"empty role", sessionsettings.Config{Timeout: 5000, Roles: []string{""}}, true},
+		{"empty ignored role", sessionsettings.Config{Timeout: 5000, IgnoreRoles: []string{""}}, false},
 	}
 
 	for _, tt := range tests {

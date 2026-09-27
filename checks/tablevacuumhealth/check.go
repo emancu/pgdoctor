@@ -25,7 +25,7 @@ type TableVacuumHealthQueries interface {
 }
 
 type Config struct {
-	AutovacuumDisabledExclude []string `yaml:"autovacuum_disabled_exclude"`
+	IgnoreTables []string `yaml:"ignore_tables"`
 }
 
 func DefaultConfig() Config {
@@ -33,9 +33,9 @@ func DefaultConfig() Config {
 }
 
 func (c Config) Validate() error {
-	for _, prefix := range c.AutovacuumDisabledExclude {
+	for _, prefix := range c.IgnoreTables {
 		if prefix == "" {
-			return fmt.Errorf("autovacuum_disabled_exclude: empty prefix")
+			return fmt.Errorf("ignore_tables: empty prefix")
 		}
 	}
 	return nil
@@ -80,7 +80,7 @@ func Metadata() check.Metadata {
 }
 
 func New(queries TableVacuumHealthQueries, cfg Config) check.Checker {
-	return &checker{queries: queries, autovacuumDisabledExcludes: cfg.AutovacuumDisabledExclude}
+	return &checker{queries: queries, autovacuumDisabledExcludes: cfg.IgnoreTables}
 }
 
 func (c *checker) Metadata() check.Metadata {

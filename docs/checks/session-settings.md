@@ -2,7 +2,7 @@
 
 Verifies that PostgreSQL role-level session settings (timeouts and logging) are properly configured for application roles.
 
-By default, application roles are **discovered dynamically** — any login-capable, non-system role is checked. You can also specify exact roles via configuration (see Configuration below).
+By default, application roles are **discovered dynamically** — any login-capable, non-system role is checked. You can skip roles via configuration (see Configuration below).
 
 ## What it checks
 
@@ -103,17 +103,16 @@ WHERE r.rolcanlogin = true
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `roles` | List of roles to check | Discovered dynamically |
+| `ignore_roles` | List of discovered roles that the check skips | None |
 | `timeout` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` are a `Too high` WARN | `5000` |
 | `timeout_by_role` | A map from role to threshold (ms) for that role, in place of `timeout` | None |
 
-A role that is not in `timeout_by_role` uses `timeout`. A timeout value that is not a positive integer is an error. An empty role name in `roles` is an error. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
+A role that is not in `timeout_by_role` uses `timeout`. A timeout value that is not a positive integer is an error. pgdoctor ignores an empty item in `ignore_roles`. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
 
 ```yaml
 session-settings:
-  roles:
-    - app_rw
-    - dba_ro
+  ignore_roles:
+    - migrations
   timeout: 2000
   timeout_by_role:
     dba_ro: 300000
@@ -123,7 +122,7 @@ As a library, pass a `sessionsettings.Config` in `check.Config`:
 
 ```go
 cfg := sessionsettings.Config{
-    Roles:         []string{"app_rw", "dba_ro"},
+    IgnoreRoles:   []string{"migrations"},
     Timeout:       2000,
     TimeoutByRole: map[string]int64{"dba_ro": 300000},
 }

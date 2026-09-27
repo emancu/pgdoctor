@@ -318,7 +318,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := tablevacuumhealth.Config{AutovacuumDisabledExclude: tt.exclude}
+			cfg := tablevacuumhealth.Config{IgnoreTables: tt.exclude}
 			report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
@@ -339,14 +339,14 @@ func TestTableVacuumHealth_ConfigValidate(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, tablevacuumhealth.DefaultConfig().Validate())
-	require.NoError(t, tablevacuumhealth.Config{AutovacuumDisabledExclude: []string{"public.outbox_events"}}.Validate())
-	require.Error(t, tablevacuumhealth.Config{AutovacuumDisabledExclude: []string{"public.outbox_events", ""}}.Validate())
+	require.NoError(t, tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}.Validate())
+	require.Error(t, tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events", ""}}.Validate())
 }
 
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 	t.Parallel()
 
-	cfg := tablevacuumhealth.Config{AutovacuumDisabledExclude: []string{"public.outbox_events"}}
+	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").withAutovacuumDisabled().build(),
 	}
@@ -363,7 +363,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testing.T) {
 	t.Parallel()
 
-	cfg := tablevacuumhealth.Config{AutovacuumDisabledExclude: []string{"public.outbox_events"}}
+	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").
 			withAutovacuumDisabled().

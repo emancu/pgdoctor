@@ -37,8 +37,8 @@ func TestLoadConfig(t *testing.T) {
 	}{
 		{
 			name:    "valid",
-			content: "session-settings:\n  timeout: 1000\n  roles: [app_ro, app_rw]\n",
-			want:    check.Config{"session-settings": sessionsettings.Config{Timeout: 1000, Roles: []string{"app_ro", "app_rw"}}},
+			content: "session-settings:\n  timeout: 1000\n  ignore_roles: [dba_ro, migrations]\n",
+			want:    check.Config{"session-settings": sessionsettings.Config{Timeout: 1000, IgnoreRoles: []string{"dba_ro", "migrations"}}},
 		},
 		{
 			name:    "empty",
@@ -61,10 +61,10 @@ func TestLoadConfig(t *testing.T) {
 		},
 		{
 			name:    "role timeout and table prefixes",
-			content: "session-settings:\n  timeout_by_role:\n    dba_ro: 300000\ntable-vacuum-health:\n  autovacuum_disabled_exclude:\n    - public.outbox\n",
+			content: "session-settings:\n  timeout_by_role:\n    dba_ro: 300000\ntable-vacuum-health:\n  ignore_tables:\n    - public.outbox\n",
 			want: check.Config{
 				"session-settings":    sessionsettings.Config{Timeout: 5000, TimeoutByRole: map[string]int64{"dba_ro": 300000}},
-				"table-vacuum-health": tablevacuumhealth.Config{AutovacuumDisabledExclude: []string{"public.outbox"}},
+				"table-vacuum-health": tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox"}},
 			},
 		},
 		{
@@ -115,8 +115,8 @@ func TestLoadConfigInvalid(t *testing.T) {
 		},
 		{
 			name:    "comma string for a list",
-			content: "session-settings:\n  roles: app_ro,app_rw\n",
-			want:    []string{"session-settings: cannot unmarshal !!str `app_ro,...` into []string"},
+			content: "session-settings:\n  ignore_roles: dba_ro,migrations\n",
+			want:    []string{"session-settings: cannot unmarshal !!str `dba_ro,...` into []string"},
 		},
 		{
 			name:    "unknown key",

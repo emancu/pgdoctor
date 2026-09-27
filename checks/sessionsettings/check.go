@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/emancu/pgdoctor/check"
@@ -33,7 +34,7 @@ type settingCheck struct {
 }
 
 type Config struct {
-	Roles         []string         `yaml:"roles"`
+	IgnoreRoles   []string         `yaml:"ignore_roles"`
 	Timeout       int64            `yaml:"timeout"` // milliseconds
 	TimeoutByRole map[string]int64 `yaml:"timeout_by_role"`
 }
@@ -49,11 +50,6 @@ func (c Config) Validate() error {
 	for role, n := range c.TimeoutByRole {
 		if n <= 0 {
 			return fmt.Errorf("timeout_by_role.%s: %d is not a positive integer", role, n)
-		}
-	}
-	for _, role := range c.Roles {
-		if role == "" {
-			return fmt.Errorf("roles: empty role name")
 		}
 	}
 	return nil
@@ -93,11 +89,9 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	dbSettings := dbSessionSettings(settings)
 
-	// Determine which roles to check
-	roles := dbSettings.roles() // dynamic discovery
-	if len(c.cfg.Roles) > 0 {
-		roles = c.cfg.Roles // override with configured roles
-	}
+	roles := slices.DeleteFunc(dbSettings.roles(), func(role string) bool {
+		return slices.Contains(c.cfg.IgnoreRoles, role)
+	})
 
 	if len(roles) == 0 {
 		report.AddFinding(check.Finding{
@@ -113,18 +107,6 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	var checks []settingCheck
 
 	for _, role := range roles {
-		if !dbSettings.hasRole(role) {
-			checks = append(checks, settingCheck{
-				Role:      role,
-				Parameter: "(all)",
-				Current:   "-",
-				Expected:  "Role exists",
-				Status:    "Role not found",
-				Severity:  check.SeverityWarn,
-			})
-			continue
-		}
-
 		timeouts, err := c.checkUserTimeouts(dbSettings, role)
 		if err != nil {
 			return nil, fmt.Errorf("checking timeouts for %s: %w", role, err)
@@ -350,16 +332,6 @@ func (s dbSessionSettings) roles() []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-// hasRole checks if a role exists in the query results.
-func (s dbSessionSettings) hasRole(role string) bool {
-	for _, row := range s {
-		if row.RoleName.Valid && row.RoleName.String == role {
-			return true
-		}
-	}
-	return false
 }
 
 // fetch returns the millisecond value of a setting for a user.

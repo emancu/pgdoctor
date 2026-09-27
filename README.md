@@ -78,7 +78,7 @@ A config file changes the settings of a check. Each check README lists the keys 
 
 ```yaml
 session-settings:
-  roles: [app_rw, dba_ro]
+  ignore_roles: [migrations]
   timeout: 5000
   timeout_by_role:
     dba_ro: 300000
