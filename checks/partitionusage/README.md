@@ -147,13 +147,19 @@ Queries referencing a partition leaf directly (e.g. `orders_2025_01`) are not at
 
 ### Keys constrained through a JOIN
 
-The key counts as used when it is constrained anywhere after `FROM`, including a `JOIN ... ON` condition. Such a query prunes when the planner parameterizes the partitioned side (a nested loop) and does not prune when it hash joins, which cannot be told from the query text. The check treats it as used, preferring silence over reporting a table whose access path may well be pruning. Confirm an individual query with:
+The key counts as used when it is constrained anywhere after `FROM`, including a `JOIN ... ON` condition. Such a query prunes when the planner parameterizes the partitioned side (a nested loop) and does not prune when it hash joins, which cannot be told from the query text. The check treats it as used, preferring silence over reporting a table whose access path may well be pruning. To confirm an individual query, run `EXPLAIN` on the query text with a real value in place of each `$n` placeholder:
 
 ```sql
-EXPLAIN (GENERIC_PLAN, COSTS OFF) <query text with its $n placeholders>;  -- PostgreSQL 16+
+EXPLAIN (COSTS OFF) <query text with a real value for each $n>;
 ```
 
-`Subplans Removed: N` means pruning happens; all partitions listed means it does not.
+If the partitioned table is on the inner side of a `Nested Loop` and the key is in its index condition, the executor prunes at run time. The plan still lists every partition. If the plan uses a `Hash Join` and lists every partition, pruning does not happen.
+
+A real value can give a different plan from the plan that the application gets with parameters. Use values that are typical for the application.
+
+Do not use `EXPLAIN (GENERIC_PLAN)`. It has no values for the `$n` placeholders, so it cannot prune and always lists every partition.
+
+`EXPLAIN` takes a lock on the table, on every partition, and on every index. If DDL holds a lock on one of them, `EXPLAIN` waits, and DDL that comes after it waits too. Run `EXPLAIN` on a replica or at a quiet time.
 
 ### Subqueries and CTEs
 
