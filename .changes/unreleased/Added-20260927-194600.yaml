@@ -2,5 +2,5 @@ kind: Added
 body: '`pgdoctor.LoadConfig` reads a config file, with the same validation as the `--config` flag'
 time: 2026-09-27T19:46:00.066083+01:00
 custom:
-    Component: library
+    Component: Config
     PR: "207"
