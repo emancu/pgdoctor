@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -21,9 +23,13 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var raw map[string]yaml.Node
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := dec.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+	}
+	if err := dec.Decode(&yaml.Node{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("parsing config %s: expected one YAML document", path)
 	}
 
 	known := map[string]check.Package{}

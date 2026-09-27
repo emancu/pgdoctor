@@ -1,0 +1,6 @@
+kind: Fixed
+body: a `--config` file with more than one YAML document is a config error (exit 2). Only the first document was read, so settings after a `---` had no effect
+time: 2026-09-27T12:07:21.234441+01:00
+custom:
+    Component: CLI
+    PR: "193"

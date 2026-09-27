@@ -46,6 +46,11 @@ func TestLoadConfig(t *testing.T) {
 			want:    check.Config{},
 		},
 		{
+			name:    "one document with markers",
+			content: "---\nsession-settings:\n  timeout: 1000\n...\n",
+			want:    check.Config{"session-settings": sessionsettings.Config{Timeout: 1000}},
+		},
+		{
 			name:    "check without settings",
 			content: "pg-version: {}\n",
 			want:    check.Config{},
@@ -195,6 +200,31 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	_, err := loadConfig(writeConfig(t, "session-settings: [\n"), pgdoctor.AllChecks())
 
 	require.ErrorContains(t, err, "parsing config")
+}
+
+func TestLoadConfigMultipleDocuments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "two documents", content: "session-settings:\n  timeout: 1000\n---\npk-types:\n  usage_warn_percent: 40\n"},
+		{name: "unknown key in the second document", content: "session-settings:\n  timeout: 1000\n---\nsession-settings:\n  timeuot: 1\n"},
+		{name: "empty second document", content: "session-settings:\n  timeout: 1000\n---\n"},
+		{name: "invalid second document", content: "session-settings:\n  timeout: 1000\n---\nsession-settings: [\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
+
+			require.ErrorContains(t, err, "expected one YAML document")
+			assert.Nil(t, cfg)
+		})
+	}
 }
 
 type sessionSettingsQueryer []db.SessionSettingsRow
