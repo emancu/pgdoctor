@@ -147,7 +147,7 @@ func reportEvictionRate(row db.QueryStatsCapacityRow, report *check.Report) {
 	if !row.RecycleHours.Valid {
 		report.AddFinding(check.Finding{
 			ID:       rateID,
-			Name:     rateName + ": no evictions",
+			Name:     fmt.Sprintf("%s: no evictions in %s", rateName, check.FormatDurationSec(int64(row.WindowSeconds.Float64))),
 			Severity: check.SeverityPass,
 		})
 
