@@ -358,7 +358,7 @@ Set it above the idle floor that your pools keep on purpose. In a `--config` fil
 
 ```yaml
 connection-health:
-  long_idle_warn_count: "300"
+  long_idle_warn_count: 300
 ```
 
 As a library, pass the same key in `check.Config`:
