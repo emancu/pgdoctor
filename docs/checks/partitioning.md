@@ -1,12 +1,12 @@
 # Table Partitioning Check
 
-Validates that large tables (>= 10M rows) are properly partitioned according to architecture guidelines.
+Validates that large tables are properly partitioned according to architecture guidelines.
 
 ## How to Fix
 
 ### For `large-unpartitioned`
 
-Tables with >=25M rows must be partitioned to improve query performance, maintenance, and archival:
+Tables with >= 50M rows (see Configuration) should be partitioned to improve query performance, maintenance, and archival:
 
 **Strategy 1: Range partitioning (for time-series data)**
 
@@ -99,21 +99,17 @@ DROP TABLE sales_2024;
 
 Identifies large business tables that are not partitioned.
 
-**Standard Thresholds:**
-- Warning: Tables with >= 25M rows not partitioned
-- Critical: Tables with >= 50M rows not partitioned
+**Threshold:** Tables with >= 50M rows not partitioned (see Configuration).
 
-**Activity-Aware Thresholds (lower for write-heavy tables):**
-- Warning: Tables with >= 10M rows not partitioned
-- Critical: Tables with >= 25M rows not partitioned
+The `Reason` column shows the write pattern of each table:
 
-| Table Type | WARN | FAIL |
-|------------|------|------|
-| Regular | 25M rows | 50M rows |
-| Insert-heavy (>80% inserts) | 10M rows | 25M rows |
-| High-delete (>20% deletes/inserts) | 10M rows | 25M rows |
+| Reason | Write pattern |
+|--------|---------------|
+| Insert-heavy | >80% inserts |
+| High-delete | >20% deletes/inserts |
+| Large table | Neither |
 
-**Why activity-aware?** Write-heavy tables benefit more from partitioning:
+**Why the write pattern matters:** Write-heavy tables benefit more from partitioning:
 - INSERT-heavy often means time-series data; partitions enable `DROP PARTITION` vs slow `DELETE`
 - High insert rates cause B-tree page splits and index bloat
 - More inserts = more dead tuples from subsequent updates/deletes requiring vacuum
@@ -123,7 +119,7 @@ Identifies large business tables that are not partitioned.
 
 ### transient-unpartitioned
 
-Identifies large transient tables (outbox, inbox, jobs, queues) that are not partitioned.
+Identifies large transient tables (outbox, inbox, jobs, queues) with >= 10M rows (see Configuration) that are not partitioned.
 
 **Detected table patterns (regex):**
 - `outbox`, `inbox` - Event sourcing tables
@@ -148,6 +144,8 @@ Identifies individual partitions that have grown too large (>= 10M rows by defau
 | Key | Description | Default |
 |-----|-------------|---------|
 | `inefficient_partitions_min_rows` | Row count at which `inefficient-partitions` reports a partition | `10000000` |
+| `large_unpartitioned_min_rows` | Row count at which `large-unpartitioned` reports a table | `50000000` |
+| `transient_unpartitioned_min_rows` | Row count at which `transient-unpartitioned` reports a transient table | `10000000` |
 
 A value that is not a positive integer is ignored.
 

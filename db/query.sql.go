@@ -1180,10 +1180,15 @@ WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'pgpartman', 'debezium', 'cron')
   AND COALESCE(s.n_live_tup, 0) >= CASE
-    WHEN ii.parent_table IS NULL THEN 10000000
-    ELSE $1::bigint
+    WHEN ii.parent_table IS NULL THEN $1::bigint
+    ELSE $2::bigint
   END
 `
+
+type LargeTablesParams struct {
+	MinTableRows     int64
+	MinPartitionRows int64
+}
 
 type LargeTablesRow struct {
 	TableName      pgtype.Text
@@ -1198,11 +1203,11 @@ type LargeTablesRow struct {
 	NTupDel        pgtype.Int8
 }
 
-// Identifies all large tables (>= 10M rows) and large partitions (>= min_partition_rows) with partitioning and transient status.
+// Identifies all large tables (>= min_table_rows) and large partitions (>= min_partition_rows) with partitioning and transient status.
 // Returns both regular and partitioned tables for unified analysis.
-// Includes activity metrics (inserts/updates/deletes) for activity-aware thresholds.
-func (q *Queries) LargeTables(ctx context.Context, minPartitionRows int64) ([]LargeTablesRow, error) {
-	rows, err := q.db.Query(ctx, largeTables, minPartitionRows)
+// Includes activity metrics (inserts/updates/deletes) as context for each table.
+func (q *Queries) LargeTables(ctx context.Context, arg LargeTablesParams) ([]LargeTablesRow, error) {
+	rows, err := q.db.Query(ctx, largeTables, arg.MinTableRows, arg.MinPartitionRows)
 	if err != nil {
 		return nil, err
 	}
