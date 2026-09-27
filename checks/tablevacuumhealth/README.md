@@ -20,7 +20,7 @@ These tables rely entirely on manual maintenance. Common legitimate uses:
 - Bulk import staging tables (re-enable after import)
 - Tables managed by external ETL processes
 
-To stop the report of a table that has autovacuum disabled on purpose, use the `autovacuum_disabled_exclude` key (see Configuration).
+To stop the report of a table that has autovacuum disabled on purpose, use the `ignore_tables` key (see Configuration).
 
 ### large-table-defaults
 
@@ -167,30 +167,28 @@ When the analyze arm is the one tripping, run `ANALYZE schema.table_name` (or lo
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `autovacuum_disabled_exclude` | Comma-separated table-name prefixes that `autovacuum-disabled` does not report | None |
+| `ignore_tables` | List of table-name prefixes that the `autovacuum-disabled` finding does not report. The other findings still report these tables | None |
 
-A prefix matches the schema-qualified table name (`schema.table`). A prefix matches every name that starts with it: `public.outbox` also matches `public.outbox_archive`. The match is case-sensitive. Empty entries are ignored. The key changes only the `autovacuum-disabled` finding: the other findings still report an excluded table.
+A prefix matches the schema-qualified table name (`schema.table`). A prefix matches every name that starts with it: `public.outbox` also matches `public.outbox_archive`. The match is case-sensitive. An empty prefix is an error. The key changes only the `autovacuum-disabled` finding: the other findings still report an excluded table.
 
 A partition leaf matches only when its name starts with the prefix. `public.outbox_events` matches `public.outbox_events_p20260101`, but not a leaf with a different name or in another schema.
 
 ```yaml
 table-vacuum-health:
-  autovacuum_disabled_exclude:
+  ignore_tables:
     - public.outbox_events
     - public.audit_logs
 ```
 
-As a library, pass the same key in `check.Config`:
+As a library, pass a `tablevacuumhealth.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "table-vacuum-health": {
-        "autovacuum_disabled_exclude": "public.outbox_events,public.audit_logs",
-    },
+cfg := tablevacuumhealth.Config{
+    IgnoreTables: []string{"public.outbox_events", "public.audit_logs"},
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Checks: pgdoctor.AllChecks(),
-    Config: cfg,
+    Config: check.Config{"table-vacuum-health": cfg},
 })
 ```
 

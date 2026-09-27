@@ -95,7 +95,7 @@ func Test_Partitioning_NoLargeTables(t *testing.T) {
 
 	queryer := newMockQueryer([]db.LargeTablesRow{})
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -119,7 +119,7 @@ func Test_Partitioning_AllPartitioned(t *testing.T) {
 
 	queryer := newMockQueryer(tables)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func Test_Partitioning_LargeUnpartitioned_Warning(t *testing.T) {
 
 	queryer := newMockQueryer(tables)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -165,7 +165,7 @@ func Test_Partitioning_TransientUnpartitioned(t *testing.T) {
 
 	queryer := newMockQueryer(tables)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -196,7 +196,7 @@ func Test_Partitioning_MixedResults(t *testing.T) {
 
 	queryer := newMockQueryer(tables)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -237,7 +237,7 @@ func Test_Partitioning_InefficientPartitions(t *testing.T) {
 
 	queryer := newMockQueryer(tables)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -263,32 +263,21 @@ func Test_Partitioning_MinPartitionRowsConfig(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		cfg         check.Config
+		cfg         partitioning.Config
 		wantMinRows int64
 		wantDetails string
 	}{
 		{
 			name:        "default",
+			cfg:         partitioning.DefaultConfig(),
 			wantMinRows: 10_000_000,
 			wantDetails: ">= 10.0M rows",
 		},
 		{
 			name:        "configured",
-			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "25000000"}},
+			cfg:         partitioning.Config{InefficientPartitionsMinRows: 25_000_000, LargeUnpartitionedMinRows: 50_000_000, TransientUnpartitionedMinRows: 10_000_000},
 			wantMinRows: 25_000_000,
 			wantDetails: ">= 25.0M rows",
-		},
-		{
-			name:        "zero",
-			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "0"}},
-			wantMinRows: 10_000_000,
-			wantDetails: ">= 10.0M rows",
-		},
-		{
-			name:        "not an integer",
-			cfg:         check.Config{"partitioning": {"inefficient_partitions_min_rows": "25M"}},
-			wantMinRows: 10_000_000,
-			wantDetails: ">= 10.0M rows",
 		},
 	}
 
@@ -321,7 +310,7 @@ func Test_Partitioning_QueryError(t *testing.T) {
 	expectedErr := fmt.Errorf("database connection error")
 	queryer := newMockQueryerWithError(expectedErr)
 
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	_, err := checker.Check(context.Background())
 
 	require.Error(t, err)
@@ -332,7 +321,7 @@ func Test_Partitioning_Metadata(t *testing.T) {
 	t.Parallel()
 
 	queryer := newMockQueryer([]db.LargeTablesRow{})
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	metadata := checker.Metadata()
 
 	require.Equal(t, "partitioning", metadata.CheckID)
@@ -368,7 +357,7 @@ func Test_Partitioning_Thresholds(t *testing.T) {
 			queryer := newMockQueryer([]db.LargeTablesRow{
 				makeTable("public", "test_table", tc.rows, false, tc.transient),
 			})
-			report, err := partitioning.New(queryer).Check(context.Background())
+			report, err := partitioning.New(queryer, partitioning.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -395,7 +384,7 @@ func Test_Partitioning_PrescriptionContent(t *testing.T) {
 	}
 
 	queryer := newMockQueryer(tables)
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -418,7 +407,7 @@ func Test_Partitioning_TransientPrescriptionContent(t *testing.T) {
 	}
 
 	queryer := newMockQueryer(tables)
-	checker := partitioning.New(queryer)
+	checker := partitioning.New(queryer, partitioning.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -489,7 +478,7 @@ func Test_Partitioning_ActivityContext(t *testing.T) {
 			queryer := newMockQueryer([]db.LargeTablesRow{
 				makeTableWithActivity("public", "test_table", tc.rows, tc.inserts, tc.updates, tc.deletes, false, false),
 			})
-			report, err := partitioning.New(queryer).Check(context.Background())
+			report, err := partitioning.New(queryer, partitioning.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -518,36 +507,30 @@ func Test_Partitioning_RowThresholdConfig(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		settings      map[string]string
+		cfg           partitioning.Config
 		wantQueryRows int64
 		wantLarge     check.Severity
 		wantTransient check.Severity
 	}{
 		{
 			name:          "defaults",
+			cfg:           partitioning.DefaultConfig(),
 			wantQueryRows: 10_000_000,
 			wantLarge:     check.SeverityPass,
 			wantTransient: check.SeverityPass,
 		},
 		{
 			name:          "lower thresholds lower the query floor",
-			settings:      map[string]string{"large_unpartitioned_min_rows": "5000000", "transient_unpartitioned_min_rows": "2000000"},
+			cfg:           partitioning.Config{InefficientPartitionsMinRows: 10_000_000, LargeUnpartitionedMinRows: 5_000_000, TransientUnpartitionedMinRows: 2_000_000},
 			wantQueryRows: 2_000_000,
 			wantLarge:     check.SeverityWarn,
 			wantTransient: check.SeverityWarn,
 		},
 		{
 			name:          "large threshold below transient threshold sets the query floor",
-			settings:      map[string]string{"large_unpartitioned_min_rows": "5000000"},
+			cfg:           partitioning.Config{InefficientPartitionsMinRows: 10_000_000, LargeUnpartitionedMinRows: 5_000_000, TransientUnpartitionedMinRows: 10_000_000},
 			wantQueryRows: 5_000_000,
 			wantLarge:     check.SeverityWarn,
-			wantTransient: check.SeverityPass,
-		},
-		{
-			name:          "invalid values keep the defaults",
-			settings:      map[string]string{"large_unpartitioned_min_rows": "0", "transient_unpartitioned_min_rows": "5M"},
-			wantQueryRows: 10_000_000,
-			wantLarge:     check.SeverityPass,
 			wantTransient: check.SeverityPass,
 		},
 	}
@@ -560,7 +543,7 @@ func Test_Partitioning_RowThresholdConfig(t *testing.T) {
 				makeTable("public", "orders", 6_000_000, false, false),
 				makeTable("public", "outbox", 3_000_000, false, true),
 			})
-			report, err := partitioning.New(queryer, check.Config{"partitioning": tt.settings}).Check(context.Background())
+			report, err := partitioning.New(queryer, tt.cfg).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -575,31 +558,25 @@ func Test_Partitioning_RowThresholdConfig(t *testing.T) {
 	}
 }
 
-func Test_Partitioning_ValidateSetting(t *testing.T) {
+func Test_Partitioning_ConfigValidate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		key     string
-		value   string
+		name    string
+		cfg     partitioning.Config
 		wantErr bool
 	}{
-		{key: "inefficient_partitions_min_rows", value: "25000000"},
-		{key: "large_unpartitioned_min_rows", value: "100000000"},
-		{key: "transient_unpartitioned_min_rows", value: "1000000"},
-		{key: "large_unpartitioned_min_rows", value: "0", wantErr: true},
-		{key: "large_unpartitioned_min_rows", value: "-1", wantErr: true},
-		{key: "large_unpartitioned_min_rows", value: "50M", wantErr: true},
-		{key: "transient_unpartitioned_min_rows", value: "1.5", wantErr: true},
-		{key: "transient_unpartitioned_min_rows", value: "99999999999999999999", wantErr: true},
-		{key: "inefficient_partitions_min_rows", value: "", wantErr: true},
-		{key: "large_tables_min_rows", value: "50000000", wantErr: true},
+		{name: "defaults", cfg: partitioning.DefaultConfig()},
+		{name: "zero inefficient", cfg: partitioning.Config{LargeUnpartitionedMinRows: 1, TransientUnpartitionedMinRows: 1}, wantErr: true},
+		{name: "negative large", cfg: partitioning.Config{InefficientPartitionsMinRows: 1, LargeUnpartitionedMinRows: -1, TransientUnpartitionedMinRows: 1}, wantErr: true},
+		{name: "zero transient", cfg: partitioning.Config{InefficientPartitionsMinRows: 1, LargeUnpartitionedMinRows: 1}, wantErr: true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := partitioning.ValidateSetting(tt.key, tt.value)
+			err := tt.cfg.Validate()
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

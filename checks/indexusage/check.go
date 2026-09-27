@@ -44,7 +44,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries IndexUsageQueries, _ ...check.Config) check.Checker {
+func New(queries IndexUsageQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}

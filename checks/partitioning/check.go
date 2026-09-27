@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -19,6 +18,27 @@ var readme string
 
 type PartitioningQueries interface {
 	LargeTables(ctx context.Context, arg db.LargeTablesParams) ([]db.LargeTablesRow, error)
+}
+
+type Config struct {
+	InefficientPartitionsMinRows  int64 `yaml:"inefficient_partitions_min_rows"`
+	LargeUnpartitionedMinRows     int64 `yaml:"large_unpartitioned_min_rows"`
+	TransientUnpartitionedMinRows int64 `yaml:"transient_unpartitioned_min_rows"`
+}
+
+func DefaultConfig() Config {
+	return Config{
+		InefficientPartitionsMinRows:  10_000_000,
+		LargeUnpartitionedMinRows:     50_000_000,
+		TransientUnpartitionedMinRows: 10_000_000,
+	}
+}
+
+func (c Config) Validate() error {
+	if c.InefficientPartitionsMinRows <= 0 || c.LargeUnpartitionedMinRows <= 0 || c.TransientUnpartitionedMinRows <= 0 {
+		return fmt.Errorf("row thresholds must be positive integers")
+	}
+	return nil
 }
 
 type checker struct {
@@ -45,39 +65,13 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries PartitioningQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
+func New(queries PartitioningQueries, cfg Config) check.Checker {
+	return &checker{
 		queries:          queries,
-		minPartitionRows: 10_000_000,
-		largeMinRows:     50_000_000,
-		transientMinRows: 10_000_000,
+		minPartitionRows: cfg.InefficientPartitionsMinRows,
+		largeMinRows:     cfg.LargeUnpartitionedMinRows,
+		transientMinRows: cfg.TransientUnpartitionedMinRows,
 	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			for key, dst := range map[string]*int64{
-				"inefficient_partitions_min_rows":  &c.minPartitionRows,
-				"large_unpartitioned_min_rows":     &c.largeMinRows,
-				"transient_unpartitioned_min_rows": &c.transientMinRows,
-			} {
-				if n, err := strconv.ParseInt(myCfg[key], 10, 64); err == nil && n > 0 {
-					*dst = n
-				}
-			}
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, value string) error {
-	switch key {
-	case "inefficient_partitions_min_rows", "large_unpartitioned_min_rows", "transient_unpartitioned_min_rows":
-	default:
-		return fmt.Errorf("unknown key %q", key)
-	}
-	if n, err := strconv.ParseInt(value, 10, 64); err != nil || n <= 0 {
-		return fmt.Errorf("%s: %q is not a positive integer", key, value)
-	}
-	return nil
 }
 
 func (c *checker) Metadata() check.Metadata {

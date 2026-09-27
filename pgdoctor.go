@@ -3,15 +3,18 @@
 package pgdoctor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.yaml.in/yaml/v3"
 )
 
 // DefaultStatementTimeoutMs is the PostgreSQL statement_timeout in milliseconds.
@@ -34,6 +37,8 @@ type Options struct {
 }
 
 // Run executes checks sequentially against the given connection.
+// A check that fails, or whose entry in Options.Config is invalid, reports SKIP
+// with the reason.
 //
 // Important: callers should SET statement_timeout on the connection before calling Run()
 // to prevent slow queries from blocking the database. See DefaultStatementTimeoutMs.
@@ -46,15 +51,16 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 	ctx = withServerVersion(ctx, conn)
 
 	for _, pkg := range opts.Checks {
-		checker := pkg.New(conn, opts.Config)
-
 		start := time.Now()
-		report, err := checker.Check(ctx)
+		checker, err := pkg.New(conn, opts.Config)
+		var report *check.Report
+		if err == nil {
+			report, err = checker.Check(ctx)
+		}
 		elapsed := time.Since(start)
 
 		if err != nil {
-			metadata := checker.Metadata()
-			report = check.NewReport(metadata)
+			report = check.NewReport(pkg.Metadata())
 			report.Severity = check.SeveritySkip
 
 			detail := err.Error()
@@ -73,6 +79,17 @@ func Run(ctx context.Context, conn db.DBTX, opts Options) {
 		report.Duration = elapsed
 		onReport(report)
 	}
+}
+
+// decodeConfig decodes YAML settings over dst and rejects a key that dst does
+// not declare, at any depth. Empty or null settings leave dst unchanged.
+func decodeConfig(data []byte, dst any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 // withServerVersion fills the engine version from the server when the

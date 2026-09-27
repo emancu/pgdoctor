@@ -158,7 +158,7 @@ func (b *rowBuilder) build() db.TableVacuumHealthRow {
 func runCheck(t *testing.T, rows []db.TableVacuumHealthRow) *check.Report {
 	t.Helper()
 
-	checker := tablevacuumhealth.New(&mockQueryer{rows: rows})
+	checker := tablevacuumhealth.New(&mockQueryer{rows: rows}, tablevacuumhealth.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
@@ -300,28 +300,17 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		cfg      check.Config
+		exclude  []string
 		expected []string
 	}{
 		{
 			name:     "no config reports every table",
-			cfg:      nil,
 			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders"},
 		},
 		{
 			name:     "prefix excludes a table and its partition leaves by schema-qualified name",
-			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events,tenant_1.outbox_events,public.audit_logs"}},
+			exclude:  []string{"public.outbox_events", "tenant_1.outbox_events", "public.audit_logs"},
 			expected: []string{"public.staging", "audit_logs.orders"},
-		},
-		{
-			name:     "empty entries and spaces are ignored",
-			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ",public.outbox_events, ,public.audit_logs ,"}},
-			expected: []string{"tenant_1.outbox_events_p20260101", "public.staging", "audit_logs.orders"},
-		},
-		{
-			name:     "empty value reports every table",
-			cfg:      check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": ""}},
-			expected: []string{"public.outbox_events", "tenant_1.outbox_events_p20260101", "public.audit_logs", "public.staging", "audit_logs.orders"},
 		},
 	}
 
@@ -329,7 +318,8 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, tt.cfg).Check(context.Background())
+			cfg := tablevacuumhealth.Config{IgnoreTables: tt.exclude}
+			report, err := tablevacuumhealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -345,10 +335,18 @@ func TestTableVacuumHealth_AutovacuumDisabled_Exclude(t *testing.T) {
 	}
 }
 
+func TestTableVacuumHealth_ConfigValidate(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, tablevacuumhealth.DefaultConfig().Validate())
+	require.NoError(t, tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}.Validate())
+	require.Error(t, tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events", ""}}.Validate())
+}
+
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 	t.Parallel()
 
-	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
+	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").withAutovacuumDisabled().build(),
 	}
@@ -365,7 +363,7 @@ func TestTableVacuumHealth_AutovacuumDisabled_ExcludeAll(t *testing.T) {
 func TestTableVacuumHealth_AutovacuumDisabled_ExcludeKeepsOtherFindings(t *testing.T) {
 	t.Parallel()
 
-	cfg := check.Config{"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox_events"}}
+	cfg := tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox_events"}}
 	rows := []db.TableVacuumHealthRow{
 		makeRow("public.outbox_events").
 			withAutovacuumDisabled().
@@ -905,7 +903,7 @@ func TestTableVacuumHealth_VacuumStale_SameNameInTwoSchemas(t *testing.T) {
 func TestTableVacuumHealth_QueryError(t *testing.T) {
 	t.Parallel()
 
-	checker := tablevacuumhealth.New(&mockQueryer{err: fmt.Errorf("database connection error")})
+	checker := tablevacuumhealth.New(&mockQueryer{err: fmt.Errorf("database connection error")}, tablevacuumhealth.DefaultConfig())
 	_, err := checker.Check(context.Background())
 
 	require.Error(t, err)
@@ -915,7 +913,7 @@ func TestTableVacuumHealth_QueryError(t *testing.T) {
 func TestTableVacuumHealth_Metadata(t *testing.T) {
 	t.Parallel()
 
-	metadata := tablevacuumhealth.New(&mockQueryer{}).Metadata()
+	metadata := tablevacuumhealth.New(&mockQueryer{}, tablevacuumhealth.DefaultConfig()).Metadata()
 
 	assert.Equal(t, "table-vacuum-health", metadata.CheckID)
 	assert.Equal(t, "Table Vacuum Health", metadata.Name)

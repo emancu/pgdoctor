@@ -49,7 +49,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ToastStorageQueries, _ ...check.Config) check.Checker {
+func New(queries ToastStorageQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}

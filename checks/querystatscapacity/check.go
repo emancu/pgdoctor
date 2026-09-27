@@ -51,7 +51,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries QueryStatsCapacityQueries, _ ...check.Config) check.Checker {
+func New(queries QueryStatsCapacityQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}

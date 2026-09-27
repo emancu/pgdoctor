@@ -37,8 +37,8 @@ type Checker interface {
 
 Each check package exports:
 - `Metadata()` function returning `check.Metadata`
-- `New(queryer, ...check.Config)` constructor returning `check.Checker`. The generated registry passes the per-check config; a check that has no settings names it `_`.
-- Optional: `ValidateSetting(key, value string) error` to accept `--config` keys. The generator registers it in `AllChecks()`. A check without it rejects every key.
+- `New(queryer)` constructor returning `check.Checker`
+- Optional: settings. See [Check Settings](#check-settings). A check without settings rejects every `--config` key.
 
 ### Check Structure
 
@@ -94,7 +94,7 @@ func Metadata() check.Metadata {
     }
 }
 
-func New(queryer MyQueryQueries, _ ...check.Config) check.Checker {
+func New(queryer MyQueryQueries) check.Checker {
     return &checker{queryer: queryer}
 }
 
@@ -129,6 +129,39 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
     return report, nil
 }
 ```
+
+### Check Settings
+
+A check with settings exports a `Config` struct with `yaml` tags, `DefaultConfig()`, and `(Config) Validate() error`. Its constructor takes the `Config`:
+
+```go
+type Config struct {
+    WarnPercent float64  `yaml:"warn_percent"`
+    FailPercent float64  `yaml:"fail_percent"`
+    Exclude     []string `yaml:"exclude"`
+}
+
+func DefaultConfig() Config {
+    return Config{WarnPercent: 50, FailPercent: 90}
+}
+
+func (c Config) Validate() error {
+    if !(c.WarnPercent > 0 && c.WarnPercent < c.FailPercent) {
+        return fmt.Errorf("warn_percent %v must be positive and lower than fail_percent %v", c.WarnPercent, c.FailPercent)
+    }
+    return nil
+}
+
+func New(queryer MyQueryQueries, cfg Config) check.Checker {
+    return &checker{queryer: queryer, cfg: cfg}
+}
+```
+
+- The generator detects `DefaultConfig` and registers the check with a `DecodeConfig` in `AllChecks()`.
+- The CLI decodes the YAML section of the check over `DefaultConfig()`. It rejects an unknown key at any depth, then calls `Validate`.
+- A library caller puts the `Config` value in `check.Config`, keyed by check ID. `Run` calls `Validate`, and reports SKIP for an invalid value or a value of the wrong type.
+- Put every range rule and cross-field rule (for example warn < fail) in `Validate`. Never fall back to a default in silence.
+- Use real YAML types: numbers, lists (`[]string`), and maps (`map[string]T`). Never parse a comma-separated string.
 
 ### Report Structure (Field Promotion)
 
@@ -508,7 +541,7 @@ pgdoctor.Run(ctx, conn, pgdoctor.Options{
 })
 ```
 
-Each contrib check creates its own sqlc queries internally, using the `check.DBTX` interface. This allows organizations to add domain-specific checks (naming conventions, internal standards) without forking.
+Each contrib check creates its own sqlc queries internally, using the `check.DBTX` interface. Its `check.Package.New` returns an error for an invalid entry in `check.Config`. A contrib check with settings also sets `DecodeConfig`, so the CLI can decode its YAML section. This allows organizations to add domain-specific checks (naming conventions, internal standards) without forking.
 
 ## Severity Assignment Guide
 

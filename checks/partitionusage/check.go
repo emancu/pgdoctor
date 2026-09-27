@@ -44,7 +44,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries PartitionUsageQueries, _ ...check.Config) check.Checker {
+func New(queries PartitionUsageQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}

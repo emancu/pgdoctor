@@ -477,31 +477,30 @@ ORDER BY pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) DESC;
 |-----|-------------|---------|
 | `physical_lag_warn_seconds` | Replay lag (seconds) at which `physical-replication-lag` is a WARN | `5` |
 | `physical_lag_fail_seconds` | Replay lag (seconds) at which `physical-replication-lag` is a FAIL | `60` |
-| `physical_lag_warn_seconds.<application_name>` | WARN threshold (seconds) for one replica, in place of `physical_lag_warn_seconds` | `physical_lag_warn_seconds` |
-| `physical_lag_fail_seconds.<application_name>` | FAIL threshold (seconds) for one replica, in place of `physical_lag_fail_seconds` | `physical_lag_fail_seconds` |
+| `physical_lag_by_application` | A map from `application_name` to `warn_seconds` and `fail_seconds` for one replica, in place of the global pair | None |
 
-The `<application_name>` suffix must match `pg_stat_replication.application_name` exactly. In a `--config` file, a value that is not a positive number is an error. The WARN threshold must be lower than the FAIL threshold. If it is not, pgdoctor ignores that pair: the global pair falls back to the defaults, and a replica pair falls back to the global pair. Use a per-replica pair for a delayed replica.
+A key in `physical_lag_by_application` must match `pg_stat_replication.application_name` exactly. Each replica needs both `warn_seconds` and `fail_seconds`. A value that is not a positive number is an error. The WARN threshold must be lower than the FAIL threshold, for the global pair and for each replica. If it is not, the config is an error. Use a per-replica pair for a delayed replica.
 
 ```yaml
 replication-lag:
   physical_lag_warn_seconds: 10
-  physical_lag_warn_seconds.delayed_replica: 305
-  physical_lag_fail_seconds.delayed_replica: 360
+  physical_lag_by_application:
+    delayed_replica:
+      warn_seconds: 305
+      fail_seconds: 360
 ```
 
-As a library, pass the same keys in `check.Config`:
+As a library, pass a `replicationlag.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "replication-lag": {
-        "physical_lag_warn_seconds":                 "10",
-        "physical_lag_warn_seconds.delayed_replica": "305",
-        "physical_lag_fail_seconds.delayed_replica": "360",
-    },
+cfg := replicationlag.DefaultConfig()
+cfg.PhysicalLagWarnSeconds = 10
+cfg.PhysicalLagByApplication = map[string]replicationlag.LagThresholds{
+    "delayed_replica": {WarnSeconds: 305, FailSeconds: 360},
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Checks: pgdoctor.AllChecks(),
-    Config: cfg,
+    Config: check.Config{"replication-lag": cfg},
 })
 ```
 

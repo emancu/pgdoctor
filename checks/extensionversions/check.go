@@ -39,7 +39,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ExtensionQueries, _ ...check.Config) check.Checker {
+func New(queries ExtensionQueries) check.Checker {
 	policies := make(map[string]ExtensionPolicy, len(ExtensionPolicies))
 	for _, p := range ExtensionPolicies {
 		policies[p.Name] = p

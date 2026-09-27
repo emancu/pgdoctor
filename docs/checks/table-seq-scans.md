@@ -39,7 +39,7 @@ This check requires at least **7 days** of statistics history. After a recent st
 | `high_seq_scans_min_rows` | Row count at which `high-seq-scans` reports a table | `50000` |
 | `high_seq_scans_min_ratio` | Sequential scan / index scan ratio at which `high-seq-scans` reports a table | `50` |
 
-In a `--config` file, a row count that is not a positive integer, or a ratio that is not a positive number, is an error. As a library, pgdoctor ignores an invalid value and uses the default.
+A row count that is not a positive integer, or a ratio that is not a positive number, is an error.
 
 ```yaml
 table-seq-scans:
@@ -47,17 +47,13 @@ table-seq-scans:
   high_seq_scans_min_ratio: 100
 ```
 
-As a library, pass the same keys in `check.Config`:
+As a library, pass a `tableseqscans.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "table-seq-scans": {
-        "high_seq_scans_min_rows":  "1000000",
-        "high_seq_scans_min_ratio": "100",
-    },
-}
+cfg := tableseqscans.Config{HighSeqScansMinRows: 1_000_000, HighSeqScansMinRatio: 100}
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
-    Config: cfg,
+    Checks: pgdoctor.AllChecks(),
+    Config: check.Config{"table-seq-scans": cfg},
 })
 ```
 

@@ -3,6 +3,7 @@ package sequencehealth_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -81,7 +82,7 @@ func TestSequenceHealth_NoSequences(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{rows: []db.SequenceHealthRow{}}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -108,7 +109,7 @@ func TestSequenceHealth_AllHealthy(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -184,7 +185,7 @@ func TestSequenceHealth_UnreadableSequences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := sequencehealth.New(&mockQueryer{rows: tt.rows}).Check(context.Background())
+			report, err := sequencehealth.New(&mockQueryer{rows: tt.rows}, sequencehealth.DefaultConfig()).Check(context.Background())
 
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
@@ -218,7 +219,7 @@ func TestSequenceHealth_NearExhaustion_Critical(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -296,7 +297,7 @@ func TestSequenceHealth_NearExhaustion_Direction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{tt.row}}).Check(context.Background())
+			report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{tt.row}}, sequencehealth.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -331,7 +332,7 @@ func TestSequenceHealth_NearExhaustion_Warning(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -378,7 +379,7 @@ func TestSequenceHealth_NearExhaustion_MixedSeverity(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -417,7 +418,7 @@ func TestSequenceHealth_NearExhaustion_CyclicIgnored(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -450,7 +451,7 @@ func TestSequenceHealth_IntegerShouldBeBigint_Warning(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -487,7 +488,7 @@ func TestSequenceHealth_IntegerShouldBeBigint_Critical(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -532,7 +533,7 @@ func TestSequenceHealth_IntegerShouldBeBigint_Multiple(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -569,7 +570,7 @@ func TestSequenceHealth_TypeMismatch(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -610,7 +611,7 @@ func TestSequenceHealth_TypeMismatch_Multiple(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -664,7 +665,7 @@ func TestSequenceHealth_ComplexScenario_AllSubchecks(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -714,7 +715,7 @@ func TestSequenceHealth_EdgeCase_ExactThresholds(t *testing.T) {
 				),
 			}
 
-			report, err := sequencehealth.New(&mockQueryer{rows: rows}).Check(context.Background())
+			report, err := sequencehealth.New(&mockQueryer{rows: rows}, sequencehealth.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 
 			finding := findingByID(t, report, findingIDNearExhaustion)
@@ -813,7 +814,7 @@ func TestSequenceHealth_ColumnCapacity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{tt.row}}).Check(context.Background())
+			report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{tt.row}}, sequencehealth.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
 
@@ -839,7 +840,7 @@ func TestSequenceHealth_TypeMismatch_Unreadable(t *testing.T) {
 	readable := makeSequenceRow("public", "public.t_id_seq", "bigint", "public.t", "id", "bigint",
 		1000, 9223372036854775807, 1, 9223372036854774807, 9223372036854775807, 0.00, false, false, true, 0)
 
-	report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{readable, mismatched}}).Check(context.Background())
+	report, err := sequencehealth.New(&mockQueryer{rows: []db.SequenceHealthRow{readable, mismatched}}, sequencehealth.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 	checktest.AssertSeverityInvariant(t, report)
 
@@ -864,30 +865,20 @@ func TestSequenceHealth_Config(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		settings       map[string]string
+		cfg            sequencehealth.Config
 		nearExhaustion int
 		integerColumns check.Severity
 		typeMismatch   check.Severity
 	}{
 		{
-			name:     "defaults ignore pk-types keys",
-			settings: nil, nearExhaustion: 1,
+			name: "defaults",
+			cfg:  sequencehealth.DefaultConfig(), nearExhaustion: 1,
 			integerColumns: check.SeverityWarn, typeMismatch: check.SeverityWarn,
 		},
 		{
-			name:     "override",
-			settings: map[string]string{"usage_warn_percent": "30", "usage_fail_percent": "75"}, nearExhaustion: 2,
+			name: "override",
+			cfg:  sequencehealth.Config{UsageWarnPercent: 30, UsageFailPercent: 75}, nearExhaustion: 2,
 			integerColumns: check.SeverityFail, typeMismatch: check.SeverityFail,
-		},
-		{
-			name:     "warn not below fail keeps defaults",
-			settings: map[string]string{"usage_warn_percent": "80", "usage_fail_percent": "70"}, nearExhaustion: 1,
-			integerColumns: check.SeverityWarn, typeMismatch: check.SeverityWarn,
-		},
-		{
-			name:     "invalid value keeps default",
-			settings: map[string]string{"usage_fail_percent": "0"}, nearExhaustion: 1,
-			integerColumns: check.SeverityWarn, typeMismatch: check.SeverityWarn,
 		},
 	}
 
@@ -895,11 +886,7 @@ func TestSequenceHealth_Config(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := check.Config{
-				"sequence-health": tt.settings,
-				"pk-types":        {"usage_warn_percent": "10", "usage_fail_percent": "20"},
-			}
-			report, err := sequencehealth.New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
+			report, err := sequencehealth.New(&mockQueryer{rows: rows}, tt.cfg).Check(context.Background())
 			require.NoError(t, err)
 
 			near := findingByID(t, report, findingIDNearExhaustion)
@@ -911,30 +898,31 @@ func TestSequenceHealth_Config(t *testing.T) {
 	}
 }
 
-func TestValidateSetting(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		key, value string
+		name       string
+		warn, fail float64
 		wantErr    bool
 	}{
-		{"usage_warn_percent", "50", false},
-		{"usage_fail_percent", "100", false},
-		{"usage_warn_percent", "49.5", false},
-		{"usage_warn_percent", "0", true},
-		{"usage_fail_percent", "101", true},
-		{"usage_warn_percent", "-5", true},
-		{"usage_warn_percent", "NaN", true},
-		{"usage_fail_percent", "Inf", true},
-		{"usage_fail_percent", "ninety", true},
-		{"usage_percent", "50", true},
+		{"defaults", 50, 90, false},
+		{"fail at 100", 50, 100, false},
+		{"fractional warn", 49.5, 90, false},
+		{"zero warn", 0, 90, true},
+		{"zero fail", 50, 0, true},
+		{"fail above 100", 50, 101, true},
+		{"negative warn", -5, 90, true},
+		{"NaN warn", math.NaN(), 90, true},
+		{"infinite fail", 50, math.Inf(1), true},
+		{"warn above fail", 80, 70, true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := sequencehealth.ValidateSetting(tt.key, tt.value)
+			err := sequencehealth.Config{UsageWarnPercent: tt.warn, UsageFailPercent: tt.fail}.Validate()
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -956,7 +944,7 @@ func TestSequenceHealth_TableFormatting_NearExhaustion(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -997,7 +985,7 @@ func TestSequenceHealth_TableFormatting_IntegerColumns(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1038,7 +1026,7 @@ func TestSequenceHealth_TableFormatting_TypeMismatch(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1080,7 +1068,7 @@ func TestSequenceHealth_SequenceWithoutColumn(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1098,7 +1086,7 @@ func TestSequenceHealth_QueryError(t *testing.T) {
 
 	expectedErr := fmt.Errorf("database connection error")
 	queryer := &mockQueryer{err: expectedErr}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	_, err := checker.Check(context.Background())
 
@@ -1110,7 +1098,7 @@ func TestSequenceHealth_Metadata(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{rows: []db.SequenceHealthRow{}}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 	metadata := checker.Metadata()
 
 	require.Equal(t, "sequence-health", metadata.CheckID)
@@ -1135,7 +1123,7 @@ func TestSequenceHealth_PrescriptionContent_NearExhaustion(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1165,7 +1153,7 @@ func TestSequenceHealth_PrescriptionContent_IntegerColumns(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1195,7 +1183,7 @@ func TestSequenceHealth_PrescriptionContent_TypeMismatch(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1225,7 +1213,7 @@ func TestSequenceHealth_SmallintType(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := sequencehealth.New(queryer)
+	checker := sequencehealth.New(queryer, sequencehealth.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -1253,7 +1241,7 @@ func TestSequenceHealth_IntegerColumns_FKCount(t *testing.T) {
 		),
 	}
 
-	report, err := sequencehealth.New(&mockQueryer{rows: rows}).Check(context.Background())
+	report, err := sequencehealth.New(&mockQueryer{rows: rows}, sequencehealth.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	var integerFinding *check.Finding

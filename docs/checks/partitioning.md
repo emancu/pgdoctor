@@ -147,24 +147,21 @@ Identifies individual partitions that have grown too large (>= 10M rows by defau
 | `large_unpartitioned_min_rows` | Row count at which `large-unpartitioned` reports a table | `50000000` |
 | `transient_unpartitioned_min_rows` | Row count at which `transient-unpartitioned` reports a transient table | `10000000` |
 
-A value that is not a positive integer is ignored.
+A value that is not a positive integer is an error.
 
 ```yaml
 partitioning:
   inefficient_partitions_min_rows: 25000000
 ```
 
-As a library, pass the same key in `check.Config`:
+As a library, pass a `partitioning.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "partitioning": {
-        "inefficient_partitions_min_rows": "25000000",
-    },
-}
+cfg := partitioning.DefaultConfig()
+cfg.InefficientPartitionsMinRows = 25_000_000
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Checks: pgdoctor.AllChecks(),
-    Config: cfg,
+    Config: check.Config{"partitioning": cfg},
 })
 ```
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -45,6 +44,21 @@ type ConnectionHealthQueries interface {
 	LongIdleConnections(context.Context) ([]db.LongIdleConnectionsRow, error)
 }
 
+type Config struct {
+	LongIdleWarnCount int64 `yaml:"long_idle_warn_count"`
+}
+
+func DefaultConfig() Config {
+	return Config{LongIdleWarnCount: defaultLongIdleWarnCount}
+}
+
+func (c Config) Validate() error {
+	if c.LongIdleWarnCount <= 0 {
+		return fmt.Errorf("long_idle_warn_count: %d is not a positive integer", c.LongIdleWarnCount)
+	}
+	return nil
+}
+
 type checker struct {
 	queries           ConnectionHealthQueries
 	longIdleWarnCount int64
@@ -61,31 +75,8 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ConnectionHealthQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
-		queries:           queries,
-		longIdleWarnCount: defaultLongIdleWarnCount,
-	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			if v, ok := myCfg["long_idle_warn_count"]; ok {
-				if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-					c.longIdleWarnCount = n
-				}
-			}
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, value string) error {
-	if key != "long_idle_warn_count" {
-		return fmt.Errorf("unknown key %q", key)
-	}
-	if n, err := strconv.ParseInt(value, 10, 64); err != nil || n <= 0 {
-		return fmt.Errorf("%s: %q is not a positive integer", key, value)
-	}
-	return nil
+func New(queries ConnectionHealthQueries, cfg Config) check.Checker {
+	return &checker{queries: queries, longIdleWarnCount: cfg.LongIdleWarnCount}
 }
 
 func (c *checker) Metadata() check.Metadata {

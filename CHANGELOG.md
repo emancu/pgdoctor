@@ -12,17 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Exit codes**: `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, an invalid `--config`, or zero checks selected ([#133](https://github.com/emancu/pgdoctor/pull/133), [#148](https://github.com/emancu/pgdoctor/pull/148)).
 - **Renamed IDs**: `statistics-freshness` is now `db-statistics` ([#97](https://github.com/emancu/pgdoctor/pull/97)), and the `toast-storage/toast-storage` finding is now `toast-storage/toast-usage` ([#152](https://github.com/emancu/pgdoctor/pull/152)).
 - **Severities**: `partitioning`, `connection-health/long-idle` and `connection-health/pool-pressure` no longer FAIL. `pk-types` and `sequence-health` use WARN 50% / FAIL 90% for int2/int4 capacity. Physical replication lag is WARN at 5 s and FAIL at 60 s. `idle-in-transaction` fails at 1 h. See Changed for the details.
+- **Config**: typed per-check config. New YAML shapes, and a new `check.Config` for library callers. `session-settings` drops the `roles` allow list for `ignore_roles`. See Changed.
 - **Library**: the generated `db` types change for `invalid-indexes`, `table-activity`, `pk-types`, `partitioning`, `table-seq-scans`, `sequence-health` and `connection-health` (listed in each entry below).
 
 ### Added
 
-- **CLI**: `run --config <file>` reads per-check settings from YAML. A value can be a number, a string, or a list of scalars ([#99](https://github.com/emancu/pgdoctor/pull/99), [#102](https://github.com/emancu/pgdoctor/pull/102)).
+- **CLI**: `run --config <file>` reads per-check settings from YAML ([#99](https://github.com/emancu/pgdoctor/pull/99), [#102](https://github.com/emancu/pgdoctor/pull/102)).
 - **Config keys**: new per-check settings. Each check README lists its keys:
-  - `session-settings`: `timeout.<role>` ([#98](https://github.com/emancu/pgdoctor/pull/98))
-  - `table-vacuum-health`: `autovacuum_disabled_exclude` ([#100](https://github.com/emancu/pgdoctor/pull/100))
+  - `session-settings`: `timeout_by_role` ([#98](https://github.com/emancu/pgdoctor/pull/98)), `ignore_roles` ([#187](https://github.com/emancu/pgdoctor/pull/187))
+  - `table-vacuum-health`: `ignore_tables` ([#100](https://github.com/emancu/pgdoctor/pull/100))
   - `partitioning`: `inefficient_partitions_min_rows`, `large_unpartitioned_min_rows`, `transient_unpartitioned_min_rows` ([#149](https://github.com/emancu/pgdoctor/pull/149), [#177](https://github.com/emancu/pgdoctor/pull/177))
   - `pk-types`, `sequence-health`: `usage_warn_percent`, `usage_fail_percent` ([#174](https://github.com/emancu/pgdoctor/pull/174), [#179](https://github.com/emancu/pgdoctor/pull/179))
-  - `replication-lag`: `physical_lag_warn_seconds`, `physical_lag_fail_seconds`, with a `.<application_name>` suffix for one replica ([#176](https://github.com/emancu/pgdoctor/pull/176))
+  - `replication-lag`: `physical_lag_warn_seconds`, `physical_lag_fail_seconds`, and `physical_lag_by_application` for one replica ([#176](https://github.com/emancu/pgdoctor/pull/176))
   - `connection-health`: `long_idle_warn_count` ([#178](https://github.com/emancu/pgdoctor/pull/178))
   - `table-seq-scans`: `high_seq_scans_min_rows`, `high_seq_scans_min_ratio` ([#175](https://github.com/emancu/pgdoctor/pull/175))
 - **`connection-health`**: new `stats-restricted` WARN when the role cannot see other roles' connections ([#92](https://github.com/emancu/pgdoctor/pull/92)).
@@ -35,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**: `--detail verbose` and `--detail debug` show the details of PASS findings ([#138](https://github.com/emancu/pgdoctor/pull/138)).
 - **CLI**: bytes under 1 KiB print as `512 bytes`, so `B` means only billions (`2.1B`). A missing table cell shows `-`, and the summary uses correct plurals ([#162](https://github.com/emancu/pgdoctor/pull/162)).
 - **Library**: `Run` reads the server version from the database when the caller's `InstanceMetadata` has none ([#131](https://github.com/emancu/pgdoctor/pull/131)).
-- **Library**: `check.Package` has an optional `ValidateSetting` field. The generator sets it for each check that exports one ([#173](https://github.com/emancu/pgdoctor/pull/173)).
+- **Config**: each configurable check exports `Config`, `DefaultConfig()` and `Validate()`, and `check.Config` holds those values. Lists and maps are real YAML, an unknown key fails at any depth, warn >= fail is an error and no longer falls back to the defaults, and the library `Run` reports SKIP for an invalid value ([#187](https://github.com/emancu/pgdoctor/pull/187)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 - **Docs**: every finding ID that can be INFO, WARN or FAIL has a `### For \`finding-id\`` heading in its check README, and a test enforces it ([#163](https://github.com/emancu/pgdoctor/pull/163)).
 - **Release**: release binaries build with the latest stable Go. `go.mod` keeps `go 1.25.0` and adds `toolchain go1.27.1`, and CI tests Go 1.25-1.27 with golangci-lint v2.14 ([#170](https://github.com/emancu/pgdoctor/pull/170), [#182](https://github.com/emancu/pgdoctor/pull/182)).

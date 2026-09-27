@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"fmt"
 	"math"
-	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -27,6 +26,25 @@ type TableSeqScansQueries interface {
 	HighSeqScanTables(ctx context.Context, minRows int64) ([]db.HighSeqScanTablesRow, error)
 }
 
+type Config struct {
+	HighSeqScansMinRows  int64   `yaml:"high_seq_scans_min_rows"`
+	HighSeqScansMinRatio float64 `yaml:"high_seq_scans_min_ratio"`
+}
+
+func DefaultConfig() Config {
+	return Config{HighSeqScansMinRows: 50000, HighSeqScansMinRatio: 50}
+}
+
+func (c Config) Validate() error {
+	if c.HighSeqScansMinRows <= 0 {
+		return fmt.Errorf("high_seq_scans_min_rows: %d is not a positive integer", c.HighSeqScansMinRows)
+	}
+	if !(c.HighSeqScansMinRatio > 0) || math.IsInf(c.HighSeqScansMinRatio, 1) {
+		return fmt.Errorf("high_seq_scans_min_ratio: %v is not a positive number", c.HighSeqScansMinRatio)
+	}
+	return nil
+}
+
 type checker struct {
 	queries      TableSeqScansQueries
 	highMinRows  int64
@@ -44,49 +62,8 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableSeqScansQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
-		queries:      queries,
-		highMinRows:  50000,
-		highMinRatio: 50,
-	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			if n, ok := parsePositiveInt(myCfg["high_seq_scans_min_rows"]); ok {
-				c.highMinRows = n
-			}
-			if f, ok := parsePositiveNumber(myCfg["high_seq_scans_min_ratio"]); ok {
-				c.highMinRatio = f
-			}
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, value string) error {
-	switch key {
-	case "high_seq_scans_min_rows":
-		if _, ok := parsePositiveInt(value); !ok {
-			return fmt.Errorf("%s: %q is not a positive integer", key, value)
-		}
-		return nil
-	case "high_seq_scans_min_ratio":
-		if _, ok := parsePositiveNumber(value); !ok {
-			return fmt.Errorf("%s: %q is not a positive number", key, value)
-		}
-		return nil
-	}
-	return fmt.Errorf("unknown key %q", key)
-}
-
-func parsePositiveInt(value string) (int64, bool) {
-	n, err := strconv.ParseInt(value, 10, 64)
-	return n, err == nil && n > 0
-}
-
-func parsePositiveNumber(value string) (float64, bool) {
-	f, err := strconv.ParseFloat(value, 64)
-	return f, err == nil && f > 0 && !math.IsInf(f, 1)
+func New(queries TableSeqScansQueries, cfg Config) check.Checker {
+	return &checker{queries: queries, highMinRows: cfg.HighSeqScansMinRows, highMinRatio: cfg.HighSeqScansMinRatio}
 }
 
 func (c *checker) Metadata() check.Metadata {

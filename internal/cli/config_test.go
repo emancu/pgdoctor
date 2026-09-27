@@ -13,7 +13,10 @@ import (
 
 	"github.com/emancu/pgdoctor"
 	"github.com/emancu/pgdoctor/check"
+	"github.com/emancu/pgdoctor/checks/partitioning"
+	"github.com/emancu/pgdoctor/checks/replicationlag"
 	"github.com/emancu/pgdoctor/checks/sessionsettings"
+	"github.com/emancu/pgdoctor/checks/tablevacuumhealth"
 	"github.com/emancu/pgdoctor/db"
 )
 
@@ -34,8 +37,8 @@ func TestLoadConfig(t *testing.T) {
 	}{
 		{
 			name:    "valid",
-			content: "session-settings:\n  timeout: 1000\n  roles: app_ro,app_rw\n",
-			want:    check.Config{"session-settings": {"timeout": "1000", "roles": "app_ro,app_rw"}},
+			content: "session-settings:\n  timeout: 1000\n  ignore_roles: [dba_ro, migrations]\n",
+			want:    check.Config{"session-settings": sessionsettings.Config{Timeout: 1000, IgnoreRoles: []string{"dba_ro", "migrations"}}},
 		},
 		{
 			name:    "empty",
@@ -45,35 +48,33 @@ func TestLoadConfig(t *testing.T) {
 		{
 			name:    "check without settings",
 			content: "pg-version: {}\n",
-			want:    check.Config{"pg-version": {}},
+			want:    check.Config{},
 		},
 		{
 			name:    "partition row floor",
 			content: "partitioning:\n  inefficient_partitions_min_rows: 25000000\n",
-			want:    check.Config{"partitioning": {"inefficient_partitions_min_rows": "25000000"}},
+			want: check.Config{"partitioning": partitioning.Config{
+				InefficientPartitionsMinRows:  25_000_000,
+				LargeUnpartitionedMinRows:     50_000_000,
+				TransientUnpartitionedMinRows: 10_000_000,
+			}},
 		},
 		{
 			name:    "role timeout and table prefixes",
-			content: "session-settings:\n  timeout.dba_ro: 300000\ntable-vacuum-health:\n  autovacuum_disabled_exclude: [public.outbox]\n",
+			content: "session-settings:\n  timeout_by_role:\n    dba_ro: 300000\ntable-vacuum-health:\n  ignore_tables:\n    - public.outbox\n",
 			want: check.Config{
-				"session-settings":    {"timeout.dba_ro": "300000"},
-				"table-vacuum-health": {"autovacuum_disabled_exclude": "public.outbox"},
+				"session-settings":    sessionsettings.Config{Timeout: 5000, TimeoutByRole: map[string]int64{"dba_ro": 300000}},
+				"table-vacuum-health": tablevacuumhealth.Config{IgnoreTables: []string{"public.outbox"}},
 			},
 		},
 		{
-			name:    "list of scalars",
-			content: "session-settings:\n  roles:\n    - app_ro\n    - app_rw\n",
-			want:    check.Config{"session-settings": {"roles": "app_ro,app_rw"}},
-		},
-		{
-			name:    "flow list of scalars",
-			content: "session-settings:\n  roles: [app_ro, 42]\n",
-			want:    check.Config{"session-settings": {"roles": "app_ro,42"}},
-		},
-		{
-			name:    "empty list",
-			content: "session-settings:\n  roles: []\n",
-			want:    check.Config{"session-settings": {"roles": ""}},
+			name:    "replica lag by application",
+			content: "replication-lag:\n  physical_lag_by_application:\n    delayed:\n      warn_seconds: 305\n      fail_seconds: 360\n",
+			want: check.Config{"replication-lag": replicationlag.Config{
+				PhysicalLagWarnSeconds:   5,
+				PhysicalLagFailSeconds:   60,
+				PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 305, FailSeconds: 360}},
+			}},
 		},
 	}
 
@@ -110,59 +111,55 @@ func TestLoadConfigInvalid(t *testing.T) {
 		{
 			name:    "non-mapping check settings",
 			content: "session-settings: 1000\n",
-			want:    []string{"session-settings: not a mapping"},
+			want:    []string{"session-settings: cannot unmarshal !!int `1000` into sessionsettings.Config"},
 		},
 		{
-			name:    "list with a nested item",
-			content: "session-settings:\n  roles: [app_ro, [app_rw]]\n  timeout: 1000\n",
-			want:    []string{"session-settings.roles: not a scalar value"},
-		},
-		{
-			name:    "mapping value",
-			content: "session-settings:\n  roles: {app_ro: true}\n",
-			want:    []string{"session-settings.roles: not a scalar value"},
+			name:    "comma string for a list",
+			content: "session-settings:\n  ignore_roles: dba_ro,migrations\n",
+			want:    []string{"session-settings: cannot unmarshal !!str `dba_ro,...` into []string"},
 		},
 		{
 			name:    "unknown key",
 			content: "session-settings:\n  timeuot: 1000\n",
-			want:    []string{`session-settings: unknown key "timeuot"`},
+			want:    []string{"session-settings: field timeuot not found in type sessionsettings.Config"},
+		},
+		{
+			name:    "unknown nested key",
+			content: "replication-lag:\n  physical_lag_by_application:\n    delayed:\n      fial_seconds: 360\n",
+			want:    []string{"replication-lag: field fial_seconds not found in type replicationlag.LagThresholds"},
 		},
 		{
 			name:    "key on a check without settings",
 			content: "pg-version:\n  minimum: 16\n",
-			want:    []string{`pg-version: unknown key "minimum"`},
+			want:    []string{"pg-version: the check accepts no settings"},
 		},
 		{
 			name:    "timeout that is not an integer",
 			content: "session-settings:\n  timeout: 5s\n",
-			want:    []string{`session-settings: timeout: "5s" is not an integer`},
+			want:    []string{"session-settings: cannot unmarshal !!str `5s` into int64"},
 		},
 		{
-			name:    "role timeout that is not an integer",
-			content: "session-settings:\n  timeout.dba_ro: 5m\n",
-			want:    []string{`session-settings: timeout.dba_ro: "5m" is not an integer`},
-		},
-		{
-			name:    "role timeout without a role",
-			content: "session-settings:\n  timeout.: 1000\n",
-			want:    []string{`session-settings: unknown key "timeout."`},
-		},
-		{
-			name:    "unknown table-vacuum-health key",
-			content: "table-vacuum-health:\n  exclude: public.outbox\n",
-			want:    []string{`table-vacuum-health: unknown key "exclude"`},
+			name:    "role timeout that is not positive",
+			content: "session-settings:\n  timeout_by_role:\n    dba_ro: 0\n",
+			want:    []string{"session-settings: timeout_by_role.dba_ro: 0 is not a positive integer"},
 		},
 		{
 			name:    "partition row floor that is not positive",
 			content: "partitioning:\n  inefficient_partitions_min_rows: 0\n",
-			want:    []string{`partitioning: inefficient_partitions_min_rows: "0" is not a positive integer`},
+			want:    []string{"partitioning: row thresholds must be positive integers"},
+		},
+		{
+			name:    "warn not below the default fail",
+			content: "pk-types:\n  usage_warn_percent: 95\n",
+			want:    []string{"pk-types: usage_warn_percent 95 must be lower than usage_fail_percent 90"},
 		},
 		{
 			name:    "every problem is reported",
-			content: "no-such-check: {}\nsession-settings:\n  timeout: abc\n  timeuot: 1\n",
+			content: "no-such-check: {}\nsession-settings:\n  timeout: abc\n  timeuot: 1\npk-types:\n  usage_fail_percent: 40\n",
 			want: []string{
-				`session-settings: timeout: "abc" is not an integer`,
-				`session-settings: unknown key "timeuot"`,
+				"pk-types: usage_warn_percent 50 must be lower than usage_fail_percent 40",
+				"session-settings: cannot unmarshal !!str `abc` into int64",
+				"session-settings: field timeuot not found in type sessionsettings.Config",
 				`unknown check "no-such-check"`,
 			},
 		},
@@ -223,14 +220,14 @@ func TestLoadConfigReachesCheck(t *testing.T) {
 		})
 	}
 
-	report, err := sessionsettings.New(rows).Check(context.Background())
+	report, err := sessionsettings.New(rows, sessionsettings.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, check.SeverityPass, report.Severity)
 
 	cfg, err := loadConfig(writeConfig(t, "session-settings:\n  timeout: 1000\n"), pgdoctor.AllChecks())
 	require.NoError(t, err)
 
-	report, err = sessionsettings.New(rows, cfg).Check(context.Background())
+	report, err = sessionsettings.New(rows, cfg["session-settings"].(sessionsettings.Config)).Check(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
 }

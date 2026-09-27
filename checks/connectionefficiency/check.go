@@ -43,7 +43,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queryer ConnectionEfficiencyQueries, _ ...check.Config) check.Checker {
+func New(queryer ConnectionEfficiencyQueries) check.Checker {
 	return &checker{
 		queryer: queryer,
 	}

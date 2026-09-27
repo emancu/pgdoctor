@@ -24,6 +24,23 @@ type TableVacuumHealthQueries interface {
 	TableVacuumHealth(context.Context) ([]db.TableVacuumHealthRow, error)
 }
 
+type Config struct {
+	IgnoreTables []string `yaml:"ignore_tables"`
+}
+
+func DefaultConfig() Config {
+	return Config{}
+}
+
+func (c Config) Validate() error {
+	for _, prefix := range c.IgnoreTables {
+		if prefix == "" {
+			return fmt.Errorf("ignore_tables: empty prefix")
+		}
+	}
+	return nil
+}
+
 type checker struct {
 	queries                    TableVacuumHealthQueries
 	autovacuumDisabledExcludes []string
@@ -62,29 +79,8 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableVacuumHealthQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
-		queries: queries,
-	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			if v, ok := myCfg["autovacuum_disabled_exclude"]; ok {
-				for _, prefix := range strings.Split(v, ",") {
-					if prefix = strings.TrimSpace(prefix); prefix != "" {
-						c.autovacuumDisabledExcludes = append(c.autovacuumDisabledExcludes, prefix)
-					}
-				}
-			}
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, _ string) error {
-	if key != "autovacuum_disabled_exclude" {
-		return fmt.Errorf("unknown key %q", key)
-	}
-	return nil
+func New(queries TableVacuumHealthQueries, cfg Config) check.Checker {
+	return &checker{queries: queries, autovacuumDisabledExcludes: cfg.IgnoreTables}
 }
 
 func (c *checker) Metadata() check.Metadata {
