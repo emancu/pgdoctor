@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-27
+
 **Breaking changes**
 
 - **Exit codes**: `run` exits `1` only when a check reports FAIL, for text and JSON output. It exits `2` when it cannot run: a connection error, a usage error, an invalid `--config`, or zero checks selected ([#133](https://github.com/emancu/pgdoctor/pull/133), [#148](https://github.com/emancu/pgdoctor/pull/148)).
