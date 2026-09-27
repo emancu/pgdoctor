@@ -58,8 +58,8 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
 			continue
 		}
-		visited := 0
-		if err := resolveAliases(&node, &visited); err != nil {
+		expanded := 0
+		if err := resolveAliases(&node, false, &expanded); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
 			continue
 		}
@@ -90,20 +90,23 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 	return cfg, nil
 }
 
-// maxConfigNodes bounds the alias expansion of one check section. A cycle or an
-// alias bomb never finishes without it.
-const maxConfigNodes = 10000
+// maxAliasNodes bounds the nodes that alias expansion reaches in one check
+// section. A cycle or an alias bomb never finishes without it.
+const maxAliasNodes = 10000
 
-func resolveAliases(n *yaml.Node, visited *int) error {
-	*visited++
-	if *visited > maxConfigNodes {
-		return errors.New("YAML aliases expand too far (an alias cycle or too many aliases)")
-	}
+func resolveAliases(n *yaml.Node, inAlias bool, expanded *int) error {
 	if n.Kind == yaml.AliasNode {
 		*n = *n.Alias
+		inAlias = true
+	}
+	if inAlias {
+		*expanded++
+		if *expanded > maxAliasNodes {
+			return errors.New("YAML aliases expand too far (an alias cycle or too many aliases)")
+		}
 	}
 	for _, child := range n.Content {
-		if err := resolveAliases(child, visited); err != nil {
+		if err := resolveAliases(child, inAlias, expanded); err != nil {
 			return err
 		}
 	}

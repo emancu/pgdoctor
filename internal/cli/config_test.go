@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -321,4 +322,18 @@ func TestLoadConfigReachesCheck(t *testing.T) {
 	report, err = sessionsettings.New(rows, cfg["session-settings"].(sessionsettings.Config)).Check(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, check.SeverityWarn, report.Severity)
+}
+
+func TestLoadConfigLongListWithoutAliases(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString("table-vacuum-health:\n  ignore_tables:\n")
+	for i := range 12000 {
+		b.WriteString("    - public.t" + strconv.Itoa(i) + "\n")
+	}
+
+	_, err := loadConfig(writeConfig(t, b.String()), pgdoctor.AllChecks())
+
+	require.NoError(t, err)
 }
