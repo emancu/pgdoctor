@@ -219,6 +219,16 @@ func TestLoadConfigInvalid(t *testing.T) {
 			content: "pk-types: &limits\n  usage_warn_percent: *limits\n",
 			want:    []string{"pk-types: yaml: anchor 'limits' value contains itself"},
 		},
+		{
+			name:    "alias cycle inside an overridden merge key",
+			content: "session-settings: {timeout: 1000, <<: &d {timeout: *d}}\n",
+			want:    []string{"session-settings: YAML aliases expand too far (an alias cycle or too many aliases)"},
+		},
+		{
+			name:    "alias bomb inside an overridden merge key",
+			content: "session-settings: {timeout: 1000, <<: {timeout: [&a [x, x, x, x, x, x, x, x, x, x], &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a], &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b], &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c], [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]]}}\n",
+			want:    []string{"session-settings: YAML aliases expand too far (an alias cycle or too many aliases)"},
+		},
 	}
 
 	for _, tt := range tests {

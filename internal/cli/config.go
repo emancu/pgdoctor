@@ -51,13 +51,18 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			}
 			continue
 		}
-		// Decode rejects an anchor that contains itself and excessive aliasing.
-		// resolveAliases does not stop on the first and expands the second in full.
+		// Decode rejects an anchor that contains itself and excessive aliasing, but it
+		// skips a merged key that an explicit key overrides, so resolveAliases keeps
+		// its own limit.
 		if err := node.Decode(new(any)); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
 			continue
 		}
-		resolveAliases(&node)
+		visited := 0
+		if err := resolveAliases(&node, &visited); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
+			continue
+		}
 		settings, err := yaml.Marshal(&node)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
@@ -85,11 +90,22 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 	return cfg, nil
 }
 
-func resolveAliases(n *yaml.Node) {
+// maxConfigNodes bounds the alias expansion of one check section. A cycle or an
+// alias bomb never finishes without it.
+const maxConfigNodes = 10000
+
+func resolveAliases(n *yaml.Node, visited *int) error {
+	*visited++
+	if *visited > maxConfigNodes {
+		return errors.New("YAML aliases expand too far (an alias cycle or too many aliases)")
+	}
 	if n.Kind == yaml.AliasNode {
 		*n = *n.Alias
 	}
 	for _, child := range n.Content {
-		resolveAliases(child)
+		if err := resolveAliases(child, visited); err != nil {
+			return err
+		}
 	}
+	return nil
 }
