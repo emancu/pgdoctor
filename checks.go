@@ -124,6 +124,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return pktypes.New(db.New(conn), cfg)
 			},
+			ValidateSetting: pktypes.ValidateSetting,
 		},
 		{
 			Metadata: querystatscapacity.Metadata,
