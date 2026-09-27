@@ -59,11 +59,12 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 			continue
 		}
 		expanded := 0
-		if err := resolveAliases(&node, false, &expanded); err != nil {
+		resolved, err := resolveAliases(&node, false, &expanded)
+		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
 			continue
 		}
-		settings, err := yaml.Marshal(&node)
+		settings, err := yaml.Marshal(resolved)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
 			continue
@@ -94,21 +95,26 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 // section. A cycle or an alias bomb never finishes without it.
 const maxAliasNodes = 10000
 
-func resolveAliases(n *yaml.Node, inAlias bool, expanded *int) error {
+// resolveAliases returns a copy of n in which each alias is replaced by its
+// anchor. It never changes n, because check sections share the nodes of an anchor.
+func resolveAliases(n *yaml.Node, inAlias bool, expanded *int) (*yaml.Node, error) {
 	if n.Kind == yaml.AliasNode {
-		*n = *n.Alias
+		n = n.Alias
 		inAlias = true
 	}
 	if inAlias {
 		*expanded++
 		if *expanded > maxAliasNodes {
-			return errors.New("YAML aliases expand too far (an alias cycle or too many aliases)")
+			return nil, errors.New("YAML aliases expand too far (an alias cycle or too many aliases)")
 		}
 	}
-	for _, child := range n.Content {
-		if err := resolveAliases(child, inAlias, expanded); err != nil {
-			return err
+	resolved := *n
+	resolved.Content = make([]*yaml.Node, len(n.Content))
+	for i, child := range n.Content {
+		var err error
+		if resolved.Content[i], err = resolveAliases(child, inAlias, expanded); err != nil {
+			return nil, err
 		}
 	}
-	return nil
+	return &resolved, nil
 }
