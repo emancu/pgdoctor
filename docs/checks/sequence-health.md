@@ -35,16 +35,16 @@ All INSERT operations fail until the sequence is migrated to bigint.
 ### near-exhaustion
 
 Identifies sequences approaching their limit: the maximum value for an ascending sequence, the minimum value for a descending one:
-- **FAIL**: Usage >90% (imminent failure, migrate immediately)
-- **WARN**: Usage >75% (plan migration soon)
+- **FAIL**: Usage >=90% (imminent failure, migrate immediately)
+- **WARN**: Usage >=50% for a smallint or integer sequence (see Configuration), >=75% for a bigint sequence (plan migration soon)
 
 **Cyclic sequences** (rarely used) are skipped as they wrap around instead of failing.
 
 ### integer-columns
 
-Identifies integer (int4) columns with sequences at >50% capacity:
-- **FAIL**: Usage >75% (migrate within weeks)
-- **WARN**: Usage >50% (plan migration within months)
+Identifies integer (int4) and smallint (int2) columns whose current sequence value reaches 50% of the column type limit (see Configuration). The usage is the value against the column type, not against the sequence maximum, so it also catches an integer column that a bigint sequence feeds:
+- **FAIL**: Usage >=90% (migrate within weeks)
+- **WARN**: Usage >=50% (plan migration within months)
 
 Integer columns max at 2.1B. High-traffic tables can exhaust this surprisingly quickly:
 - 10K inserts/day = 575 years to exhaustion (safe)
@@ -54,8 +54,10 @@ Integer columns max at 2.1B. High-traffic tables can exhaust this surprisingly q
 
 ### type-mismatch
 
-Identifies sequences that can generate values exceeding their column's capacity:
-- **FAIL**: Sequence max > column type max
+Identifies sequences that can generate values exceeding their column's capacity: the sequence max is above the column type max, or the sequence min is below the column type min. The severity comes from the column usage, on the same scale as `integer-columns`:
+- **FAIL**: Column usage >=90%
+- **WARN**: Column usage >=50%
+- **INFO**: Column usage below 50%, or the role cannot read the sequence value
 
 This occurs when a bigint sequence feeds an integer column. The sequence will eventually generate values too large for the column, causing INSERT failures.
 
@@ -80,7 +82,7 @@ For large tables or zero-downtime requirements, see the "Migration Guide" sectio
 
 ### For `integer-columns`
 
-Migrate integer columns to bigint before reaching 75% capacity:
+Migrate integer columns to bigint before reaching 90% capacity:
 
 ```sql
 -- Same migration as near-exhaustion
@@ -98,7 +100,7 @@ COMMIT;
 - 100K inserts/day: Migrate within 6 months
 - <10K inserts/day: Plan migration opportunistically
 
-**Foreign key references multiply the migration work.** Each referencing column must also become bigint. Each `ALTER COLUMN ... TYPE bigint` rewrites its table and the indexes of that table under an `ACCESS EXCLUSIVE` lock, so the lock time grows with the table size. A column with many references needs a coordinated migration of several tables. Plan it early, before capacity forces it. To list the references, see "Critical: Update ALL Foreign Keys" below.
+**Foreign key references multiply the migration work.** Each referencing column must also become bigint. Each `ALTER COLUMN ... TYPE bigint` rewrites its table and the indexes of that table under an `ACCESS EXCLUSIVE` lock, so the lock time grows with the table size. A column with many references needs a coordinated migration of several tables. Plan it early, before capacity forces it. The `FKs` column shows how many foreign keys reference the column. To list them, see "Critical: Update ALL Foreign Keys" below.
 
 ### For `type-mismatch`
 
@@ -127,15 +129,30 @@ ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
   GRANT SELECT ON SEQUENCES TO monitoring_role;
 ```
 
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `usage_warn_percent` | Usage at which `integer-columns`, `type-mismatch`, and `near-exhaustion` for a smallint or integer sequence give WARN | `50` |
+| `usage_fail_percent` | Usage at which the same findings give FAIL | `90` |
+
+Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. If the pair is not in this order, the check uses the defaults. A bigint sequence in `near-exhaustion` always uses 75% and 90%. These keys do not change `pk-types`.
+
+```yaml
+sequence-health:
+  usage_warn_percent: 40
+  usage_fail_percent: 75
+```
+
 ## Decision Tree: Which Issue to Fix First?
 
 ```
 CRITICAL (Migrate immediately - days to failure):
 ├─► near-exhaustion >90%
-└─► integer-columns >75% with >1M inserts/day
+└─► integer-columns >90%
 
 HIGH PRIORITY (Plan migration - weeks to months):
-├─► near-exhaustion >75%
+├─► near-exhaustion >50% (smallint, integer) or >75% (bigint)
 ├─► integer-columns >50% with >100K inserts/day
 └─► integer-columns with >10 foreign key references
 

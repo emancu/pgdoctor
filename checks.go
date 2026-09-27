@@ -151,6 +151,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return sequencehealth.New(db.New(conn), cfg)
 			},
+			ValidateSetting: sequencehealth.ValidateSetting,
 		},
 		{
 			Metadata: sessionsettings.Metadata,
