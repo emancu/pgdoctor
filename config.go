@@ -1,4 +1,4 @@
-package cli
+package pgdoctor
 
 import (
 	"bytes"
@@ -17,7 +17,9 @@ import (
 
 var linePrefix = regexp.MustCompile(`^line \d+: `)
 
-func loadConfig(path string, checks []check.Package) (check.Config, error) {
+// LoadConfig reads a YAML config file of per-check settings, keyed by CheckID.
+// It rejects an unknown check, an unknown setting, and an invalid value.
+func LoadConfig(path string, checks []check.Package) (check.Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)

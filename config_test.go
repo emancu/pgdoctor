@@ -1,4 +1,4 @@
-package cli
+package pgdoctor
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/emancu/pgdoctor"
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/partitioning"
 	"github.com/emancu/pgdoctor/checks/pktypes"
@@ -119,7 +118,7 @@ func TestLoadConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
+			cfg, err := LoadConfig(writeConfig(t, tt.content), AllChecks())
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, cfg)
@@ -245,7 +244,7 @@ func TestLoadConfigInvalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
+			cfg, err := LoadConfig(writeConfig(t, tt.content), AllChecks())
 
 			require.Error(t, err)
 			assert.Nil(t, cfg)
@@ -260,7 +259,7 @@ func TestLoadConfigInvalid(t *testing.T) {
 func TestLoadConfigMissingFile(t *testing.T) {
 	t.Parallel()
 
-	_, err := loadConfig(filepath.Join(t.TempDir(), "missing.yml"), pgdoctor.AllChecks())
+	_, err := LoadConfig(filepath.Join(t.TempDir(), "missing.yml"), AllChecks())
 
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
@@ -268,7 +267,7 @@ func TestLoadConfigMissingFile(t *testing.T) {
 func TestLoadConfigInvalidYAML(t *testing.T) {
 	t.Parallel()
 
-	_, err := loadConfig(writeConfig(t, "session-settings: [\n"), pgdoctor.AllChecks())
+	_, err := LoadConfig(writeConfig(t, "session-settings: [\n"), AllChecks())
 
 	require.ErrorContains(t, err, "parsing config")
 }
@@ -290,7 +289,7 @@ func TestLoadConfigMultipleDocuments(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg, err := loadConfig(writeConfig(t, tt.content), pgdoctor.AllChecks())
+			cfg, err := LoadConfig(writeConfig(t, tt.content), AllChecks())
 
 			require.ErrorContains(t, err, "expected one YAML document")
 			assert.Nil(t, cfg)
@@ -325,7 +324,7 @@ func TestLoadConfigReachesCheck(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, check.SeverityPass, report.Severity)
 
-	cfg, err := loadConfig(writeConfig(t, "session-settings:\n  timeout: 1000\n"), pgdoctor.AllChecks())
+	cfg, err := LoadConfig(writeConfig(t, "session-settings:\n  timeout: 1000\n"), AllChecks())
 	require.NoError(t, err)
 
 	report, err = sessionsettings.New(rows, cfg["session-settings"].(sessionsettings.Config)).Check(context.Background())
@@ -342,7 +341,7 @@ func TestLoadConfigLongListWithoutAliases(t *testing.T) {
 		b.WriteString("    - public.t" + strconv.Itoa(i) + "\n")
 	}
 
-	_, err := loadConfig(writeConfig(t, b.String()), pgdoctor.AllChecks())
+	_, err := LoadConfig(writeConfig(t, b.String()), AllChecks())
 
 	require.NoError(t, err)
 }
@@ -378,11 +377,11 @@ func FuzzLoadConfig(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
-	checks := pgdoctor.AllChecks()
+	checks := AllChecks()
 	f.Fuzz(func(t *testing.T, content string) {
 		path := filepath.Join(t.TempDir(), "pgdoctor.yml")
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-		_, _ = loadConfig(path, checks)
+		_, _ = LoadConfig(path, checks)
 	})
 }
 
@@ -394,7 +393,7 @@ func TestLoadConfigEmptyAliasForCheckWithoutSettings(t *testing.T) {
 		"pg-version: {<<: {}}\n",
 		"pg-version:\n",
 	} {
-		_, err := loadConfig(writeConfig(t, content), pgdoctor.AllChecks())
+		_, err := LoadConfig(writeConfig(t, content), AllChecks())
 		require.NoError(t, err, content)
 	}
 }
@@ -402,7 +401,7 @@ func TestLoadConfigEmptyAliasForCheckWithoutSettings(t *testing.T) {
 func TestDecodeConfigRejectsTrailingDocuments(t *testing.T) {
 	t.Parallel()
 
-	for _, pkg := range pgdoctor.AllChecks() {
+	for _, pkg := range AllChecks() {
 		if pkg.DecodeConfig == nil {
 			continue
 		}

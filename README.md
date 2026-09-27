@@ -224,6 +224,9 @@ pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
+
+// Read a YAML config file, the same file as the --config flag
+pgdoctor.LoadConfig(path, checks) (check.Config, error)
 ```
 
 To change the settings of a check, put the `Config` value of that check in `Options.Config`, keyed by check ID. Start from `DefaultConfig()`, because a zero field is not a valid setting. A check with an invalid value, or a value of the wrong type, reports SKIP with the reason:

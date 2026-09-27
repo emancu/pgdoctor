@@ -74,7 +74,7 @@ the level of detail, and --hide-passing to hide checks and findings that passed.
 			var cfg check.Config
 			if opts.config != "" {
 				var err error
-				cfg, err = loadConfig(opts.config, pgdoctor.AllChecks())
+				cfg, err = pgdoctor.LoadConfig(opts.config, pgdoctor.AllChecks())
 				if err != nil {
 					return err
 				}
