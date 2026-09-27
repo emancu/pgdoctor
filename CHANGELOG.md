@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release**: release binaries compile with the latest stable Go. `go.mod` keeps `go 1.25.0` as the minimum and adds `toolchain go1.26.8`, and CI also tests Go 1.27 ([#170](https://github.com/emancu/pgdoctor/pull/170)).
 - **Library**: `check.Package` has an optional `ValidateSetting` field. The generator sets it for each check that exports `ValidateSetting`, and `--config` reads it instead of a list in the CLI. A package that leaves it nil accepts no settings ([#173](https://github.com/emancu/pgdoctor/pull/173)).
 - **`pk-types`**: breaking — WARN at 50% and FAIL at 90% of the key capacity, instead of 45% and 85%. New `usage_warn_percent` and `usage_fail_percent` config keys set them. A table that uses the row estimate gives WARN, never FAIL ([#174](https://github.com/emancu/pgdoctor/pull/174)).
+- **`replication-lag`**: breaking — `physical-replication-lag` is WARN at 5 s and FAIL at 60 s, instead of 250 ms and 1 s. The new `physical_lag_warn_seconds` and `physical_lag_fail_seconds` config keys set the pair, and a `.<application_name>` suffix sets a pair for one replica. The `logical-replication-lag` absolute tier (time AND bytes) is WARN only ([#176](https://github.com/emancu/pgdoctor/pull/176)).
 
 ### Fixed
 
