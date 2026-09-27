@@ -36,22 +36,37 @@ This check identifies **ALL** tables using `int4` (integer) or `int2` (smallint)
 
 ## Severity Thresholds
 
-Tables with int4/int2 primary keys are reported once capacity usage reaches 45%. Severity indicates migration urgency:
+Tables with int4/int2 primary keys are reported once capacity usage reaches 50% (see Configuration). Severity indicates migration urgency:
 
-- **FAIL (≥85% capacity)**: Urgent migration required
+- **FAIL (≥90% capacity)**: Urgent migration required
   - Tables are approaching exhaustion
   - Migration complexity increases with size
   - Risk of emergency downtime if not addressed
 
-- **WARN (45-85% capacity)**: Migration needed, less urgent
+- **WARN (50-90% capacity)**: Migration needed, less urgent
   - Architectural violation must be fixed
-  - Migrate proactively before reaching 85%
+  - Migrate proactively before reaching 90%
   - Easier migration when table is smaller
 
 **Usage % calculation:**
 - Uses actual sequence value when available (most accurate)
-- Falls back to estimated row count vs type max value
+- Falls back to estimated row count vs type max value. A row count does not show the position of the next id, so this estimate gives WARN, never FAIL
 - Always available (only NULL for empty tables)
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `usage_warn_percent` | Capacity usage at which a table is reported | `50` |
+| `usage_fail_percent` | Capacity usage at which a table is FAIL | `90` |
+
+Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. If the pair is not in this order, the check uses the defaults. These keys do not change `sequence-health`.
+
+```yaml
+pk-types:
+  usage_warn_percent: "40"
+  usage_fail_percent: "75"
+```
 
 ## Architecture Rationale
 

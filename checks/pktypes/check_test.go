@@ -68,7 +68,7 @@ func TestPKTypes(t *testing.T) {
 		{
 			name: "single table - high usage - FAIL",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_910_000_000, 2_147_483_647, 0.889),
+				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_990_000_000, 2_147_483_647, 0.927),
 			},
 			severity:          check.SeverityFail,
 			wantOK:            false,
@@ -84,9 +84,17 @@ func TestPKTypes(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name: "floor threshold - exactly 45%",
+			name: "warn threshold - just below 50%",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.test", "id", "int4", 966_367_641, 0, 2_147_483_647, 0.45),
+				makePKRowWithUsage("public.test", "id", "int4", 1_000, 1_071_594_330, 2_147_483_647, 0.499),
+			},
+			severity: check.SeverityPass,
+			wantOK:   true,
+		},
+		{
+			name: "warn threshold - exactly 50%",
+			data: []db.InvalidPrimaryKeyTypesRow{
+				makePKRowWithUsage("public.test", "id", "int4", 1_000, 1_073_741_824, 2_147_483_647, 0.50),
 			},
 			severity:          check.SeverityWarn,
 			wantOK:            false,
@@ -94,17 +102,9 @@ func TestPKTypes(t *testing.T) {
 			wantDetailsSubstr: "1 WARNING",
 		},
 		{
-			name: "floor threshold - just below 45%",
-			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.test", "id", "int4", 966_367_640, 0, 2_147_483_647, 0.4499),
-			},
-			severity: check.SeverityPass,
-			wantOK:   true,
-		},
-		{
 			name: "multiple tables - mixed severity",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_910_000_000, 2_147_483_647, 0.889),
+				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_990_000_000, 2_147_483_647, 0.927),
 				makePKRowWithUsage("public.appointments", "id", "int4", 1_000_000_000, 1_108_000_000, 2_147_483_647, 0.516),
 				makePKRowWithUsage("public.kyc_statuses", "id", "int4", 1_200_000, 0, 2_147_483_647, 0.001),
 				makePKRowWithUsage("public.events", "id", "int4", 500_000, 0, 2_147_483_647, 0.0002),
@@ -115,18 +115,27 @@ func TestPKTypes(t *testing.T) {
 			wantDetailsSubstr: "1 CRITICAL, 1 WARNING",
 		},
 		{
-			name: "severity threshold - exactly 85%",
+			name: "fail threshold - just below 90%",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.test", "id", "int4", 1_825_361_100, 0, 2_147_483_647, 0.85),
+				makePKRowWithUsage("public.test", "id", "int4", 1_000, 1_930_587_800, 2_147_483_647, 0.899),
+			},
+			severity:      check.SeverityWarn,
+			wantOK:        false,
+			wantTableRows: 1,
+		},
+		{
+			name: "fail threshold - exactly 90%",
+			data: []db.InvalidPrimaryKeyTypesRow{
+				makePKRowWithUsage("public.test", "id", "int4", 1_000, 1_932_735_283, 2_147_483_647, 0.90),
 			},
 			severity:      check.SeverityFail,
 			wantOK:        false,
 			wantTableRows: 1,
 		},
 		{
-			name: "severity threshold - just below 85%",
+			name: "row estimate at 95% - capped at WARN",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.test", "id", "int4", 1_825_361_099, 0, 2_147_483_647, 0.8499),
+				makePKRowWithUsage("public.test", "id", "int4", 2_040_109_465, 0, 2_147_483_647, 0.95),
 			},
 			severity:      check.SeverityWarn,
 			wantOK:        false,
@@ -135,7 +144,7 @@ func TestPKTypes(t *testing.T) {
 		{
 			name: "int2 - smallint type",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.lookup", "id", "int2", 15_000, 0, 32_767, 0.458),
+				makePKRowWithUsage("public.lookup", "id", "int2", 15_000, 17_000, 32_767, 0.519),
 			},
 			severity:      check.SeverityWarn,
 			wantOK:        false,
@@ -152,7 +161,7 @@ func TestPKTypes(t *testing.T) {
 		{
 			name: "only above-floor tables listed",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.high_usage", "id", "int4", 1_000_000_000, 0, 2_147_483_647, 0.466),
+				makePKRowWithUsage("public.high_usage", "id", "int4", 1_100_000_000, 0, 2_147_483_647, 0.512),
 				makePKRowWithUsage("public.medium_usage", "id", "int4", 100_000_000, 0, 2_147_483_647, 0.047),
 				makePKRowWithUsage("public.low_usage", "id", "int4", 1_000, 0, 2_147_483_647, 0.0000005),
 			},
@@ -212,7 +221,7 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 		{
 			name: "unreadable next to a FAIL",
 			data: []db.InvalidPrimaryKeyTypesRow{
-				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_910_000_000, 2_147_483_647, 0.889),
+				makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_990_000_000, 2_147_483_647, 0.927),
 				unreadable,
 			},
 			severity: check.SeverityFail,
@@ -231,6 +240,78 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 			require.Len(t, report.Results, 1)
 			assert.Equal(t, "pk-types", report.Results[0].ID)
 			assert.Contains(t, report.Results[0].Details, "1 table(s) use the row estimate")
+		})
+	}
+}
+
+func TestPKTypes_Config(t *testing.T) {
+	t.Parallel()
+
+	rows := []db.InvalidPrimaryKeyTypesRow{
+		makePKRowWithUsage("public.a", "id", "int4", 1_000, 858_993_459, 2_147_483_647, 0.40),
+		makePKRowWithUsage("public.b", "id", "int4", 1_000, 1_610_612_736, 2_147_483_647, 0.75),
+	}
+
+	tests := []struct {
+		name     string
+		settings map[string]string
+		severity check.Severity
+		rowCount int
+	}{
+		{name: "defaults ignore sequence-health keys", settings: nil, severity: check.SeverityWarn, rowCount: 1},
+		{name: "override", settings: map[string]string{"usage_warn_percent": "30", "usage_fail_percent": "75"}, severity: check.SeverityFail, rowCount: 2},
+		{name: "warn not below fail keeps defaults", settings: map[string]string{"usage_warn_percent": "80", "usage_fail_percent": "70"}, severity: check.SeverityWarn, rowCount: 1},
+		{name: "warn above default fail keeps defaults", settings: map[string]string{"usage_warn_percent": "95"}, severity: check.SeverityWarn, rowCount: 1},
+		{name: "invalid value keeps default", settings: map[string]string{"usage_warn_percent": "abc"}, severity: check.SeverityWarn, rowCount: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := check.Config{
+				"pk-types":        tt.settings,
+				"sequence-health": {"usage_warn_percent": "10", "usage_fail_percent": "20"},
+			}
+			report, err := New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.severity, report.Severity)
+			require.NotNil(t, report.Results[0].Table)
+			assert.Len(t, report.Results[0].Table.Rows, tt.rowCount)
+		})
+	}
+}
+
+func TestValidateSetting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key, value string
+		wantErr    bool
+	}{
+		{"usage_warn_percent", "50", false},
+		{"usage_fail_percent", "100", false},
+		{"usage_warn_percent", "49.5", false},
+		{"usage_warn_percent", "0", true},
+		{"usage_fail_percent", "101", true},
+		{"usage_warn_percent", "-5", true},
+		{"usage_warn_percent", "NaN", true},
+		{"usage_fail_percent", "Inf", true},
+		{"usage_fail_percent", "ninety", true},
+		{"usage_percent", "50", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateSetting(tt.key, tt.value)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
@@ -268,8 +349,8 @@ func TestPKTypes_TableFormatting(t *testing.T) {
 	t.Parallel()
 
 	rows := []db.InvalidPrimaryKeyTypesRow{
-		makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_910_000_000, 2_147_483_647, 0.889),
-		makePKRowWithUsage("public.kyc_statuses", "id", "int4", 1_000_000_000, 0, 2_147_483_647, 0.466),
+		makePKRowWithUsage("public.bookings", "id", "int4", 1_900_000_000, 1_990_000_000, 2_147_483_647, 0.927),
+		makePKRowWithUsage("public.kyc_statuses", "id", "int4", 1_100_000_000, 0, 2_147_483_647, 0.512),
 	}
 
 	queryer := &mockQueryer{rows: rows}
@@ -288,22 +369,22 @@ func TestPKTypes_TableFormatting(t *testing.T) {
 	require.Equal(t, "public.bookings", table.Rows[0].Cells[0])
 	require.Equal(t, "id", table.Rows[0].Cells[1])
 	require.Equal(t, "int4", table.Rows[0].Cells[2])
-	require.Contains(t, table.Rows[0].Cells[3], "88.9%")
+	require.Contains(t, table.Rows[0].Cells[3], "92.7%")
 	require.Contains(t, table.Rows[0].Cells[4], "1.9B")
 	require.Equal(t, check.SeverityFail, table.Rows[0].Severity)
 
 	require.Equal(t, "public.kyc_statuses", table.Rows[1].Cells[0])
 	require.Equal(t, "id", table.Rows[1].Cells[1])
 	require.Equal(t, "int4", table.Rows[1].Cells[2])
-	require.Contains(t, table.Rows[1].Cells[3], "46.6%")
-	require.Contains(t, table.Rows[1].Cells[4], "1.0B")
+	require.Contains(t, table.Rows[1].Cells[3], "51.2%")
+	require.Contains(t, table.Rows[1].Cells[4], "1.1B")
 	require.Equal(t, check.SeverityWarn, table.Rows[1].Severity)
 }
 
 func TestPKTypes_UsageDisplay(t *testing.T) {
 	t.Parallel()
 
-	row := makePKRowWithUsage("public.test", "id", "int4", 1_000_000, 1_500_000, 2_147_483_647, 0.47)
+	row := makePKRowWithUsage("public.test", "id", "int4", 1_000_000, 1_500_000, 2_147_483_647, 0.57)
 	queryer := &mockQueryer{rows: []db.InvalidPrimaryKeyTypesRow{row}}
 	checker := New(queryer)
 
@@ -314,7 +395,7 @@ func TestPKTypes_UsageDisplay(t *testing.T) {
 	require.Len(t, report.Results[0].Table.Rows, 1)
 
 	usageCell := report.Results[0].Table.Rows[0].Cells[3]
-	assert.Contains(t, usageCell, "~47.0%")
+	assert.Contains(t, usageCell, "~57.0%")
 }
 
 func TestFormatDetails(t *testing.T) {
