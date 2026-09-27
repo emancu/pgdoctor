@@ -91,7 +91,7 @@ An error in the config file stops pgdoctor with exit code `2` before it runs a q
 - a value of the wrong type, for example `timeout: 5s`, or a comma-separated string where the check reads a list
 - a value that the check rejects, for example a WARN threshold that is not lower than the FAIL threshold
 
-The error messages do not show line numbers, because pgdoctor decodes each check section separately.
+A syntax error shows its line in the file. An error inside a check section has no reliable line number, because pgdoctor decodes each section separately.
 
 Exit codes are the same for text and JSON output:
 

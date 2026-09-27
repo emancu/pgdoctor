@@ -222,6 +222,14 @@ func TestLoadConfigInvalid(t *testing.T) {
 			want:    []string{"pk-types: yaml: anchor 'limits' value contains itself"},
 		},
 		{
+			name:    "every invalid role timeout, in order",
+			content: "session-settings: {timeout_by_role: {b: -1, a: 0}}\n",
+			want: []string{
+				"session-settings: timeout_by_role.a: 0 is not a positive integer",
+				"session-settings: timeout_by_role.b: -1 is not a positive integer",
+			},
+		},
+		{
 			name:    "alias cycle inside an overridden merge key",
 			content: "session-settings: {timeout: 1000, <<: &d {timeout: *d}}\n",
 			want:    []string{"session-settings: YAML aliases expand too far (an alias cycle or too many aliases)"},
@@ -358,4 +366,49 @@ func TestResolveAliasesLeavesTheSharedTreeUnchanged(t *testing.T) {
 	expanded = 0
 	_, err = resolveAliases(sectionB, false, &expanded)
 	require.ErrorContains(t, err, "YAML aliases expand too far")
+}
+
+func FuzzLoadConfig(f *testing.F) {
+	for _, seed := range []string{
+		"session-settings:\n  timeout: 1000\n  ignore_roles: [a, b]\n",
+		"pk-types: &l\n  usage_warn_percent: 40\nsequence-health: *l\n",
+		"session-settings: {timeout: 1000, <<: &d {timeout: *d}}\npk-types: {usage_warn_percent: *d}\n",
+		"replication-lag:\n  physical_lag_by_application:\n    r1: {warn_seconds: 5, fail_seconds: 60}\n",
+		"a: 1\n---\nb: 2\n",
+	} {
+		f.Add(seed)
+	}
+	checks := pgdoctor.AllChecks()
+	f.Fuzz(func(t *testing.T, content string) {
+		path := filepath.Join(t.TempDir(), "pgdoctor.yml")
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		_, _ = loadConfig(path, checks)
+	})
+}
+
+func TestLoadConfigEmptyAliasForCheckWithoutSettings(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{
+		"pg-version: &empty {}\ncache-efficiency: *empty\n",
+		"pg-version: {<<: {}}\n",
+		"pg-version:\n",
+	} {
+		_, err := loadConfig(writeConfig(t, content), pgdoctor.AllChecks())
+		require.NoError(t, err, content)
+	}
+}
+
+func TestDecodeConfigRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
+
+	for _, pkg := range pgdoctor.AllChecks() {
+		if pkg.DecodeConfig == nil {
+			continue
+		}
+		for _, content := range []string{"{}\n---\nunknown_setting: 1\n", "{}\n---\n[\n"} {
+			_, err := pkg.DecodeConfig([]byte(content))
+			require.Error(t, err, "%s %q", pkg.Metadata().CheckID, content)
+		}
+	}
 }
