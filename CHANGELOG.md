@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-27
+
+### Added
+
+- **Config**: `pgdoctor.LoadConfig` reads a config file, with the same validation as the `--config` flag ([#207](https://github.com/emancu/pgdoctor/pull/207)).
+
+### Changed
+
+- **table-vacuum-health**: `ignore_tables` now removes a table from every finding of the check, not only from `autovacuum-disabled` ([#206](https://github.com/emancu/pgdoctor/pull/206)).
+
 ## [0.6.3] - 2026-09-27
 
 ### Fixed

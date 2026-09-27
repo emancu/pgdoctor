@@ -1,6 +1,0 @@
-kind: Changed
-body: '`ignore_tables` now removes a table from every finding of the check, not only from `autovacuum-disabled`'
-time: 2026-09-27T19:45:49.404093+01:00
-custom:
-    Component: table-vacuum-health
-    PR: "206"
