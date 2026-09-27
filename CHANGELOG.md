@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-27
+
+### Fixed
+
+- **CLI**: a `--config` file with more than one YAML document is a config error (exit 2). Only the first document was read, so settings after a `---` had no effect ([#193](https://github.com/emancu/pgdoctor/pull/193)).
+- **CLI**: a `--config` alias to an anchor in another check section works. It failed with "unknown anchor" ([#195](https://github.com/emancu/pgdoctor/pull/195)).
+
 ## [0.6.0] - 2026-09-27
 
 **Breaking changes**
