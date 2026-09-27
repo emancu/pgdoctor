@@ -64,8 +64,8 @@ Each value must be a number greater than 0 and at most 100, and `usage_warn_perc
 
 ```yaml
 pk-types:
-  usage_warn_percent: "40"
-  usage_fail_percent: "75"
+  usage_warn_percent: 40
+  usage_fail_percent: 75
 ```
 
 ## Architecture Rationale

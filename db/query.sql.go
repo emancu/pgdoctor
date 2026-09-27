@@ -459,7 +459,7 @@ WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.relpersistence <> 't'
-  AND coalesce(s.n_live_tup, 0) > 10000
+  AND coalesce(s.n_live_tup, 0) >= $1::bigint
   AND coalesce(s.seq_scan, 0) > 100
 ORDER BY
   coalesce(s.seq_scan, 0) DESC
@@ -476,9 +476,9 @@ type HighSeqScanTablesRow struct {
 }
 
 // Identifies tables with excessive sequential scans relative to index scans.
-// Excludes: small tables, system schemas, temporary tables, tables with no indexes.
-func (q *Queries) HighSeqScanTables(ctx context.Context) ([]HighSeqScanTablesRow, error) {
-	rows, err := q.db.Query(ctx, highSeqScanTables)
+// Excludes: tables below min_rows, system schemas, temporary tables, tables with no indexes.
+func (q *Queries) HighSeqScanTables(ctx context.Context, minRows int64) ([]HighSeqScanTablesRow, error) {
+	rows, err := q.db.Query(ctx, highSeqScanTables, minRows)
 	if err != nil {
 		return nil, err
 	}
@@ -615,33 +615,26 @@ SELECT
   , pg_stat_activity.datname::text AS database_name
   , pg_stat_activity.application_name::text AS application_name
   , pg_stat_activity.state::text AS state
-  , extract(EPOCH FROM (now() - pg_stat_activity.xact_start))::bigint AS transaction_duration_seconds
+  , extract(EPOCH FROM (now() - pg_stat_activity.state_change))::bigint AS idle_duration_seconds
   , left(pg_stat_activity.query, 200)::text AS query_preview
-  , coalesce((
-    SELECT pg_settings.setting::bigint
-    FROM pg_settings
-    WHERE pg_settings.name = 'idle_in_transaction_session_timeout'
-  ), 0) AS timeout_ms
 FROM pg_stat_activity
 WHERE
   pg_stat_activity.state IN ('idle in transaction', 'idle in transaction (aborted)')
   AND pg_stat_activity.pid != pg_backend_pid()
-ORDER BY pg_stat_activity.xact_start ASC
+ORDER BY pg_stat_activity.state_change ASC
 `
 
 type IdleInTransactionRow struct {
-	Pid                        pgtype.Int4
-	Username                   pgtype.Text
-	DatabaseName               pgtype.Text
-	ApplicationName            pgtype.Text
-	State                      pgtype.Text
-	TransactionDurationSeconds pgtype.Int8
-	QueryPreview               pgtype.Text
-	TimeoutMs                  pgtype.Int8
+	Pid                 pgtype.Int4
+	Username            pgtype.Text
+	DatabaseName        pgtype.Text
+	ApplicationName     pgtype.Text
+	State               pgtype.Text
+	IdleDurationSeconds pgtype.Int8
+	QueryPreview        pgtype.Text
 }
 
 // Identifies connections stuck in 'idle in transaction' state.
-// Includes the timeout setting (in ms) for threshold calculation in Go.
 func (q *Queries) IdleInTransaction(ctx context.Context) ([]IdleInTransactionRow, error) {
 	rows, err := q.db.Query(ctx, idleInTransaction)
 	if err != nil {
@@ -657,9 +650,8 @@ func (q *Queries) IdleInTransaction(ctx context.Context) ([]IdleInTransactionRow
 			&i.DatabaseName,
 			&i.ApplicationName,
 			&i.State,
-			&i.TransactionDurationSeconds,
+			&i.IdleDurationSeconds,
 			&i.QueryPreview,
-			&i.TimeoutMs,
 		); err != nil {
 			return nil, err
 		}

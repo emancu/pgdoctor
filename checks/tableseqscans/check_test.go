@@ -19,11 +19,13 @@ const (
 )
 
 type mockTableSeqScansQueryer struct {
-	rows []db.HighSeqScanTablesRow
-	err  error
+	rows    []db.HighSeqScanTablesRow
+	err     error
+	minRows int64
 }
 
-func (m *mockTableSeqScansQueryer) HighSeqScanTables(context.Context) ([]db.HighSeqScanTablesRow, error) {
+func (m *mockTableSeqScansQueryer) HighSeqScanTables(_ context.Context, minRows int64) ([]db.HighSeqScanTablesRow, error) {
+	m.minRows = minRows
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -75,7 +77,7 @@ func Test_TableSeqScans(t *testing.T) {
 				},
 			},
 			ExpectedSeverity: check.SeverityWarn,
-			ExpectedFindings: 1,
+			ExpectedFindings: 2,
 		},
 		{
 			Name: "high seq scans (>50k rows, >50 ratio) - FAIL",
@@ -264,6 +266,8 @@ func Test_TableSeqScans_ModerateSeqScans(t *testing.T) {
 	require.Equal(t, check.SeverityWarn, moderateSeqResult.Severity)
 	require.Equal(t, "comments", moderateSeqResult.Table.Rows[0].Cells[0])
 	require.Equal(t, check.SeverityWarn, moderateSeqResult.Table.Rows[0].Severity)
+	require.Equal(t, check.SeverityWarn, report.Severity)
+	checktest.AssertSeverityInvariant(t, report)
 }
 
 func Test_TableSeqScans_ThresholdBoundaries(t *testing.T) {
@@ -399,8 +403,8 @@ func Test_TableSeqScans_InvalidRatio(t *testing.T) {
 	}
 
 	require.NotNil(t, highSeqResult)
-	require.Equal(t, check.SeverityFail, highSeqResult.Severity, "Invalid ratio (no idx scans) should be treated as very high")
-	require.Equal(t, "-", highSeqResult.Table.Rows[0].Cells[3])
+	require.Equal(t, check.SeverityFail, highSeqResult.Severity, "No index scans should meet any ratio threshold")
+	require.Equal(t, "no index scans", highSeqResult.Table.Rows[0].Cells[3])
 }
 
 func Test_TableSeqScans_SizeFormatting(t *testing.T) {
@@ -544,4 +548,117 @@ func Test_TableSeqScans_NoOKResultWhenIssuesFound(t *testing.T) {
 	result := results[0]
 	require.Equal(t, "high-seq-scans", result.ID)
 	require.Equal(t, check.SeverityFail, result.Severity)
+}
+
+func Test_TableSeqScans_Config(t *testing.T) {
+	t.Parallel()
+
+	table := func(rows int64, ratio float64) db.HighSeqScanTablesRow {
+		return db.HighSeqScanTablesRow{
+			TableName:      pgtype.Text{String: "orders", Valid: true},
+			SeqScan:        pgtype.Int8{Int64: 10000, Valid: true},
+			IdxScan:        pgtype.Int8{Int64: 100, Valid: true},
+			SeqToIdxRatio:  makeNumeric(ratio),
+			EstimatedRows:  pgtype.Int8{Int64: rows, Valid: true},
+			TableSizeBytes: pgtype.Int8{Int64: 10485760, Valid: true},
+			IndexCount:     pgtype.Int8{Int64: 2, Valid: true},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		settings        map[string]string
+		row             db.HighSeqScanTablesRow
+		wantMinRows     int64
+		wantHighFinding check.Severity
+	}{
+		{
+			name:            "defaults",
+			settings:        nil,
+			row:             table(50000, 50),
+			wantMinRows:     10000,
+			wantHighFinding: check.SeverityFail,
+		},
+		{
+			name:            "higher min rows moves the table out of high",
+			settings:        map[string]string{"high_seq_scans_min_rows": "50001"},
+			row:             table(50000, 50),
+			wantMinRows:     10000,
+			wantHighFinding: check.SeverityPass,
+		},
+		{
+			name:            "min rows below the moderate floor lowers the query floor",
+			settings:        map[string]string{"high_seq_scans_min_rows": "5000"},
+			row:             table(5000, 50),
+			wantMinRows:     5000,
+			wantHighFinding: check.SeverityFail,
+		},
+		{
+			name:            "lower min ratio",
+			settings:        map[string]string{"high_seq_scans_min_ratio": "2.5"},
+			row:             table(50000, 2.5),
+			wantMinRows:     10000,
+			wantHighFinding: check.SeverityFail,
+		},
+		{
+			name:            "invalid values keep the defaults",
+			settings:        map[string]string{"high_seq_scans_min_rows": "-1", "high_seq_scans_min_ratio": "NaN"},
+			row:             table(50000, 49.9),
+			wantMinRows:     10000,
+			wantHighFinding: check.SeverityPass,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := newMockQueryer([]db.HighSeqScanTablesRow{tt.row})
+			report, err := tableseqscans.New(queryer, check.Config{"table-seq-scans": tt.settings}).Check(context.Background())
+			require.NoError(t, err)
+			checktest.AssertSeverityInvariant(t, report)
+
+			require.Equal(t, tt.wantMinRows, queryer.minRows)
+			require.Equal(t, highSeqScansID, report.Results[0].ID)
+			require.Equal(t, tt.wantHighFinding, report.Results[0].Severity)
+		})
+	}
+}
+
+func Test_TableSeqScans_ValidateSetting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key     string
+		value   string
+		wantErr bool
+	}{
+		{key: "high_seq_scans_min_rows", value: "50000"},
+		{key: "high_seq_scans_min_rows", value: "0", wantErr: true},
+		{key: "high_seq_scans_min_rows", value: "-5", wantErr: true},
+		{key: "high_seq_scans_min_rows", value: "1.5", wantErr: true},
+		{key: "high_seq_scans_min_rows", value: "abc", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "50"},
+		{key: "high_seq_scans_min_ratio", value: "2.5"},
+		{key: "high_seq_scans_min_ratio", value: "0", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "-1", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "NaN", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "Inf", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "1e400", wantErr: true},
+		{key: "high_seq_scans_min_ratio", value: "abc", wantErr: true},
+		{key: "min_rows", value: "50000", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+
+			err := tableseqscans.ValidateSetting(tt.key, tt.value)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

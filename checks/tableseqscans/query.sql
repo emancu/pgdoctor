@@ -1,6 +1,6 @@
 -- name: HighSeqScanTables :many
 -- Identifies tables with excessive sequential scans relative to index scans.
--- Excludes: small tables, system schemas, temporary tables, tables with no indexes.
+-- Excludes: tables below min_rows, system schemas, temporary tables, tables with no indexes.
 WITH table_indexes AS (
   SELECT
     idx.indrelid AS table_oid
@@ -29,7 +29,7 @@ WHERE
   c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
   AND c.relpersistence <> 't'
-  AND coalesce(s.n_live_tup, 0) > 10000
+  AND coalesce(s.n_live_tup, 0) >= sqlc.arg(min_rows)::bigint
   AND coalesce(s.seq_scan, 0) > 100
 ORDER BY
   coalesce(s.seq_scan, 0) DESC;

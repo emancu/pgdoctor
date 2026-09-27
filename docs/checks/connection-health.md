@@ -75,7 +75,6 @@ Detects when nearly all connections are busy and new queries may need to wait.
 
 **Thresholds:**
 - Warning: >90% connections active AND <3 idle connections
-- Critical: >90% connections active AND ≤1 idle connection
 - Skipped if fewer than 10 total connections
 
 **What it means:**
@@ -99,7 +98,7 @@ Detects when too many connections are idle, indicating an oversized pool.
 **Thresholds:**
 - Warning: ≥90% of connections idle (minimum 20 connections)
 
-Advisory only — a high idle ratio never fails the check. Real connection-exhaustion risk is covered by `connection-saturation` and `pool-pressure`.
+Advisory only — a high idle ratio never fails the check. Real connection-exhaustion risk is covered by `connection-saturation`.
 
 **What it means:**
 Many idle connections waste memory and connection slots. This often indicates:
@@ -111,10 +110,9 @@ Many idle connections waste memory and connection slots. This often indicates:
 
 Identifies connections stuck in 'idle in transaction' state.
 
-**Thresholds (based on `idle_in_transaction_session_timeout` setting):**
-- Warning: Duration exceeds 50% of the timeout setting
-- Critical: Duration exceeds 100% of the timeout setting
-- If timeout is disabled (0), uses a 5-minute default
+**Thresholds (time since the connection became idle, from `state_change`):**
+- Warning: idle for 5 minutes or more
+- Critical: idle for 1 hour or more
 
 **Why this matters:**
 Idle-in-transaction connections:
@@ -129,8 +127,7 @@ Counts connections idle for more than 1 hour. One hour is the point past the usu
 backstop, so anything still idle beyond it is genuinely unreaped.
 
 **Thresholds:**
-- Warning: more than 100 connections idle over 1 hour
-- Critical: more than 500 connections idle over 1 hour
+- Warning: more than 100 connections idle over 1 hour (configurable, see Configuration below)
 
 **Why it matters:**
 Every idle connection still holds a `max_connections` slot, so a growing population of them starves new
@@ -224,10 +221,10 @@ ALTER SYSTEM SET idle_in_transaction_session_timeout = '10sec';
 SELECT pg_reload_conf();
 
 # Step 2: Identify problematic queries
-SELECT pid, state, query_start, query
+SELECT pid, state, state_change, query
 FROM pg_stat_activity
 WHERE state = 'idle in transaction'
-  AND query_start < NOW() - INTERVAL '5 minutes';
+  AND state_change < NOW() - INTERVAL '5 minutes';
 
 # Step 3: Kill stuck connections (if timeout doesn't work)
 # One PID at a time, verified from the query above. Never run a set-valued
@@ -350,6 +347,33 @@ Configuration lives in each service's source code (ORM settings). Consult your O
 
 - **connection-efficiency** - Analyzes historical session statistics (PostgreSQL 14+): abnormal session termination patterns
 - **session-settings** - Validates timeout configurations that affect connection behavior
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `long_idle_warn_count` | Number of connections idle over 1 hour above which `long-idle` is a WARN | `100` |
+
+Set it above the idle floor that your pools keep on purpose. In a `--config` file, a value that is not a positive integer is an error.
+
+```yaml
+connection-health:
+  long_idle_warn_count: 300
+```
+
+As a library, pass the same key in `check.Config`:
+
+```go
+cfg := check.Config{
+    "connection-health": {
+        "long_idle_warn_count": "300",
+    },
+}
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Checks: pgdoctor.AllChecks(),
+    Config: cfg,
+})
+```
 
 ## References
 

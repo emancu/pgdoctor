@@ -16,25 +16,19 @@ WHERE pid != pg_backend_pid();
 
 -- name: IdleInTransaction :many
 -- Identifies connections stuck in 'idle in transaction' state.
--- Includes the timeout setting (in ms) for threshold calculation in Go.
 SELECT
   pg_stat_activity.pid
   , pg_stat_activity.usename::text AS username
   , pg_stat_activity.datname::text AS database_name
   , pg_stat_activity.application_name::text AS application_name
   , pg_stat_activity.state::text AS state
-  , extract(EPOCH FROM (now() - pg_stat_activity.xact_start))::bigint AS transaction_duration_seconds
+  , extract(EPOCH FROM (now() - pg_stat_activity.state_change))::bigint AS idle_duration_seconds
   , left(pg_stat_activity.query, 200)::text AS query_preview
-  , coalesce((
-    SELECT pg_settings.setting::bigint
-    FROM pg_settings
-    WHERE pg_settings.name = 'idle_in_transaction_session_timeout'
-  ), 0) AS timeout_ms
 FROM pg_stat_activity
 WHERE
   pg_stat_activity.state IN ('idle in transaction', 'idle in transaction (aborted)')
   AND pg_stat_activity.pid != pg_backend_pid()
-ORDER BY pg_stat_activity.xact_start ASC;
+ORDER BY pg_stat_activity.state_change ASC;
 
 -- name: LongIdleConnections :many
 -- Identifies connections idle past the 1h idle_session_timeout backstop (unreaped pool accumulation).
