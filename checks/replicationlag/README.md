@@ -484,9 +484,9 @@ The `<application_name>` suffix must match `pg_stat_replication.application_name
 
 ```yaml
 replication-lag:
-  physical_lag_warn_seconds: "10"
-  physical_lag_warn_seconds.delayed_replica: "305"
-  physical_lag_fail_seconds.delayed_replica: "360"
+  physical_lag_warn_seconds: 10
+  physical_lag_warn_seconds.delayed_replica: 305
+  physical_lag_fail_seconds.delayed_replica: 360
 ```
 
 As a library, pass the same keys in `check.Config`:

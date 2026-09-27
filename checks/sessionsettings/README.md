@@ -114,8 +114,8 @@ session-settings:
   roles:
     - app_rw
     - dba_ro
-  timeout: "2000"
-  timeout.dba_ro: "300000"
+  timeout: 2000
+  timeout.dba_ro: 300000
 ```
 
 As a library, pass the same keys in `check.Config`:
