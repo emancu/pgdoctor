@@ -283,11 +283,6 @@ func TestCheck_PhysicalReplicationLag_Config(t *testing.T) {
 		{"under custom warn", replicationlag.Config{PhysicalLagWarnSeconds: 10, PhysicalLagFailSeconds: 60}, "standby", 9, check.SeverityPass},
 		{"replica override", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: delayed}, "delayed", 310, check.SeverityWarn},
 		{"replica override does not apply to other replicas", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: delayed}, "standby", 310, check.SeverityFail},
-		{
-			"replica fail-only override inherits global warn",
-			replicationlag.Config{PhysicalLagWarnSeconds: 10, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {FailSeconds: 360}}},
-			"delayed", 20, check.SeverityWarn,
-		},
 	}
 
 	for _, tt := range tests {
@@ -323,8 +318,18 @@ func TestConfig_Validate(t *testing.T) {
 		{"NaN warn", replicationlag.Config{PhysicalLagWarnSeconds: math.NaN(), PhysicalLagFailSeconds: 60}, true},
 		{"warn not below fail", replicationlag.Config{PhysicalLagWarnSeconds: 90, PhysicalLagFailSeconds: 60}, true},
 		{
-			"replica warn not below inherited fail",
-			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 90}}},
+			"replica pair",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 305, FailSeconds: 360}}},
+			false,
+		},
+		{
+			"replica without warn",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {FailSeconds: 360}}},
+			true,
+		},
+		{
+			"replica warn not below fail",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 400, FailSeconds: 360}}},
 			true,
 		},
 	}

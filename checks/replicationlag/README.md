@@ -479,7 +479,7 @@ ORDER BY pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) DESC;
 | `physical_lag_fail_seconds` | Replay lag (seconds) at which `physical-replication-lag` is a FAIL | `60` |
 | `physical_lag_by_application` | A map from `application_name` to `warn_seconds` and `fail_seconds` for one replica, in place of the global pair | None |
 
-A key in `physical_lag_by_application` must match `pg_stat_replication.application_name` exactly. A replica without `warn_seconds` or `fail_seconds` uses the global value. A value that is not a positive number is an error. The WARN threshold must be lower than the FAIL threshold, for the global pair and for each replica. If it is not, the config is an error. Use a per-replica pair for a delayed replica.
+A key in `physical_lag_by_application` must match `pg_stat_replication.application_name` exactly. Each replica needs both `warn_seconds` and `fail_seconds`. A value that is not a positive number is an error. The WARN threshold must be lower than the FAIL threshold, for the global pair and for each replica. If it is not, the config is an error. Use a per-replica pair for a delayed replica.
 
 ```yaml
 replication-lag:

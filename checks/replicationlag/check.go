@@ -50,8 +50,7 @@ type Config struct {
 	PhysicalLagByApplication map[string]LagThresholds `yaml:"physical_lag_by_application"`
 }
 
-// LagThresholds overrides the global pair for one replica. A zero field keeps
-// the global value.
+// LagThresholds replaces the global pair for one replica.
 type LagThresholds struct {
 	WarnSeconds float64 `yaml:"warn_seconds"`
 	FailSeconds float64 `yaml:"fail_seconds"`
@@ -65,8 +64,8 @@ func (c Config) Validate() error {
 	if err := validatePair(c.PhysicalLagWarnSeconds, c.PhysicalLagFailSeconds); err != nil {
 		return err
 	}
-	for name := range c.PhysicalLagByApplication {
-		if err := validatePair(c.physicalLag(name)); err != nil {
+	for name, t := range c.PhysicalLagByApplication {
+		if err := validatePair(t.WarnSeconds, t.FailSeconds); err != nil {
 			return fmt.Errorf("physical_lag_by_application.%s: %w", name, err)
 		}
 	}
@@ -85,18 +84,6 @@ func validatePair(warn, fail float64) error {
 
 func positive(n float64) bool {
 	return n > 0 && !math.IsInf(n, 1)
-}
-
-func (c Config) physicalLag(applicationName string) (warn, fail float64) {
-	warn, fail = c.PhysicalLagWarnSeconds, c.PhysicalLagFailSeconds
-	t := c.PhysicalLagByApplication[applicationName]
-	if t.WarnSeconds != 0 {
-		warn = t.WarnSeconds
-	}
-	if t.FailSeconds != 0 {
-		fail = t.FailSeconds
-	}
-	return warn, fail
 }
 
 type checker struct {
@@ -168,7 +155,10 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 func (c *checker) physicalLagSeverity(row db.ReplicationLagRow) check.Severity {
-	warn, fail := c.cfg.physicalLag(row.ApplicationName.String)
+	warn, fail := c.cfg.PhysicalLagWarnSeconds, c.cfg.PhysicalLagFailSeconds
+	if t, ok := c.cfg.PhysicalLagByApplication[row.ApplicationName.String]; ok {
+		warn, fail = t.WarnSeconds, t.FailSeconds
+	}
 	// COALESCE in query ensures these are always valid
 	lagSeconds := row.ReplayLagSeconds.Float64
 	switch {

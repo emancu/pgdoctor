@@ -197,9 +197,10 @@ func TestAllChecks_DecodeConfig(t *testing.T) {
 			sessionsettings.Config{Roles: []string{"app_rw", "dba_ro"}, Timeout: 5000, TimeoutByRole: map[string]int64{"dba_ro": 300000}}, "",
 		},
 		{
-			"nested map", "replication-lag", "physical_lag_by_application: {delayed: {fail_seconds: 360}}",
-			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {FailSeconds: 360}}}, "",
+			"nested map", "replication-lag", "physical_lag_by_application: {delayed: {warn_seconds: 305, fail_seconds: 360}}",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 305, FailSeconds: 360}}}, "",
 		},
+		{"replica without warn", "replication-lag", "physical_lag_by_application: {delayed: {fail_seconds: 360}}", nil, "physical_lag_by_application.delayed"},
 		{"unknown key", "session-settings", "timeuot: 2000", nil, "field timeuot not found"},
 		{"unknown nested key", "replication-lag", "physical_lag_by_application: {delayed: {fial_seconds: 360}}", nil, "field fial_seconds not found"},
 		{"comma string for a list", "table-vacuum-health", "autovacuum_disabled_exclude: public.a,public.b", nil, "cannot unmarshal"},
