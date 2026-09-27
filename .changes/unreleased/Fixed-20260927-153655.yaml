@@ -1,0 +1,6 @@
+kind: Fixed
+body: a `--config` alias cycle or alias bomb inside a merge key is a config error (exit 2). It crashed pgdoctor with a stack overflow
+time: 2026-09-27T15:36:55.133466+01:00
+custom:
+    Component: CLI
+    PR: "199"
