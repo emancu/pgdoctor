@@ -137,6 +137,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return replicationlag.New(db.New(conn), cfg)
 			},
+			ValidateSetting: replicationlag.ValidateSetting,
 		},
 		{
 			Metadata: replicationslots.Metadata,

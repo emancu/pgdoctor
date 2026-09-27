@@ -46,17 +46,17 @@ Validates that replication slots have healthy WAL retention status.
 
 Monitors replay lag for physical standby servers (streaming replication to standbys).
 
-**Thresholds:**
-- FAIL: >= 1 second
-- WARN: >= 250ms
-- OK: < 250ms
+**Thresholds** (configurable, see Configuration below):
+- FAIL: >= 60 seconds
+- WARN: >= 5 seconds
+- OK: < 5 seconds
 
-**Why strict thresholds?** Physical standbys should be nearly synchronous (<250ms). High lag indicates:
+**Why these thresholds?** Replay on a standby pauses for up to `max_standby_streaming_delay` (30s by default) when a standby query conflicts with WAL replay. The replay of a large `CREATE INDEX` or `VACUUM` also causes short lag. A minute of lag is not normal. High lag indicates:
 - Network issues between primary and standby
 - Standby under heavy load (can't apply WAL fast enough)
 - Risk during failover (data loss or long recovery time)
 
-Physical replication uses streaming replication protocol where WAL is sent directly to the standby and applied immediately. Any lag above 250ms suggests infrastructure problems.
+A replica with `recovery_min_apply_delay` always shows that delay as replay lag. The primary cannot see this setting, so give that replica its own thresholds.
 
 ### logical-replication-lag
 
@@ -69,7 +69,6 @@ Severity is the **maximum of two independent tiers** evaluated per slot. A slot 
 Requires **both** a sustained high replay lag **and** a material backlog:
 
 - WARN: replay lag >= 120s **AND** backlog >= 550 MiB
-- FAIL: replay lag >= 300s **AND** backlog >= 2 GiB
 - OK: otherwise
 
 **Why gate on both?** For Debezium/CDC, `replay_lag` time tracks the connector's LSN-ack cadence (batching, Kafka round-trips), not danger. A slot can show high time with a tiny backlog during low-activity periods — that is normal batch behaviour, not a failure. The backlog in bytes is the real risk signal. Requiring both dimensions avoids paging on routine batching while still catching a genuinely growing, stuck slot.
@@ -137,7 +136,7 @@ reported as OK.
 Lag is **problematic** only when it signals an unbounded, growing backlog, which is
 what the `logical-replication-lag` thresholds above capture:
 - **Liveness** — replay lag time stays high *and* the retained backlog is large
-  (≥120s + ≥550 MiB → warn; ≥300s + ≥2 GiB → fail).
+  (≥120s + ≥550 MiB → warn).
 - **Capacity** — the backlog consumes a large fraction of `max_slot_wal_keep_size`
   (≥50% → warn; ≥85% → fail), when a cap is set. This is the early signal before
   `wal_status` flips to `unreserved`.
@@ -471,6 +470,40 @@ ORDER BY pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) DESC;
 - **`cdc-warehouse`** - CDC warehouse publication validation
   - Publication coverage
   - Replica identity configuration
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `physical_lag_warn_seconds` | Replay lag (seconds) at which `physical-replication-lag` is a WARN | `5` |
+| `physical_lag_fail_seconds` | Replay lag (seconds) at which `physical-replication-lag` is a FAIL | `60` |
+| `physical_lag_warn_seconds.<application_name>` | WARN threshold (seconds) for one replica, in place of `physical_lag_warn_seconds` | `physical_lag_warn_seconds` |
+| `physical_lag_fail_seconds.<application_name>` | FAIL threshold (seconds) for one replica, in place of `physical_lag_fail_seconds` | `physical_lag_fail_seconds` |
+
+The `<application_name>` suffix must match `pg_stat_replication.application_name` exactly. In a `--config` file, a value that is not a positive number is an error. The WARN threshold must be lower than the FAIL threshold. If it is not, pgdoctor ignores that pair: the global pair falls back to the defaults, and a replica pair falls back to the global pair. Use a per-replica pair for a delayed replica.
+
+```yaml
+replication-lag:
+  physical_lag_warn_seconds: "10"
+  physical_lag_warn_seconds.delayed_replica: "305"
+  physical_lag_fail_seconds.delayed_replica: "360"
+```
+
+As a library, pass the same keys in `check.Config`:
+
+```go
+cfg := check.Config{
+    "replication-lag": {
+        "physical_lag_warn_seconds":                 "10",
+        "physical_lag_warn_seconds.delayed_replica": "305",
+        "physical_lag_fail_seconds.delayed_replica": "360",
+    },
+}
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Checks: pgdoctor.AllChecks(),
+    Config: cfg,
+})
+```
 
 ## References
 

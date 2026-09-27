@@ -103,7 +103,6 @@ const (
 	mib          = int64(1024 * 1024)
 	capUnlimited = int64(-1)        // max_slot_wal_keep_size = -1 (RDS default)
 	warnBytes    = int64(576716800) // logicalWarnBytes (550 MiB)
-	failBytes    = 2 * gib          // logicalFailBytes (2 GiB)
 )
 
 func nonStreamingState(appName, state string) db.ReplicationLagRow {
@@ -177,7 +176,7 @@ func TestCheck_PhysicalReplicationLag_Warning(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 0.5), // 500ms - warning
+			laggingPhysical("standby1", 10.0), // warning
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -209,7 +208,7 @@ func TestCheck_PhysicalReplicationLag_Fail(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 2.0), // 2s - fail
+			laggingPhysical("standby1", 120.0), // fail
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -240,11 +239,11 @@ func TestCheck_PhysicalReplicationLag_Thresholds(t *testing.T) {
 		lagSeconds     float64
 		expectSeverity check.Severity
 	}{
-		{"under threshold", 0.1, check.SeverityPass},
-		{"exactly at warn threshold", 0.25, check.SeverityWarn},
-		{"over warn threshold", 0.5, check.SeverityWarn},
-		{"exactly at fail threshold", 1.0, check.SeverityFail},
-		{"over fail threshold", 2.0, check.SeverityFail},
+		{"under threshold", 4.99, check.SeverityPass},
+		{"exactly at warn threshold", 5.0, check.SeverityWarn},
+		{"under fail threshold", 59.99, check.SeverityWarn},
+		{"exactly at fail threshold", 60.0, check.SeverityFail},
+		{"over fail threshold", 120.0, check.SeverityFail},
 	}
 
 	for _, tt := range tests {
@@ -262,6 +261,97 @@ func TestCheck_PhysicalReplicationLag_Thresholds(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectSeverity, report.Severity)
+		})
+	}
+}
+
+func TestCheck_PhysicalReplicationLag_Config(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		settings       map[string]string
+		appName        string
+		lagSeconds     float64
+		expectSeverity check.Severity
+	}{
+		{"custom warn", map[string]string{"physical_lag_warn_seconds": "1.5"}, "standby", 1.5, check.SeverityWarn},
+		{"custom fail", map[string]string{"physical_lag_fail_seconds": "30"}, "standby", 30, check.SeverityFail},
+		{"under custom warn", map[string]string{"physical_lag_warn_seconds": "10"}, "standby", 9, check.SeverityPass},
+		{"warn not below fail keeps defaults", map[string]string{"physical_lag_warn_seconds": "90"}, "standby", 60, check.SeverityFail},
+		{"invalid value keeps default", map[string]string{"physical_lag_fail_seconds": "-1"}, "standby", 60, check.SeverityFail},
+		{"non-number keeps default", map[string]string{"physical_lag_warn_seconds": "5s"}, "standby", 4, check.SeverityPass},
+		{
+			"replica override",
+			map[string]string{"physical_lag_warn_seconds.delayed": "305", "physical_lag_fail_seconds.delayed": "360"},
+			"delayed", 310, check.SeverityWarn,
+		},
+		{
+			"replica override does not apply to other replicas",
+			map[string]string{"physical_lag_warn_seconds.delayed": "305", "physical_lag_fail_seconds.delayed": "360"},
+			"standby", 310, check.SeverityFail,
+		},
+		{
+			"replica fail-only override inherits global warn",
+			map[string]string{"physical_lag_warn_seconds": "10", "physical_lag_fail_seconds.delayed": "360"},
+			"delayed", 20, check.SeverityWarn,
+		},
+		{
+			"invalid replica pair keeps global pair",
+			map[string]string{"physical_lag_fail_seconds": "30", "physical_lag_warn_seconds.delayed": "400", "physical_lag_fail_seconds.delayed": "360"},
+			"delayed", 30, check.SeverityFail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				rows: []db.ReplicationLagRow{laggingPhysical(tt.appName, tt.lagSeconds)},
+			}
+			cfg := check.Config{"replication-lag": tt.settings}
+			checker := replicationlag.New(queryer, cfg)
+
+			report, err := checker.Check(context.Background())
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.expectSeverity, report.Severity)
+		})
+	}
+}
+
+func TestValidateSetting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key, value string
+		wantErr    bool
+	}{
+		{"physical_lag_warn_seconds", "5", false},
+		{"physical_lag_fail_seconds", "0.5", false},
+		{"physical_lag_warn_seconds.delayed", "305", false},
+		{"physical_lag_fail_seconds.delayed", "360", false},
+		{"physical_lag_warn_seconds", "0", true},
+		{"physical_lag_warn_seconds", "-5", true},
+		{"physical_lag_fail_seconds", "60s", true},
+		{"physical_lag_fail_seconds", "NaN", true},
+		{"physical_lag_fail_seconds", "Inf", true},
+		{"physical_lag_warn_seconds.", "5", true},
+		{"physical_lag_fail_seconds.", "5", true},
+		{"logical_lag_warn_seconds", "5", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+
+			err := replicationlag.ValidateSetting(tt.key, tt.value)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
@@ -300,7 +390,7 @@ func TestCheck_LogicalReplicationLag_Fail(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingLogical("debezium", 350.0, 9*gib, capUnlimited), // high time AND bytes - fail
+			laggingLogical("debezium", 5.0, 950*mib, gib), // backlog >= 85% of cap - fail
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -341,11 +431,9 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 		// Bytes alone is not enough — time below warn tier.
 		{"warn bytes but time below warn", 10.0, 9 * gib, capUnlimited, check.SeverityPass},
 		{"130s with 600MiB AND-gate warn", 130.0, 600 * mib, capUnlimited, check.SeverityWarn},
-		{"350s with 3GiB AND-gate fail", 350.0, 3 * gib, capUnlimited, check.SeverityFail},
-		// Fail time but bytes only in warn tier ⇒ degrades to warn.
-		{"fail time with warn-tier bytes degrades to warn", 350.0, 600 * mib, capUnlimited, check.SeverityWarn},
+		{"350s with 3GiB stays warn", 350.0, 3 * gib, capUnlimited, check.SeverityWarn},
 		{"exactly at warn thresholds", 120.0, warnBytes, capUnlimited, check.SeverityWarn},
-		{"exactly at fail thresholds", 300.0, failBytes, capUnlimited, check.SeverityFail},
+		{"300s with 2GiB stays warn", 300.0, 2 * gib, capUnlimited, check.SeverityWarn},
 
 		// --- Capacity-relative tier (low time, so the absolute tier is OK) ---
 		{"cap=1GiB backlog 600MiB (>=50%) warn", 5.0, 600 * mib, gib, check.SeverityWarn},
@@ -353,8 +441,8 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 		{"cap=10GiB backlog 100MiB OK", 5.0, 100 * mib, 10 * gib, check.SeverityPass},
 
 		// --- Tiers disagree: max wins ---
-		// Absolute FAIL (350s/3GiB), relative OK (3GiB < 50% of 10GiB) ⇒ FAIL.
-		{"absolute fail, relative ok, max=fail", 350.0, 3 * gib, 10 * gib, check.SeverityFail},
+		// Absolute WARN (350s/3GiB), relative OK (3GiB < 50% of 10GiB) ⇒ WARN.
+		{"absolute warn, relative ok, max=warn", 350.0, 3 * gib, 10 * gib, check.SeverityWarn},
 		// Absolute OK (low time), relative FAIL (950MiB >= 85% of 1GiB) ⇒ FAIL.
 		{"absolute ok, relative fail, max=fail", 5.0, 950 * mib, gib, check.SeverityFail},
 	}
@@ -384,9 +472,9 @@ func TestCheck_MixedReplicationTypes(t *testing.T) {
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
 			healthyPhysical("standby1"),
-			laggingPhysical("standby2", 0.5), // warn
+			laggingPhysical("standby2", 10.0), // warn
 			healthyLogical("debezium1"),
-			laggingLogical("debezium2", 350.0, 9*gib, capUnlimited), // fail: high time AND bytes
+			laggingLogical("debezium2", 5.0, 950*mib, gib), // fail: backlog >= 85% of cap
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -615,8 +703,8 @@ func TestCheck_MultipleIssues(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 2.0),                        // physical lag fail
-			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // logical lag fail: time AND bytes
+			laggingPhysical("standby1", 120.0),                      // physical lag fail
+			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // logical lag warn: time AND bytes
 			nonStreamingState("standby2", "catchup"),                // state warn
 			walIssue("debezium2", "unreserved"),                     // wal fail
 		},
@@ -638,8 +726,8 @@ func TestCheck_MultipleIssues(t *testing.T) {
 		severityCounts[finding.Severity]++
 	}
 
-	assert.Equal(t, 3, severityCounts[check.SeverityFail])
-	assert.Equal(t, 1, severityCounts[check.SeverityWarn])
+	assert.Equal(t, 2, severityCounts[check.SeverityFail])
+	assert.Equal(t, 2, severityCounts[check.SeverityWarn])
 }
 
 func TestCheck_NoSlotName(t *testing.T) {
@@ -651,7 +739,7 @@ func TestCheck_NoSlotName(t *testing.T) {
 		State:            pgText("streaming"),
 		ReplicationType:  pgText("physical"),
 		ReplayLagBytes:   pgInt8(1024),
-		ReplayLagSeconds: pgFloat8(2.0),             // Lagging to trigger table output
+		ReplayLagSeconds: pgFloat8(10.0),            // Lagging to trigger table output
 		SlotName:         pgtype.Text{Valid: false}, // No slot
 		WalStatus:        pgtype.Text{Valid: false},
 	}
@@ -785,8 +873,8 @@ func TestCheck_PrescriptionsPresent(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 2.0),
-			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // fail: time AND bytes
+			laggingPhysical("standby1", 120.0),
+			laggingLogical("debezium1", 350.0, 9*gib, capUnlimited), // warn: time AND bytes
 			nonStreamingState("standby2", "catchup"),
 			walIssue("debezium2", "lost"),
 		},
@@ -802,7 +890,7 @@ func TestCheck_TableStructure(t *testing.T) {
 
 	queryer := &mockQueryer{
 		rows: []db.ReplicationLagRow{
-			laggingPhysical("standby1", 2.0),
+			laggingPhysical("standby1", 120.0),
 		},
 	}
 	checker := replicationlag.New(queryer)
@@ -845,15 +933,15 @@ func TestCheck_SeverityMaxCalculation(t *testing.T) {
 			name: "warn trumps OK",
 			rows: []db.ReplicationLagRow{
 				healthyPhysical("standby1"),
-				laggingPhysical("standby2", 0.5), // warn
+				laggingPhysical("standby2", 10.0), // warn
 			},
 			expectedMax: check.SeverityWarn,
 		},
 		{
 			name: "fail trumps warn",
 			rows: []db.ReplicationLagRow{
-				laggingPhysical("standby1", 0.5), // warn
-				laggingPhysical("standby2", 2.0), // fail
+				laggingPhysical("standby1", 10.0),  // warn
+				laggingPhysical("standby2", 120.0), // fail
 			},
 			expectedMax: check.SeverityFail,
 		},
