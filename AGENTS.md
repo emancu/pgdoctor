@@ -194,6 +194,9 @@ pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
+
+// Read a YAML config file, the same file as the --config flag
+pgdoctor.LoadConfig(path, checks) (check.Config, error)
 ```
 
 ### CheckID vs Finding ID
