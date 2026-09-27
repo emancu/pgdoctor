@@ -98,7 +98,7 @@ Detects when too many connections are idle, indicating an oversized pool.
 **Thresholds:**
 - Warning: ≥90% of connections idle (minimum 20 connections)
 
-Advisory only — a high idle ratio never fails the check. Real connection-exhaustion risk is covered by `connection-saturation` and `pool-pressure`.
+Advisory only — a high idle ratio never fails the check. Real connection-exhaustion risk is covered by `connection-saturation`.
 
 **What it means:**
 Many idle connections waste memory and connection slots. This often indicates:

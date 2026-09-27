@@ -21,8 +21,8 @@ const (
 	saturationWarnPercent = 70.0
 	saturationFailPercent = 85.0
 
-	// Idle ratio is advisory only — saturation and pool-pressure already guard
-	// real connection exhaustion, so this check can only ever be OK or WARN.
+	// Idle ratio is advisory only — connection-saturation already guards real
+	// connection exhaustion, so this check can only ever be OK or WARN.
 	idleRatioWarnPercent = 90.0
 	// Skip idle ratio check below this threshold to avoid false positives
 	// in low-traffic databases.
