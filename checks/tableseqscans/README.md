@@ -11,14 +11,16 @@ Identifies tables with excessive sequential scan activity relative to index scan
 Analyzes the ratio of sequential scans to index scans on tables:
 
 **FAIL**:
-- Tables with > 50,000 rows
-- Sequential scan / index scan ratio > 50:1
+- Tables with >= 50,000 rows (see Configuration)
+- Sequential scan / index scan ratio >= 50:1 (see Configuration)
 - Has at least one index (tables without indexes are excluded)
 
 **WARN**:
-- Tables with > 10,000 rows
-- Sequential scan / index scan ratio > 10:1
+- Tables with >= 10,000 rows
+- Sequential scan / index scan ratio >= 10:1
 - Has at least one index
+
+A table with no index scans meets every ratio threshold.
 
 **Excludes**:
 - Small tables (< 10,000 rows) where sequential scans are efficient
@@ -29,6 +31,35 @@ Analyzes the ratio of sequential scans to index scans on tables:
 ## Statistics Requirements
 
 This check requires at least **7 days** of statistics history. After a recent statistics reset, the ratios do not represent the workload.
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `high_seq_scans_min_rows` | Row count at which `high-seq-scans` reports a table | `50000` |
+| `high_seq_scans_min_ratio` | Sequential scan / index scan ratio at which `high-seq-scans` reports a table | `50` |
+
+In a `--config` file, a row count that is not a positive integer, or a ratio that is not a positive number, is an error. As a library, pgdoctor ignores an invalid value and uses the default.
+
+```yaml
+table-seq-scans:
+  high_seq_scans_min_rows: 1000000
+  high_seq_scans_min_ratio: 100
+```
+
+As a library, pass the same keys in `check.Config`:
+
+```go
+cfg := check.Config{
+    "table-seq-scans": {
+        "high_seq_scans_min_rows":  "1000000",
+        "high_seq_scans_min_ratio": "100",
+    },
+}
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Config: cfg,
+})
+```
 
 ## Important Considerations
 

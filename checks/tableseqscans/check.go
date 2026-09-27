@@ -5,6 +5,8 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -19,16 +21,16 @@ var readme string
 const (
 	warnRowThreshold   = 10000
 	warnRatioThreshold = 10.0
-	failRowThreshold   = 50000
-	failRatioThreshold = 50.0
 )
 
 type TableSeqScansQueries interface {
-	HighSeqScanTables(context.Context) ([]db.HighSeqScanTablesRow, error)
+	HighSeqScanTables(ctx context.Context, minRows int64) ([]db.HighSeqScanTablesRow, error)
 }
 
 type checker struct {
-	queries TableSeqScansQueries
+	queries      TableSeqScansQueries
+	highMinRows  int64
+	highMinRatio float64
 }
 
 func Metadata() check.Metadata {
@@ -42,10 +44,49 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries TableSeqScansQueries, _ ...check.Config) check.Checker {
-	return &checker{
-		queries: queries,
+func New(queries TableSeqScansQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
+		queries:      queries,
+		highMinRows:  50000,
+		highMinRatio: 50,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
+			if n, ok := parsePositiveInt(myCfg["high_seq_scans_min_rows"]); ok {
+				c.highMinRows = n
+			}
+			if f, ok := parsePositiveNumber(myCfg["high_seq_scans_min_ratio"]); ok {
+				c.highMinRatio = f
+			}
+		}
+	}
+	return c
+}
+
+func ValidateSetting(key, value string) error {
+	switch key {
+	case "high_seq_scans_min_rows":
+		if _, ok := parsePositiveInt(value); !ok {
+			return fmt.Errorf("%s: %q is not a positive integer", key, value)
+		}
+		return nil
+	case "high_seq_scans_min_ratio":
+		if _, ok := parsePositiveNumber(value); !ok {
+			return fmt.Errorf("%s: %q is not a positive number", key, value)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown key %q", key)
+}
+
+func parsePositiveInt(value string) (int64, bool) {
+	n, err := strconv.ParseInt(value, 10, 64)
+	return n, err == nil && n > 0
+}
+
+func parsePositiveNumber(value string) (float64, bool) {
+	f, err := strconv.ParseFloat(value, 64)
+	return f, err == nil && f > 0 && !math.IsInf(f, 1)
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -55,7 +96,7 @@ func (c *checker) Metadata() check.Metadata {
 func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	report := check.NewReport(Metadata())
 
-	rows, err := c.queries.HighSeqScanTables(ctx)
+	rows, err := c.queries.HighSeqScanTables(ctx, min(warnRowThreshold, c.highMinRows))
 	if err != nil {
 		return nil, fmt.Errorf("running %s/%s: %w", report.Category, report.CheckID, err)
 	}
@@ -69,12 +110,12 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		return report, nil
 	}
 
-	checkHighSeqScans(rows, report)
+	checkHighSeqScans(rows, c.highMinRows, c.highMinRatio, report)
 
 	return report, nil
 }
 
-func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
+func checkHighSeqScans(rows []db.HighSeqScanTablesRow, highMinRows int64, highMinRatio float64, report *check.Report) {
 	var failRows []check.TableRow
 	var warnRows []check.TableRow
 
@@ -83,14 +124,13 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 			continue
 		}
 
+		noIndexScans := !row.SeqToIdxRatio.Valid
 		var ratio float64
-		ratioCell := "-"
-		if row.SeqToIdxRatio.Valid {
+		ratioCell := "no index scans"
+		if !noIndexScans {
 			r, _ := row.SeqToIdxRatio.Float64Value()
 			ratio = r.Float64
 			ratioCell = fmt.Sprintf("%.1f", ratio)
-		} else {
-			ratio = 999999
 		}
 
 		cells := []string{
@@ -102,9 +142,9 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 			check.FormatBytes(row.TableSizeBytes.Int64),
 		}
 
-		if row.EstimatedRows.Int64 >= failRowThreshold && ratio >= failRatioThreshold {
+		if row.EstimatedRows.Int64 >= highMinRows && (noIndexScans || ratio >= highMinRatio) {
 			failRows = append(failRows, check.TableRow{Cells: cells, Severity: check.SeverityFail})
-		} else if row.EstimatedRows.Int64 >= warnRowThreshold && ratio >= warnRatioThreshold {
+		} else if row.EstimatedRows.Int64 >= warnRowThreshold && (noIndexScans || ratio >= warnRatioThreshold) {
 			warnRows = append(warnRows, check.TableRow{Cells: cells, Severity: check.SeverityWarn})
 		}
 	}
@@ -119,6 +159,12 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 			Details:  fmt.Sprintf("Found %d tables with very high sequential scan ratios", len(failRows)),
 			Table:    &check.Table{Headers: headers, Rows: failRows},
 		})
+	} else {
+		report.AddFinding(check.Finding{
+			ID:       "high-seq-scans",
+			Name:     "High Sequential Scans",
+			Severity: check.SeverityPass,
+		})
 	}
 
 	if len(warnRows) > 0 {
@@ -128,14 +174,6 @@ func checkHighSeqScans(rows []db.HighSeqScanTablesRow, report *check.Report) {
 			Severity: check.SeverityWarn,
 			Details:  fmt.Sprintf("Found %d tables with elevated sequential scan ratios", len(warnRows)),
 			Table:    &check.Table{Headers: headers, Rows: warnRows},
-		})
-	}
-
-	if len(failRows) == 0 && len(warnRows) == 0 {
-		report.AddFinding(check.Finding{
-			ID:       "high-seq-scans",
-			Name:     "High Sequential Scans",
-			Severity: check.SeverityPass,
 		})
 	}
 }

@@ -176,6 +176,7 @@ func AllChecks() []check.Package {
 			New: func(conn db.DBTX, cfg check.Config) check.Checker {
 				return tableseqscans.New(db.New(conn), cfg)
 			},
+			ValidateSetting: tableseqscans.ValidateSetting,
 		},
 		{
 			Metadata: tablevacuumhealth.Metadata,
