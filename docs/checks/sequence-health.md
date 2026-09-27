@@ -100,7 +100,7 @@ COMMIT;
 - 100K inserts/day: Migrate within 6 months
 - <10K inserts/day: Plan migration opportunistically
 
-**Foreign key references multiply the migration work.** Each referencing column must also become bigint. Each `ALTER COLUMN ... TYPE bigint` rewrites its table and the indexes of that table under an `ACCESS EXCLUSIVE` lock, so the lock time grows with the table size. A column with many references needs a coordinated migration of several tables. Plan it early, before capacity forces it. To list the references, see "Critical: Update ALL Foreign Keys" below.
+**Foreign key references multiply the migration work.** Each referencing column must also become bigint. Each `ALTER COLUMN ... TYPE bigint` rewrites its table and the indexes of that table under an `ACCESS EXCLUSIVE` lock, so the lock time grows with the table size. A column with many references needs a coordinated migration of several tables. Plan it early, before capacity forces it. The `FKs` column shows how many foreign keys reference the column. To list them, see "Critical: Update ALL Foreign Keys" below.
 
 ### For `type-mismatch`
 
