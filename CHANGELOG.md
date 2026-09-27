@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **CLI**: `run --config <file>` reads per-check settings from YAML. A value can be a number, a string, or a list of scalars ([#99](https://github.com/emancu/pgdoctor/pull/99), [#102](https://github.com/emancu/pgdoctor/pull/102)).
-- **Config keys**: every recalibrated threshold is configurable. Each check README lists its keys:
+- **Config keys**: new per-check settings. Each check README lists its keys:
   - `session-settings`: `timeout.<role>` ([#98](https://github.com/emancu/pgdoctor/pull/98))
   - `table-vacuum-health`: `autovacuum_disabled_exclude` ([#100](https://github.com/emancu/pgdoctor/pull/100))
   - `partitioning`: `inefficient_partitions_min_rows`, `large_unpartitioned_min_rows`, `transient_unpartitioned_min_rows` ([#149](https://github.com/emancu/pgdoctor/pull/149), [#177](https://github.com/emancu/pgdoctor/pull/177))
@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Library**: `check.Package` has an optional `ValidateSetting` field. The generator sets it for each check that exports one ([#173](https://github.com/emancu/pgdoctor/pull/173)).
 - **checktest**: `AssertSeverityInvariant` accepts a table row that is more severe than its finding ([#142](https://github.com/emancu/pgdoctor/pull/142)).
 - **Docs**: every finding ID that can be INFO, WARN or FAIL has a `### For \`finding-id\`` heading in its check README, and a test enforces it ([#163](https://github.com/emancu/pgdoctor/pull/163)).
-- **Release**: release binaries build with the latest stable Go. `go.mod` keeps `go 1.25.0` and adds `toolchain go1.27.1`, and CI tests Go 1.25-1.27 with golangci-lint v2.14 ([#170](https://github.com/emancu/pgdoctor/pull/170)).
+- **Release**: release binaries build with the latest stable Go. `go.mod` keeps `go 1.25.0` and adds `toolchain go1.27.1`, and CI tests Go 1.25-1.27 with golangci-lint v2.14 ([#170](https://github.com/emancu/pgdoctor/pull/170), [#182](https://github.com/emancu/pgdoctor/pull/182)).
 - **`connection-health`**: `long-idle` and `pool-pressure` are WARN only. `idle-in-transaction` measures idle time from `state_change`, with WARN at 5 min and FAIL at 1 h. Library: `db.IdleInTransactionRow` has `IdleDurationSeconds` and no `TimeoutMs` ([#178](https://github.com/emancu/pgdoctor/pull/178)).
 - **`db-statistics`**: renamed from `statistics-freshness` ([#97](https://github.com/emancu/pgdoctor/pull/97)).
 - **`duplicate-indexes`**, **`table-seq-scans`**: every object is listed in a table, not at most 10 in `Details` ([#161](https://github.com/emancu/pgdoctor/pull/161)).
