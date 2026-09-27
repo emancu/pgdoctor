@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -27,20 +28,15 @@ const (
 	// in low-traffic databases.
 	minConnectionsForIdleCheck = int64(20)
 
-	// Capacity-relative: absolute counts are meaningless against pooled warm floors.
-	longIdleWarnCount = 100
-	longIdleFailCount = 500
+	defaultLongIdleWarnCount = 100
 
 	// Pool pressure thresholds - detect when queries may be waiting for connections.
 	poolPressureActivePercent = 90.0 // Warn when >90% of connections are active
 	poolPressureMinIdleWarn   = 3    // AND fewer than 3 idle connections
-	poolPressureMinIdleFail   = 1    // Critical when only 0-1 idle connections
 	poolPressureMinTotalConns = 10   // Skip check if fewer than 10 total connections
-)
 
-const (
-	// Fallback timeout when idle_in_transaction_session_timeout is disabled (0).
-	idleTxnDefaultTimeoutSeconds = int64(300) // 5 minutes
+	idleTxnWarnSeconds = int64(300)  // 5 minutes
+	idleTxnFailSeconds = int64(3600) // 1 hour
 )
 
 type ConnectionHealthQueries interface {
@@ -50,7 +46,8 @@ type ConnectionHealthQueries interface {
 }
 
 type checker struct {
-	queries ConnectionHealthQueries
+	queries           ConnectionHealthQueries
+	longIdleWarnCount int64
 }
 
 func Metadata() check.Metadata {
@@ -64,10 +61,31 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ConnectionHealthQueries, _ ...check.Config) check.Checker {
-	return &checker{
-		queries: queries,
+func New(queries ConnectionHealthQueries, cfg ...check.Config) check.Checker {
+	c := &checker{
+		queries:           queries,
+		longIdleWarnCount: defaultLongIdleWarnCount,
 	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
+			if v, ok := myCfg["long_idle_warn_count"]; ok {
+				if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+					c.longIdleWarnCount = n
+				}
+			}
+		}
+	}
+	return c
+}
+
+func ValidateSetting(key, value string) error {
+	if key != "long_idle_warn_count" {
+		return fmt.Errorf("unknown key %q", key)
+	}
+	if n, err := strconv.ParseInt(value, 10, 64); err != nil || n <= 0 {
+		return fmt.Errorf("%s: %q is not a positive integer", key, value)
+	}
+	return nil
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -106,7 +124,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 		// Visible sessions still prove a problem, but their PASS would claim the hidden ones are healthy.
 		visible := check.NewReport(Metadata())
 		checkIdleInTransaction(idleTxns, visible)
-		checkLongIdleConnections(longIdle, visible)
+		checkLongIdleConnections(longIdle, c.longIdleWarnCount, visible)
 		for _, finding := range visible.Results {
 			if finding.Severity > check.SeverityPass {
 				report.AddFinding(finding)
@@ -121,7 +139,7 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 	checkPoolPressure(stats, report)
 	checkIdleRatio(stats, report)
 	checkIdleInTransaction(idleTxns, report)
-	checkLongIdleConnections(longIdle, report)
+	checkLongIdleConnections(longIdle, c.longIdleWarnCount, report)
 
 	return report, nil
 }
@@ -214,16 +232,10 @@ func checkPoolPressure(stats db.ConnectionStatsRow, report *check.Report) {
 		return
 	}
 
-	// Determine severity based on how few idle connections remain
-	severity := check.SeverityWarn
-	if idle <= poolPressureMinIdleFail {
-		severity = check.SeverityFail
-	}
-
 	report.AddFinding(check.Finding{
 		ID:       "pool-pressure",
 		Name:     "Connection Pool Pressure",
-		Severity: severity,
+		Severity: check.SeverityWarn,
 		Details:  fmt.Sprintf("Pool under pressure: %d active (%.1f%%), only %d idle - new queries may wait", active, activePercent, idle),
 	})
 }
@@ -275,18 +287,9 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 		return
 	}
 
-	// Get timeout from first row (same for all rows). If disabled (0), use 5 minute default.
-	timeoutSeconds := rows[0].TimeoutMs.Int64 / 1000
-	if timeoutSeconds == 0 {
-		timeoutSeconds = idleTxnDefaultTimeoutSeconds
-	}
-	warnThreshold := timeoutSeconds / 2
-	failThreshold := timeoutSeconds
-
-	// Filter rows that meet the warn threshold.
 	var problematic []db.IdleInTransactionRow
 	for _, row := range rows {
-		if row.TransactionDurationSeconds.Int64 >= warnThreshold {
+		if row.IdleDurationSeconds.Int64 >= idleTxnWarnSeconds {
 			problematic = append(problematic, row)
 		}
 	}
@@ -305,9 +308,9 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 	severity := check.SeverityWarn
 
 	for _, row := range problematic {
-		duration := row.TransactionDurationSeconds.Int64
+		duration := row.IdleDurationSeconds.Int64
 		rowSeverity := check.SeverityWarn
-		if duration >= failThreshold {
+		if duration >= idleTxnFailSeconds {
 			rowSeverity = check.SeverityFail
 			severity = check.SeverityFail
 		}
@@ -330,21 +333,17 @@ func checkIdleInTransaction(rows []db.IdleInTransactionRow, report *check.Report
 		Severity: severity,
 		Details:  fmt.Sprintf("Found %d connection(s) stuck in 'idle in transaction' state", len(problematic)),
 		Table: &check.Table{
-			Headers: []string{"PID", "User", "Database", "Duration", "Query"},
+			Headers: []string{"PID", "User", "Database", "Idle Duration", "Query"},
 			Rows:    tableRows,
 		},
 	})
 }
 
-// checkLongIdleConnections sizes the idle-over-1h population against max_connections capacity.
-func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, report *check.Report) {
+func checkLongIdleConnections(longIdle []db.LongIdleConnectionsRow, warnCount int64, report *check.Report) {
 	count := len(longIdle)
 
 	severity := check.SeverityPass
-	switch {
-	case count > longIdleFailCount:
-		severity = check.SeverityFail
-	case count > longIdleWarnCount:
+	if int64(count) > warnCount {
 		severity = check.SeverityWarn
 	}
 

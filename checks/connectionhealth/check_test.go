@@ -250,18 +250,18 @@ func Test_ConnectionHealth_PoolPressure(t *testing.T) {
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "critical - high active, almost no idle",
+			name:             "high active, almost no idle still warns",
 			total:            50,
 			active:           49, // 98% active
-			idle:             1,  // <= 1 idle
-			expectedSeverity: check.SeverityFail,
+			idle:             1,
+			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "critical - all connections active",
+			name:             "all connections active still warns",
 			total:            50,
 			active:           50, // 100% active
-			idle:             0,  // no idle
-			expectedSeverity: check.SeverityFail,
+			idle:             0,
+			expectedSeverity: check.SeverityWarn,
 		},
 	}
 
@@ -351,11 +351,51 @@ func Test_ConnectionHealth_IdleRatio(t *testing.T) {
 	}
 }
 
+func TestValidateSetting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key, value string
+		wantErr    bool
+	}{
+		{"long_idle_warn_count", "100", false},
+		{"long_idle_warn_count", "1", false},
+		{"long_idle_warn_count", "0", true},
+		{"long_idle_warn_count", "-5", true},
+		{"long_idle_warn_count", "1.5", true},
+		{"long_idle_warn_count", "many", true},
+		{"long_idle_fail_count", "500", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+
+			err := connectionhealth.ValidateSetting(tt.key, tt.value)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func Test_ConnectionHealth_IdleInTransaction(t *testing.T) {
 	t.Parallel()
 
-	// With default 5min timeout (when TimeoutMs is 0): warn at 150s, fail at 300s.
-	// TimeoutMs=0 in row means use default.
+	idleTxn := func(pid int32, idleSeconds int64) db.IdleInTransactionRow {
+		return db.IdleInTransactionRow{
+			Pid:                 int32Val(pid),
+			Username:            textVal("app_rw"),
+			DatabaseName:        textVal("production"),
+			ApplicationName:     textVal("myapp"),
+			State:               textVal("idle in transaction"),
+			IdleDurationSeconds: int64Val(idleSeconds),
+			QueryPreview:        textVal("SELECT * FROM orders"),
+		}
+	}
+
 	tests := []struct {
 		name             string
 		idleTxns         []db.IdleInTransactionRow
@@ -367,93 +407,28 @@ func Test_ConnectionHealth_IdleInTransaction(t *testing.T) {
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name: "below warn threshold (default timeout)",
-			idleTxns: []db.IdleInTransactionRow{
-				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(100), // 100s < 150s warn threshold
-					QueryPreview:               textVal("SELECT * FROM users"),
-					TimeoutMs:                  int64Val(0), // 0 = use default 5min
-				},
-			},
+			name:             "below warn threshold",
+			idleTxns:         []db.IdleInTransactionRow{idleTxn(1234, 299)},
 			expectedSeverity: check.SeverityPass,
 		},
 		{
-			name: "warning level (default timeout)",
-			idleTxns: []db.IdleInTransactionRow{
-				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(200), // 200s >= 150s warn, < 300s fail
-					QueryPreview:               textVal("SELECT * FROM orders"),
-					TimeoutMs:                  int64Val(0),
-				},
-			},
+			name:             "at warn threshold (5 min)",
+			idleTxns:         []db.IdleInTransactionRow{idleTxn(1234, 300)},
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name: "fail level (default timeout)",
-			idleTxns: []db.IdleInTransactionRow{
-				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(300), // 300s = fail threshold
-					QueryPreview:               textVal("BEGIN; UPDATE accounts SET balance = 0"),
-					TimeoutMs:                  int64Val(0),
-				},
-			},
+			name:             "below fail threshold",
+			idleTxns:         []db.IdleInTransactionRow{idleTxn(1234, 3599)},
+			expectedSeverity: check.SeverityWarn,
+		},
+		{
+			name:             "at fail threshold (1 h)",
+			idleTxns:         []db.IdleInTransactionRow{idleTxn(1234, 3600)},
 			expectedSeverity: check.SeverityFail,
 		},
 		{
-			name: "uses DB timeout setting",
-			idleTxns: []db.IdleInTransactionRow{
-				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(400), // 400s >= 300s warn, < 600s fail
-					QueryPreview:               textVal("SELECT * FROM orders"),
-					TimeoutMs:                  int64Val(600000), // 10 minutes = 600s, warn at 300s, fail at 600s
-				},
-			},
-			expectedSeverity: check.SeverityWarn,
-		},
-		{
-			name: "multiple with mixed severity",
-			idleTxns: []db.IdleInTransactionRow{
-				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(200), // warning
-					QueryPreview:               textVal("SELECT * FROM users"),
-					TimeoutMs:                  int64Val(0),
-				},
-				{
-					Pid:                        int32Val(5678),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("batch"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(350), // fail
-					QueryPreview:               textVal("DELETE FROM logs"),
-					TimeoutMs:                  int64Val(0),
-				},
-			},
+			name:             "multiple with mixed severity",
+			idleTxns:         []db.IdleInTransactionRow{idleTxn(1234, 600), idleTxn(5678, 7200)},
 			expectedSeverity: check.SeverityFail, // highest severity wins
 		},
 	}
@@ -483,6 +458,7 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 		name             string
 		maxConns         int32
 		longIdle         []db.LongIdleConnectionsRow
+		settings         map[string]string
 		expectedSeverity check.Severity
 	}{
 		{
@@ -504,16 +480,31 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "at fail threshold (500) still warns",
+			name:             "far above 100 still warns",
 			maxConns:         100,
-			longIdle:         makeLongIdleRows(500),
+			longIdle:         makeLongIdleRows(501),
 			expectedSeverity: check.SeverityWarn,
 		},
 		{
-			name:             "above 500 fails",
-			maxConns:         100,
-			longIdle:         makeLongIdleRows(501),
-			expectedSeverity: check.SeverityFail,
+			name:             "at configured count stays OK",
+			maxConns:         400,
+			longIdle:         makeLongIdleRows(200),
+			settings:         map[string]string{"long_idle_warn_count": "200"},
+			expectedSeverity: check.SeverityPass,
+		},
+		{
+			name:             "above configured count warns",
+			maxConns:         400,
+			longIdle:         makeLongIdleRows(11),
+			settings:         map[string]string{"long_idle_warn_count": "10"},
+			expectedSeverity: check.SeverityWarn,
+		},
+		{
+			name:             "invalid configured count keeps default",
+			maxConns:         400,
+			longIdle:         makeLongIdleRows(50),
+			settings:         map[string]string{"long_idle_warn_count": "0"},
+			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "pooled warm floor stays OK",
@@ -535,7 +526,7 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 				longIdle: tt.longIdle,
 			}
 
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, check.Config{"connection-health": tt.settings})
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -555,14 +546,13 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 			stats: healthyStats(),
 			idleTxns: []db.IdleInTransactionRow{
 				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					DatabaseName:               textVal("production"),
-					ApplicationName:            textVal("myapp"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(200), // >= 150s warn threshold
-					QueryPreview:               textVal("SELECT 1"),
-					TimeoutMs:                  int64Val(0),
+					Pid:                 int32Val(1234),
+					Username:            textVal("app_rw"),
+					DatabaseName:        textVal("production"),
+					ApplicationName:     textVal("myapp"),
+					State:               textVal("idle in transaction"),
+					IdleDurationSeconds: int64Val(600), // >= 5 min warn threshold
+					QueryPreview:        textVal("SELECT 1"),
 				},
 			},
 		}
@@ -575,7 +565,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 		finding := getFinding(report.Results, "idle-in-transaction")
 		require.NotNil(t, finding)
 		require.NotNil(t, finding.Table)
-		require.Equal(t, []string{"PID", "User", "Database", "Duration", "Query"}, finding.Table.Headers)
+		require.Equal(t, []string{"PID", "User", "Database", "Idle Duration", "Query"}, finding.Table.Headers)
 	})
 
 	t.Run("connection-overview has no table (inline details)", func(t *testing.T) {
@@ -651,14 +641,13 @@ func Test_ConnectionHealth_Prescriptions(t *testing.T) {
 		stats: stats,
 		idleTxns: []db.IdleInTransactionRow{
 			{
-				Pid:                        int32Val(1234),
-				Username:                   textVal("app_rw"),
-				DatabaseName:               textVal("production"),
-				ApplicationName:            textVal("myapp"),
-				State:                      textVal("idle in transaction"),
-				TransactionDurationSeconds: int64Val(200), // >= 150s warn threshold
-				QueryPreview:               textVal("SELECT 1"),
-				TimeoutMs:                  int64Val(0),
+				Pid:                 int32Val(1234),
+				Username:            textVal("app_rw"),
+				DatabaseName:        textVal("production"),
+				ApplicationName:     textVal("myapp"),
+				State:               textVal("idle in transaction"),
+				IdleDurationSeconds: int64Val(600), // >= 5 min warn threshold
+				QueryPreview:        textVal("SELECT 1"),
 			},
 		},
 		longIdle: makeLongIdleRows(15),
@@ -719,14 +708,13 @@ func Test_ConnectionHealth_ReportSeverity(t *testing.T) {
 					stats: stats,
 					idleTxns: []db.IdleInTransactionRow{
 						{
-							Pid:                        int32Val(1234),
-							Username:                   textVal("app_rw"),
-							DatabaseName:               textVal("production"),
-							ApplicationName:            textVal("myapp"),
-							State:                      textVal("idle in transaction"),
-							TransactionDurationSeconds: int64Val(300), // >= 300s fail threshold
-							QueryPreview:               textVal("SELECT 1"),
-							TimeoutMs:                  int64Val(0),
+							Pid:                 int32Val(1234),
+							Username:            textVal("app_rw"),
+							DatabaseName:        textVal("production"),
+							ApplicationName:     textVal("myapp"),
+							State:               textVal("idle in transaction"),
+							IdleDurationSeconds: int64Val(3600), // >= 1 h fail threshold
+							QueryPreview:        textVal("SELECT 1"),
 						},
 					},
 				}
@@ -807,11 +795,10 @@ func Test_ConnectionHealth_StatsRestricted(t *testing.T) {
 			stats: stats,
 			idleTxns: []db.IdleInTransactionRow{
 				{
-					Pid:                        int32Val(1234),
-					Username:                   textVal("app_rw"),
-					State:                      textVal("idle in transaction"),
-					TransactionDurationSeconds: int64Val(400),
-					TimeoutMs:                  int64Val(0),
+					Pid:                 int32Val(1234),
+					Username:            textVal("app_rw"),
+					State:               textVal("idle in transaction"),
+					IdleDurationSeconds: int64Val(3600),
 				},
 			},
 			longIdle: makeLongIdleRows(150),
