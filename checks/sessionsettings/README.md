@@ -103,11 +103,11 @@ WHERE r.rolcanlogin = true
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `roles` | Comma-separated list of roles to check | Discovered dynamically |
+| `roles` | List of roles to check | Discovered dynamically |
 | `timeout` | Threshold (ms) above which `statement_timeout` and `transaction_timeout` are a `Too high` WARN | `5000` |
-| `timeout.<role>` | Threshold (ms) for one role, in place of `timeout` | `timeout` |
+| `timeout_by_role` | A map from role to threshold (ms) for that role, in place of `timeout` | None |
 
-A role without a `timeout.<role>` key uses `timeout`. In a `--config` file, a timeout value that is not an integer is an error. pgdoctor ignores spaces around a role name and empty entries in `roles`. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
+A role that is not in `timeout_by_role` uses `timeout`. A timeout value that is not a positive integer is an error. An empty role name in `roles` is an error. Use a per-role threshold for a human or diagnostic role that has a longer timeout on purpose.
 
 ```yaml
 session-settings:
@@ -115,22 +115,21 @@ session-settings:
     - app_rw
     - dba_ro
   timeout: 2000
-  timeout.dba_ro: 300000
+  timeout_by_role:
+    dba_ro: 300000
 ```
 
-As a library, pass the same keys in `check.Config`:
+As a library, pass a `sessionsettings.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "session-settings": {
-        "roles":          "app_rw,dba_ro",
-        "timeout":        "2000",
-        "timeout.dba_ro": "300000",
-    },
+cfg := sessionsettings.Config{
+    Roles:         []string{"app_rw", "dba_ro"},
+    Timeout:       2000,
+    TimeoutByRole: map[string]int64{"dba_ro": 300000},
 }
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Checks: pgdoctor.AllChecks(),
-    Config: cfg,
+    Config: check.Config{"session-settings": cfg},
 })
 ```
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strconv"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -19,6 +18,28 @@ var readme string
 
 type SequenceHealthQueries interface {
 	SequenceHealth(context.Context) ([]db.SequenceHealthRow, error)
+}
+
+type Config struct {
+	UsageWarnPercent float64 `yaml:"usage_warn_percent"`
+	UsageFailPercent float64 `yaml:"usage_fail_percent"`
+}
+
+func DefaultConfig() Config {
+	return Config{UsageWarnPercent: 50, UsageFailPercent: 90}
+}
+
+func (c Config) Validate() error {
+	if !(c.UsageWarnPercent > 0 && c.UsageWarnPercent <= 100) {
+		return fmt.Errorf("usage_warn_percent: %v is not a percent in (0, 100]", c.UsageWarnPercent)
+	}
+	if !(c.UsageFailPercent > 0 && c.UsageFailPercent <= 100) {
+		return fmt.Errorf("usage_fail_percent: %v is not a percent in (0, 100]", c.UsageFailPercent)
+	}
+	if c.UsageWarnPercent >= c.UsageFailPercent {
+		return fmt.Errorf("usage_warn_percent %v must be lower than usage_fail_percent %v", c.UsageWarnPercent, c.UsageFailPercent)
+	}
+	return nil
 }
 
 type checker struct {
@@ -45,43 +66,12 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries SequenceHealthQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
+func New(queries SequenceHealthQueries, cfg Config) check.Checker {
+	return &checker{
 		queries:          queries,
-		usageWarnPercent: 50,
-		usageFailPercent: 90,
+		usageWarnPercent: cfg.UsageWarnPercent,
+		usageFailPercent: cfg.UsageFailPercent,
 	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		warn, fail := c.usageWarnPercent, c.usageFailPercent
-		if v, err := parsePercent(cfg[0][Metadata().CheckID]["usage_warn_percent"]); err == nil {
-			warn = v
-		}
-		if v, err := parsePercent(cfg[0][Metadata().CheckID]["usage_fail_percent"]); err == nil {
-			fail = v
-		}
-		if warn < fail {
-			c.usageWarnPercent, c.usageFailPercent = warn, fail
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, value string) error {
-	if key != "usage_warn_percent" && key != "usage_fail_percent" {
-		return fmt.Errorf("unknown key %q", key)
-	}
-	if _, err := parsePercent(value); err != nil {
-		return fmt.Errorf("%s: %w", key, err)
-	}
-	return nil
-}
-
-func parsePercent(value string) (float64, error) {
-	v, err := strconv.ParseFloat(value, 64)
-	if err != nil || !(v > 0 && v <= 100) {
-		return 0, fmt.Errorf("%q is not a percent in (0, 100]", value)
-	}
-	return v, nil
 }
 
 func (c *checker) Metadata() check.Metadata {

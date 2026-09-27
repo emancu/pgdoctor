@@ -6,8 +6,6 @@ import (
 	_ "embed"
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -34,11 +32,36 @@ type settingCheck struct {
 	Severity  check.Severity
 }
 
+type Config struct {
+	Roles         []string         `yaml:"roles"`
+	Timeout       int64            `yaml:"timeout"` // milliseconds
+	TimeoutByRole map[string]int64 `yaml:"timeout_by_role"`
+}
+
+func DefaultConfig() Config {
+	return Config{Timeout: 5000}
+}
+
+func (c Config) Validate() error {
+	if c.Timeout <= 0 {
+		return fmt.Errorf("timeout: %d is not a positive integer", c.Timeout)
+	}
+	for role, n := range c.TimeoutByRole {
+		if n <= 0 {
+			return fmt.Errorf("timeout_by_role.%s: %d is not a positive integer", role, n)
+		}
+	}
+	for _, role := range c.Roles {
+		if role == "" {
+			return fmt.Errorf("roles: empty role name")
+		}
+	}
+	return nil
+}
+
 type checker struct {
-	queryer      SessionSettingsQueries
-	roles        []string
-	timeout      int64 // default: 5000
-	roleTimeouts map[string]int64
+	queryer SessionSettingsQueries
+	cfg     Config
 }
 
 func Metadata() check.Metadata {
@@ -52,51 +75,8 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queryer SessionSettingsQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
-		queryer:      queryer,
-		timeout:      5000,
-		roleTimeouts: map[string]int64{},
-	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			if roles, ok := myCfg["roles"]; ok {
-				for _, role := range strings.Split(roles, ",") {
-					if role = strings.TrimSpace(role); role != "" {
-						c.roles = append(c.roles, role)
-					}
-				}
-			}
-			if v, ok := myCfg["timeout"]; ok {
-				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-					c.timeout = n
-				}
-			}
-			for k, v := range myCfg {
-				role, ok := strings.CutPrefix(k, "timeout.")
-				if !ok {
-					continue
-				}
-				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-					c.roleTimeouts[role] = n
-				}
-			}
-		}
-	}
-	return c
-}
-
-func ValidateSetting(key, value string) error {
-	switch {
-	case key == "roles":
-		return nil
-	case key == "timeout", strings.HasPrefix(key, "timeout.") && key != "timeout.":
-		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
-			return fmt.Errorf("%s: %q is not an integer", key, value)
-		}
-		return nil
-	}
-	return fmt.Errorf("unknown key %q", key)
+func New(queryer SessionSettingsQueries, cfg Config) check.Checker {
+	return &checker{queryer: queryer, cfg: cfg}
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -115,8 +95,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 
 	// Determine which roles to check
 	roles := dbSettings.roles() // dynamic discovery
-	if c.roles != nil {
-		roles = c.roles // override with configured roles
+	if len(c.cfg.Roles) > 0 {
+		roles = c.cfg.Roles // override with configured roles
 	}
 
 	if len(roles) == 0 {
@@ -220,8 +200,8 @@ func (c *checker) checkUserTimeouts(s dbSessionSettings, user string) ([]setting
 		return nil, fmt.Errorf("fetching transaction_timeout: %w", err)
 	}
 
-	timeout := c.timeout
-	if n, ok := c.roleTimeouts[user]; ok {
+	timeout := c.cfg.Timeout
+	if n, ok := c.cfg.TimeoutByRole[user]; ok {
 		timeout = n
 	}
 

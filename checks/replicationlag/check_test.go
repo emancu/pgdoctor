@@ -3,6 +3,7 @@ package replicationlag_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -135,7 +136,7 @@ func TestCheck_NoReplication(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{}}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -156,7 +157,7 @@ func TestCheck_AllHealthy(t *testing.T) {
 			healthyLogical("debezium"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -179,7 +180,7 @@ func TestCheck_PhysicalReplicationLag_Warning(t *testing.T) {
 			laggingPhysical("standby1", 10.0), // warning
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -211,7 +212,7 @@ func TestCheck_PhysicalReplicationLag_Fail(t *testing.T) {
 			laggingPhysical("standby1", 120.0), // fail
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -255,7 +256,7 @@ func TestCheck_PhysicalReplicationLag_Thresholds(t *testing.T) {
 					laggingPhysical("standby", tt.lagSeconds),
 				},
 			}
-			checker := replicationlag.New(queryer)
+			checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
@@ -268,38 +269,24 @@ func TestCheck_PhysicalReplicationLag_Thresholds(t *testing.T) {
 func TestCheck_PhysicalReplicationLag_Config(t *testing.T) {
 	t.Parallel()
 
+	delayed := map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 305, FailSeconds: 360}}
+
 	tests := []struct {
 		name           string
-		settings       map[string]string
+		cfg            replicationlag.Config
 		appName        string
 		lagSeconds     float64
 		expectSeverity check.Severity
 	}{
-		{"custom warn", map[string]string{"physical_lag_warn_seconds": "1.5"}, "standby", 1.5, check.SeverityWarn},
-		{"custom fail", map[string]string{"physical_lag_fail_seconds": "30"}, "standby", 30, check.SeverityFail},
-		{"under custom warn", map[string]string{"physical_lag_warn_seconds": "10"}, "standby", 9, check.SeverityPass},
-		{"warn not below fail keeps defaults", map[string]string{"physical_lag_warn_seconds": "90"}, "standby", 60, check.SeverityFail},
-		{"invalid value keeps default", map[string]string{"physical_lag_fail_seconds": "-1"}, "standby", 60, check.SeverityFail},
-		{"non-number keeps default", map[string]string{"physical_lag_warn_seconds": "5s"}, "standby", 4, check.SeverityPass},
-		{
-			"replica override",
-			map[string]string{"physical_lag_warn_seconds.delayed": "305", "physical_lag_fail_seconds.delayed": "360"},
-			"delayed", 310, check.SeverityWarn,
-		},
-		{
-			"replica override does not apply to other replicas",
-			map[string]string{"physical_lag_warn_seconds.delayed": "305", "physical_lag_fail_seconds.delayed": "360"},
-			"standby", 310, check.SeverityFail,
-		},
+		{"custom warn", replicationlag.Config{PhysicalLagWarnSeconds: 1.5, PhysicalLagFailSeconds: 60}, "standby", 1.5, check.SeverityWarn},
+		{"custom fail", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 30}, "standby", 30, check.SeverityFail},
+		{"under custom warn", replicationlag.Config{PhysicalLagWarnSeconds: 10, PhysicalLagFailSeconds: 60}, "standby", 9, check.SeverityPass},
+		{"replica override", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: delayed}, "delayed", 310, check.SeverityWarn},
+		{"replica override does not apply to other replicas", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: delayed}, "standby", 310, check.SeverityFail},
 		{
 			"replica fail-only override inherits global warn",
-			map[string]string{"physical_lag_warn_seconds": "10", "physical_lag_fail_seconds.delayed": "360"},
+			replicationlag.Config{PhysicalLagWarnSeconds: 10, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {FailSeconds: 360}}},
 			"delayed", 20, check.SeverityWarn,
-		},
-		{
-			"invalid replica pair keeps global pair",
-			map[string]string{"physical_lag_fail_seconds": "30", "physical_lag_warn_seconds.delayed": "400", "physical_lag_fail_seconds.delayed": "360"},
-			"delayed", 30, check.SeverityFail,
 		},
 	}
 
@@ -310,8 +297,7 @@ func TestCheck_PhysicalReplicationLag_Config(t *testing.T) {
 			queryer := &mockQueryer{
 				rows: []db.ReplicationLagRow{laggingPhysical(tt.appName, tt.lagSeconds)},
 			}
-			cfg := check.Config{"replication-lag": tt.settings}
-			checker := replicationlag.New(queryer, cfg)
+			checker := replicationlag.New(queryer, tt.cfg)
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
@@ -321,32 +307,33 @@ func TestCheck_PhysicalReplicationLag_Config(t *testing.T) {
 	}
 }
 
-func TestValidateSetting(t *testing.T) {
+func TestConfig_Validate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		key, value string
-		wantErr    bool
+		name    string
+		cfg     replicationlag.Config
+		wantErr bool
 	}{
-		{"physical_lag_warn_seconds", "5", false},
-		{"physical_lag_fail_seconds", "0.5", false},
-		{"physical_lag_warn_seconds.delayed", "305", false},
-		{"physical_lag_fail_seconds.delayed", "360", false},
-		{"physical_lag_warn_seconds", "0", true},
-		{"physical_lag_warn_seconds", "-5", true},
-		{"physical_lag_fail_seconds", "60s", true},
-		{"physical_lag_fail_seconds", "NaN", true},
-		{"physical_lag_fail_seconds", "Inf", true},
-		{"physical_lag_warn_seconds.", "5", true},
-		{"physical_lag_fail_seconds.", "5", true},
-		{"logical_lag_warn_seconds", "5", true},
+		{"defaults", replicationlag.DefaultConfig(), false},
+		{"fractional", replicationlag.Config{PhysicalLagWarnSeconds: 0.5, PhysicalLagFailSeconds: 1}, false},
+		{"zero warn", replicationlag.Config{PhysicalLagWarnSeconds: 0, PhysicalLagFailSeconds: 60}, true},
+		{"negative fail", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: -1}, true},
+		{"infinite fail", replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: math.Inf(1)}, true},
+		{"NaN warn", replicationlag.Config{PhysicalLagWarnSeconds: math.NaN(), PhysicalLagFailSeconds: 60}, true},
+		{"warn not below fail", replicationlag.Config{PhysicalLagWarnSeconds: 90, PhysicalLagFailSeconds: 60}, true},
+		{
+			"replica warn not below inherited fail",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {WarnSeconds: 90}}},
+			true,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := replicationlag.ValidateSetting(tt.key, tt.value)
+			err := tt.cfg.Validate()
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -364,7 +351,7 @@ func TestCheck_LogicalReplicationLag_Warning(t *testing.T) {
 			laggingLogical("debezium", 130.0, 9*gib, capUnlimited), // high time AND bytes - warning
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -393,7 +380,7 @@ func TestCheck_LogicalReplicationLag_Fail(t *testing.T) {
 			laggingLogical("debezium", 5.0, 950*mib, gib), // backlog >= 85% of cap - fail
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -456,7 +443,7 @@ func TestCheck_LogicalReplicationLag_Thresholds(t *testing.T) {
 					laggingLogical("debezium", tt.lagSeconds, tt.lagBytes, tt.capBytes),
 				},
 			}
-			checker := replicationlag.New(queryer)
+			checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
@@ -477,7 +464,7 @@ func TestCheck_MixedReplicationTypes(t *testing.T) {
 			laggingLogical("debezium2", 5.0, 950*mib, gib), // fail: backlog >= 85% of cap
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -511,7 +498,7 @@ func TestCheck_ReplicationState_Catchup(t *testing.T) {
 			nonStreamingState("standby1", "catchup"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -552,7 +539,7 @@ func TestCheck_ReplicationState_BackupStopping(t *testing.T) {
 					nonStreamingState("standby1", tt.state),
 				},
 			}
-			checker := replicationlag.New(queryer)
+			checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
@@ -582,7 +569,7 @@ func TestCheck_ReplicationState_AllStreaming(t *testing.T) {
 			healthyLogical("debezium1"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -608,7 +595,7 @@ func TestCheck_WALRetention_Extended(t *testing.T) {
 			walIssue("debezium", "extended"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -649,7 +636,7 @@ func TestCheck_WALRetention_UnreservedLost(t *testing.T) {
 					walIssue("debezium", tt.walStatus),
 				},
 			}
-			checker := replicationlag.New(queryer)
+			checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
@@ -680,7 +667,7 @@ func TestCheck_WALRetention_AllHealthy(t *testing.T) {
 			healthyLogical("debezium1"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -709,7 +696,7 @@ func TestCheck_MultipleIssues(t *testing.T) {
 			walIssue("debezium2", "unreserved"),                     // wal fail
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -745,7 +732,7 @@ func TestCheck_NoSlotName(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{row}}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -782,7 +769,7 @@ func TestCheck_FormatBytes(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{row}}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -818,7 +805,7 @@ func TestCheck_FormatSeconds(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: []db.ReplicationLagRow{row}}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -843,7 +830,7 @@ func TestCheck_QueryError(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{err: fmt.Errorf("connection refused")}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	_, err := checker.Check(context.Background())
 	require.Error(t, err)
@@ -855,7 +842,7 @@ func TestCheck_Metadata(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 	metadata := checker.Metadata()
 
 	assert.Equal(t, "replication-lag", metadata.CheckID)
@@ -879,7 +866,7 @@ func TestCheck_PrescriptionsPresent(t *testing.T) {
 			walIssue("debezium2", "lost"),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	_, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -893,7 +880,7 @@ func TestCheck_TableStructure(t *testing.T) {
 			laggingPhysical("standby1", 120.0),
 		},
 	}
-	checker := replicationlag.New(queryer)
+	checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
@@ -952,7 +939,7 @@ func TestCheck_SeverityMaxCalculation(t *testing.T) {
 			t.Parallel()
 
 			queryer := &mockQueryer{rows: tt.rows}
-			checker := replicationlag.New(queryer)
+			checker := replicationlag.New(queryer, replicationlag.DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)

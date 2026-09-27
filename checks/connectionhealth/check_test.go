@@ -133,7 +133,7 @@ func Test_ConnectionHealth_AllOK(t *testing.T) {
 		longIdle: nil,
 	}
 
-	checker := connectionhealth.New(mock)
+	checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 	report, err := checker.Check(ctxWithPgVersion(17))
 
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func Test_ConnectionHealth_Saturation(t *testing.T) {
 				stats: stats,
 			}
 
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -278,7 +278,7 @@ func Test_ConnectionHealth_PoolPressure(t *testing.T) {
 				stats: stats,
 			}
 
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -342,7 +342,7 @@ func Test_ConnectionHealth_IdleRatio(t *testing.T) {
 				stats: stats,
 			}
 
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -351,27 +351,24 @@ func Test_ConnectionHealth_IdleRatio(t *testing.T) {
 	}
 }
 
-func TestValidateSetting(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		key, value string
-		wantErr    bool
+		count   int64
+		wantErr bool
 	}{
-		{"long_idle_warn_count", "100", false},
-		{"long_idle_warn_count", "1", false},
-		{"long_idle_warn_count", "0", true},
-		{"long_idle_warn_count", "-5", true},
-		{"long_idle_warn_count", "1.5", true},
-		{"long_idle_warn_count", "many", true},
-		{"long_idle_fail_count", "500", true},
+		{100, false},
+		{1, false},
+		{0, true},
+		{-5, true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+		t.Run(fmt.Sprint(tt.count), func(t *testing.T) {
 			t.Parallel()
 
-			err := connectionhealth.ValidateSetting(tt.key, tt.value)
+			err := connectionhealth.Config{LongIdleWarnCount: tt.count}.Validate()
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -442,7 +439,7 @@ func Test_ConnectionHealth_IdleInTransaction(t *testing.T) {
 				idleTxns: tt.idleTxns,
 			}
 
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -458,7 +455,7 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 		name             string
 		maxConns         int32
 		longIdle         []db.LongIdleConnectionsRow
-		settings         map[string]string
+		warnCount        int64
 		expectedSeverity check.Severity
 	}{
 		{
@@ -489,22 +486,15 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 			name:             "at configured count stays OK",
 			maxConns:         400,
 			longIdle:         makeLongIdleRows(200),
-			settings:         map[string]string{"long_idle_warn_count": "200"},
+			warnCount:        200,
 			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "above configured count warns",
 			maxConns:         400,
 			longIdle:         makeLongIdleRows(11),
-			settings:         map[string]string{"long_idle_warn_count": "10"},
+			warnCount:        10,
 			expectedSeverity: check.SeverityWarn,
-		},
-		{
-			name:             "invalid configured count keeps default",
-			maxConns:         400,
-			longIdle:         makeLongIdleRows(50),
-			settings:         map[string]string{"long_idle_warn_count": "0"},
-			expectedSeverity: check.SeverityPass,
 		},
 		{
 			name:             "pooled warm floor stays OK",
@@ -526,7 +516,11 @@ func Test_ConnectionHealth_LongIdle(t *testing.T) {
 				longIdle: tt.longIdle,
 			}
 
-			checker := connectionhealth.New(mock, check.Config{"connection-health": tt.settings})
+			cfg := connectionhealth.DefaultConfig()
+			if tt.warnCount != 0 {
+				cfg.LongIdleWarnCount = tt.warnCount
+			}
+			checker := connectionhealth.New(mock, cfg)
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -557,7 +551,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 			},
 		}
 
-		checker := connectionhealth.New(mock)
+		checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 		report, err := checker.Check(ctxWithPgVersion(17))
 
 		require.NoError(t, err)
@@ -575,7 +569,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 			stats: healthyStats(),
 		}
 
-		checker := connectionhealth.New(mock)
+		checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 		report, err := checker.Check(ctxWithPgVersion(17))
 
 		require.NoError(t, err)
@@ -596,7 +590,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 			stats: stats,
 		}
 
-		checker := connectionhealth.New(mock)
+		checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 		report, err := checker.Check(ctxWithPgVersion(17))
 
 		require.NoError(t, err)
@@ -618,7 +612,7 @@ func Test_ConnectionHealth_TableDetails(t *testing.T) {
 			stats: stats,
 		}
 
-		checker := connectionhealth.New(mock)
+		checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 		report, err := checker.Check(ctxWithPgVersion(17))
 
 		require.NoError(t, err)
@@ -653,7 +647,7 @@ func Test_ConnectionHealth_Prescriptions(t *testing.T) {
 		longIdle: makeLongIdleRows(15),
 	}
 
-	checker := connectionhealth.New(mock)
+	checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 	_, err := checker.Check(ctxWithPgVersion(17))
 
 	require.NoError(t, err)
@@ -728,7 +722,7 @@ func Test_ConnectionHealth_ReportSeverity(t *testing.T) {
 			t.Parallel()
 
 			mock := tt.setupMock()
-			checker := connectionhealth.New(mock)
+			checker := connectionhealth.New(mock, connectionhealth.DefaultConfig())
 			report, err := checker.Check(ctxWithPgVersion(17))
 
 			require.NoError(t, err)
@@ -774,7 +768,7 @@ func Test_ConnectionHealth_StatsRestricted(t *testing.T) {
 			stats.HiddenConnections = int64Val(tt.hidden)
 			mock := &mockQueries{stats: stats}
 
-			report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+			report, err := connectionhealth.New(mock, connectionhealth.DefaultConfig()).Check(ctxWithPgVersion(17))
 			require.NoError(t, err)
 
 			require.Len(t, report.Results, 2)
@@ -804,7 +798,7 @@ func Test_ConnectionHealth_StatsRestricted(t *testing.T) {
 			longIdle: makeLongIdleRows(150),
 		}
 
-		report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+		report, err := connectionhealth.New(mock, connectionhealth.DefaultConfig()).Check(ctxWithPgVersion(17))
 		require.NoError(t, err)
 
 		require.Len(t, report.Results, 4)
@@ -822,7 +816,7 @@ func Test_ConnectionHealth_StatsRestricted(t *testing.T) {
 		stats.HiddenConnections = int64Val(0)
 		mock := &mockQueries{stats: stats}
 
-		report, err := connectionhealth.New(mock).Check(ctxWithPgVersion(17))
+		report, err := connectionhealth.New(mock, connectionhealth.DefaultConfig()).Check(ctxWithPgVersion(17))
 		require.NoError(t, err)
 
 		require.Len(t, report.Results, 6)
@@ -848,7 +842,7 @@ func Test_ConnectionHealth_QueryErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := connectionhealth.New(tt.mock).Check(ctxWithPgVersion(17))
+			report, err := connectionhealth.New(tt.mock, connectionhealth.DefaultConfig()).Check(ctxWithPgVersion(17))
 			require.ErrorIs(t, err, queryErr)
 			require.Contains(t, err.Error(), tt.name)
 			require.Nil(t, report)

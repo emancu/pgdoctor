@@ -136,7 +136,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
 | `usage_warn_percent` | Usage at which `integer-columns`, `type-mismatch`, and `near-exhaustion` for a smallint or integer sequence give WARN | `50` |
 | `usage_fail_percent` | Usage at which the same findings give FAIL | `90` |
 
-Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. If the pair is not in this order, the check uses the defaults. A bigint sequence in `near-exhaustion` always uses 75% and 90%. These keys do not change `pk-types`.
+Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. Other values are an error. A bigint sequence in `near-exhaustion` always uses 75% and 90%. These keys do not change `pk-types`.
 
 ```yaml
 sequence-health:

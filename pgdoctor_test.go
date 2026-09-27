@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
+	"github.com/emancu/pgdoctor/checks/replicationlag"
+	"github.com/emancu/pgdoctor/checks/sessionsettings"
 	"github.com/emancu/pgdoctor/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -102,13 +104,13 @@ func TestValidateFilters(t *testing.T) {
 	}
 }
 
-func TestAllChecks_RegistersValidateSetting(t *testing.T) {
+func TestAllChecks_RegistersDecodeConfig(t *testing.T) {
 	t.Parallel()
 
 	files, err := filepath.Glob("checks/*/*.go")
 	require.NoError(t, err)
 
-	exported := regexp.MustCompile(`(?m)^func ValidateSetting\(`)
+	exported := regexp.MustCompile(`(?m)^func DefaultConfig\(`)
 	var want []string
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
@@ -117,19 +119,124 @@ func TestAllChecks_RegistersValidateSetting(t *testing.T) {
 		src, err := os.ReadFile(file)
 		require.NoError(t, err)
 		if exported.Match(src) {
-			want = append(want, "github.com/emancu/pgdoctor/checks/"+filepath.Base(filepath.Dir(file))+".ValidateSetting")
+			want = append(want, "github.com/emancu/pgdoctor/checks/"+filepath.Base(filepath.Dir(file))+".Metadata")
 		}
 	}
 	require.NotEmpty(t, want)
 
 	var got []string
 	for _, pkg := range AllChecks() {
-		if pkg.ValidateSetting != nil {
-			got = append(got, runtime.FuncForPC(reflect.ValueOf(pkg.ValidateSetting).Pointer()).Name())
+		if pkg.DecodeConfig != nil {
+			got = append(got, runtime.FuncForPC(reflect.ValueOf(pkg.Metadata).Pointer()).Name())
 		}
 	}
 
 	assert.ElementsMatch(t, want, got)
+}
+
+func findPackage(t *testing.T, checkID string) check.Package {
+	t.Helper()
+	for _, pkg := range AllChecks() {
+		if pkg.Metadata().CheckID == checkID {
+			return pkg
+		}
+	}
+	t.Fatalf("no check %q", checkID)
+	return check.Package{}
+}
+
+func TestAllChecks_New(t *testing.T) {
+	t.Parallel()
+
+	for _, pkg := range AllChecks() {
+		_, err := pkg.New(nil, nil)
+		require.NoError(t, err, pkg.Metadata().CheckID)
+	}
+
+	tests := []struct {
+		name    string
+		checkID string
+		cfg     check.Config
+		wantErr string
+	}{
+		{"typed config", "session-settings", check.Config{"session-settings": sessionsettings.Config{Timeout: 2000}}, ""},
+		{"invalid value", "session-settings", check.Config{"session-settings": sessionsettings.Config{}}, "invalid config: timeout"},
+		{"wrong type", "session-settings", check.Config{"session-settings": replicationlag.DefaultConfig()}, "want sessionsettings.Config"},
+		{"pointer", "session-settings", check.Config{"session-settings": &sessionsettings.Config{Timeout: 2000}}, "want sessionsettings.Config"},
+		{"check without settings", "pg-version", check.Config{"pg-version": struct{}{}}, "accepts no settings"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := findPackage(t, tt.checkID).New(nil, tt.cfg)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAllChecks_DecodeConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		checkID string
+		yaml    string
+		want    any
+		wantErr string
+	}{
+		{"empty", "session-settings", "", sessionsettings.DefaultConfig(), ""},
+		{"null", "session-settings", "null", sessionsettings.DefaultConfig(), ""},
+		{
+			"lists and maps", "session-settings", "roles: [app_rw, dba_ro]\ntimeout_by_role: {dba_ro: 300000}",
+			sessionsettings.Config{Roles: []string{"app_rw", "dba_ro"}, Timeout: 5000, TimeoutByRole: map[string]int64{"dba_ro": 300000}}, "",
+		},
+		{
+			"nested map", "replication-lag", "physical_lag_by_application: {delayed: {fail_seconds: 360}}",
+			replicationlag.Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60, PhysicalLagByApplication: map[string]replicationlag.LagThresholds{"delayed": {FailSeconds: 360}}}, "",
+		},
+		{"unknown key", "session-settings", "timeuot: 2000", nil, "field timeuot not found"},
+		{"unknown nested key", "replication-lag", "physical_lag_by_application: {delayed: {fial_seconds: 360}}", nil, "field fial_seconds not found"},
+		{"comma string for a list", "table-vacuum-health", "autovacuum_disabled_exclude: public.a,public.b", nil, "cannot unmarshal"},
+		{"not a number", "connection-health", "long_idle_warn_count: many", nil, "cannot unmarshal"},
+		{"validation", "pk-types", "usage_warn_percent: 95", nil, "must be lower than usage_fail_percent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := findPackage(t, tt.checkID).DecodeConfig([]byte(tt.yaml))
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRun_InvalidConfigSkipsCheck(t *testing.T) {
+	t.Parallel()
+
+	var reports []*check.Report
+	Run(context.Background(), &fakeDB{versionNum: 170004}, Options{
+		Checks:   Filter(AllChecks(), []string{"session-settings"}, nil),
+		Config:   check.Config{"session-settings": sessionsettings.Config{Timeout: -1}},
+		OnReport: Collect(&reports),
+	})
+	require.Len(t, reports, 1)
+
+	assert.Equal(t, "session-settings", reports[0].CheckID)
+	assert.Equal(t, check.SeveritySkip, reports[0].Severity)
+	require.Len(t, reports[0].Results, 1)
+	assert.Contains(t, reports[0].Results[0].Details, "invalid config: timeout")
 }
 
 // fakeChecker is a test double that implements check.Checker.
@@ -149,8 +256,8 @@ func fakePackage(id string, category check.Category, report *check.Report, err e
 	meta := check.Metadata{CheckID: id, Name: id, Category: category}
 	return check.Package{
 		Metadata: func() check.Metadata { return meta },
-		New: func(_ db.DBTX, _ check.Config) check.Checker {
-			return &fakeChecker{metadata: meta, report: report, err: err}
+		New: func(_ db.DBTX, _ check.Config) (check.Checker, error) {
+			return &fakeChecker{metadata: meta, report: report, err: err}, nil
 		},
 	}
 }
@@ -312,7 +419,7 @@ func TestRun_ServerVersion(t *testing.T) {
 			Run(ctx, conn, Options{
 				Checks: []check.Package{{
 					Metadata: capture.Metadata,
-					New:      func(db.DBTX, check.Config) check.Checker { return capture },
+					New:      func(db.DBTX, check.Config) (check.Checker, error) { return capture, nil },
 				}},
 				OnReport: Collect(&reports),
 			})

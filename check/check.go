@@ -56,18 +56,20 @@ type Checker interface {
 	Check(context.Context) (*Report, error)
 }
 
-// Config holds per-check configuration keyed by check ID.
-// Each check defines its own supported keys.
-type Config map[string]map[string]string
+// Config holds per-check configuration keyed by check ID. Each value is the
+// Config type of that check, for example sessionsettings.Config.
+type Config map[string]any
 
 // Package holds references to a check's exported functions.
 // This allows the generator to create a simple list that consumers
 // can use to either get metadata or instantiate checkers.
 type Package struct {
 	Metadata func() Metadata
-	New      func(DBTX, Config) Checker
-	// ValidateSetting is nil for a check that accepts no settings.
-	ValidateSetting func(key, value string) error
+	// New returns an error when Config holds an invalid value for the check.
+	New func(DBTX, Config) (Checker, error)
+	// DecodeConfig decodes and validates the YAML settings of the check and
+	// returns its Config value. It is nil for a check that accepts no settings.
+	DecodeConfig func(yaml []byte) (any, error)
 }
 
 type Metadata struct {

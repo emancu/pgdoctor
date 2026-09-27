@@ -78,18 +78,20 @@ A config file changes the settings of a check. Each check README lists the keys 
 
 ```yaml
 session-settings:
+  roles: [app_rw, dba_ro]
   timeout: 5000
+  timeout_by_role:
+    dba_ro: 300000
 ```
-
-A setting value can also be a list of scalars. pgdoctor joins the items with commas, so `roles: [app_rw, dba_ro]` is the same as `roles: "app_rw,dba_ro"`.
 
 An error in the config file stops pgdoctor with exit code `2` before it runs a query. pgdoctor prints every error to stderr. These are errors:
 
 - an unknown check ID
-- a check value that is not a map
-- a key that the check does not read
-- a setting value that is not a scalar or a list of scalars
-- a value that the check cannot read, for example `timeout: 5s`
+- a key that the check does not read, at any depth
+- a value of the wrong type, for example `timeout: 5s`, or a comma-separated string where the check reads a list
+- a value that the check rejects, for example a WARN threshold that is not lower than the FAIL threshold
+
+The error messages do not show line numbers, because pgdoctor decodes each check section separately.
 
 Exit codes are the same for text and JSON output:
 
@@ -222,6 +224,21 @@ pgdoctor.AllChecks() []check.Package
 
 // Validate filter strings against a check set
 pgdoctor.ValidateFilters(checks, filters) (valid, invalid []string)
+```
+
+To change the settings of a check, put the `Config` value of that check in `Options.Config`, keyed by check ID. Start from `DefaultConfig()`, because a zero field is not a valid setting. A check with an invalid value, or a value of the wrong type, reports SKIP with the reason:
+
+```go
+lag := replicationlag.DefaultConfig()
+lag.PhysicalLagWarnSeconds = 10
+
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Checks: pgdoctor.AllChecks(),
+    Config: check.Config{
+        "replication-lag":  lag,
+        "session-settings": sessionsettings.Config{Timeout: 2000},
+    },
+})
 ```
 
 The `db.DBTX` interface matches `pgx.Conn`, so pgdoctor works with any pgx-compatible connection.

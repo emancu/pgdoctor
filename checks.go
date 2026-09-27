@@ -4,6 +4,8 @@
 package pgdoctor
 
 import (
+	"fmt"
+
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/checks/cacheefficiency"
 	"github.com/emancu/pgdoctor/checks/connectionefficiency"
@@ -42,178 +44,382 @@ func AllChecks() []check.Package {
 	return []check.Package{
 		{
 			Metadata: cacheefficiency.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return cacheefficiency.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[cacheefficiency.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return cacheefficiency.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: connectionefficiency.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return connectionefficiency.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[connectionefficiency.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return connectionefficiency.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: connectionhealth.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return connectionhealth.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := connectionhealth.DefaultConfig()
+				if v, ok := cfg[connectionhealth.Metadata().CheckID]; ok {
+					if c, ok = v.(connectionhealth.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want connectionhealth.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return connectionhealth.New(db.New(conn), c), nil
 			},
-			ValidateSetting: connectionhealth.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := connectionhealth.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: dbstatistics.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return dbstatistics.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[dbstatistics.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return dbstatistics.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: duplicateindexes.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return duplicateindexes.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[duplicateindexes.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return duplicateindexes.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: extensionversions.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return extensionversions.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[extensionversions.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return extensionversions.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: freezeage.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return freezeage.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[freezeage.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return freezeage.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: indexbloat.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return indexbloat.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[indexbloat.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return indexbloat.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: indexusage.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return indexusage.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[indexusage.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return indexusage.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: invalidindexes.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return invalidindexes.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[invalidindexes.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return invalidindexes.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: partitioning.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return partitioning.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := partitioning.DefaultConfig()
+				if v, ok := cfg[partitioning.Metadata().CheckID]; ok {
+					if c, ok = v.(partitioning.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want partitioning.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return partitioning.New(db.New(conn), c), nil
 			},
-			ValidateSetting: partitioning.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := partitioning.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: partitionusage.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return partitionusage.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[partitionusage.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return partitionusage.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: pgversion.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return pgversion.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[pgversion.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return pgversion.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: pktypes.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return pktypes.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := pktypes.DefaultConfig()
+				if v, ok := cfg[pktypes.Metadata().CheckID]; ok {
+					if c, ok = v.(pktypes.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want pktypes.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return pktypes.New(db.New(conn), c), nil
 			},
-			ValidateSetting: pktypes.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := pktypes.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: querystatscapacity.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return querystatscapacity.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[querystatscapacity.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return querystatscapacity.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: replicationlag.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return replicationlag.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := replicationlag.DefaultConfig()
+				if v, ok := cfg[replicationlag.Metadata().CheckID]; ok {
+					if c, ok = v.(replicationlag.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want replicationlag.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return replicationlag.New(db.New(conn), c), nil
 			},
-			ValidateSetting: replicationlag.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := replicationlag.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: replicationslots.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return replicationslots.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[replicationslots.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return replicationslots.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: sequencehealth.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return sequencehealth.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := sequencehealth.DefaultConfig()
+				if v, ok := cfg[sequencehealth.Metadata().CheckID]; ok {
+					if c, ok = v.(sequencehealth.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want sequencehealth.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return sequencehealth.New(db.New(conn), c), nil
 			},
-			ValidateSetting: sequencehealth.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := sequencehealth.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: sessionsettings.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return sessionsettings.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := sessionsettings.DefaultConfig()
+				if v, ok := cfg[sessionsettings.Metadata().CheckID]; ok {
+					if c, ok = v.(sessionsettings.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want sessionsettings.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return sessionsettings.New(db.New(conn), c), nil
 			},
-			ValidateSetting: sessionsettings.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := sessionsettings.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: tableactivity.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return tableactivity.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[tableactivity.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return tableactivity.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: tablebloat.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return tablebloat.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[tablebloat.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return tablebloat.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: tableseqscans.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return tableseqscans.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := tableseqscans.DefaultConfig()
+				if v, ok := cfg[tableseqscans.Metadata().CheckID]; ok {
+					if c, ok = v.(tableseqscans.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want tableseqscans.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return tableseqscans.New(db.New(conn), c), nil
 			},
-			ValidateSetting: tableseqscans.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := tableseqscans.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: tablevacuumhealth.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return tablevacuumhealth.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := tablevacuumhealth.DefaultConfig()
+				if v, ok := cfg[tablevacuumhealth.Metadata().CheckID]; ok {
+					if c, ok = v.(tablevacuumhealth.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want tablevacuumhealth.Config", v)
+					}
+				}
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return tablevacuumhealth.New(db.New(conn), c), nil
 			},
-			ValidateSetting: tablevacuumhealth.ValidateSetting,
+			DecodeConfig: func(data []byte) (any, error) {
+				c := tablevacuumhealth.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
+			},
 		},
 		{
 			Metadata: tempusage.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return tempusage.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[tempusage.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return tempusage.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: toaststorage.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return toaststorage.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[toaststorage.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return toaststorage.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: uuiddefaults.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return uuiddefaults.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[uuiddefaults.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return uuiddefaults.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: uuidtypes.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return uuidtypes.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[uuidtypes.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return uuidtypes.New(db.New(conn)), nil
 			},
 		},
 		{
 			Metadata: vacuumsettings.Metadata,
-			New: func(conn db.DBTX, cfg check.Config) check.Checker {
-				return vacuumsettings.New(db.New(conn), cfg)
+			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				if v, ok := cfg[vacuumsettings.Metadata().CheckID]; ok {
+					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+				}
+				return vacuumsettings.New(db.New(conn)), nil
 			},
 		},
 	}

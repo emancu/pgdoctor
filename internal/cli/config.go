@@ -1,15 +1,19 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/emancu/pgdoctor/check"
 )
+
+var linePrefix = regexp.MustCompile(`^line \d+: `)
 
 func loadConfig(path string, checks []check.Package) (check.Config, error) {
 	data, err := os.ReadFile(path)
@@ -22,62 +26,48 @@ func loadConfig(path string, checks []check.Package) (check.Config, error) {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
-	known := map[string]func(key, value string) error{}
+	known := map[string]check.Package{}
 	for _, pkg := range checks {
-		known[pkg.Metadata().CheckID] = pkg.ValidateSetting
+		known[pkg.Metadata().CheckID] = pkg
 	}
 
 	cfg := check.Config{}
 	var problems []string
 	for checkID, node := range raw {
-		validate, ok := known[checkID]
+		pkg, ok := known[checkID]
 		if !ok {
 			problems = append(problems, fmt.Sprintf("unknown check %q", checkID))
 			continue
 		}
-		var settings map[string]yaml.Node
-		if node.Kind != yaml.MappingNode || node.Decode(&settings) != nil {
-			problems = append(problems, fmt.Sprintf("%s: not a mapping", checkID))
+		if pkg.DecodeConfig == nil {
+			if node.Kind != yaml.MappingNode || len(node.Content) > 0 {
+				problems = append(problems, fmt.Sprintf("%s: the check accepts no settings", checkID))
+			}
 			continue
 		}
-		cfg[checkID] = map[string]string{}
-		for key, node := range settings {
-			value, ok := settingValue(node)
-			if !ok {
-				problems = append(problems, fmt.Sprintf("%s.%s: not a scalar value", checkID, key))
-				continue
-			}
-			if validate == nil {
-				problems = append(problems, fmt.Sprintf("%s: unknown key %q", checkID, key))
-				continue
-			}
-			if err := validate(key, value); err != nil {
-				problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
-				continue
-			}
-			cfg[checkID][key] = value
+		settings, err := yaml.Marshal(&node)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
+			continue
 		}
+		value, err := pkg.DecodeConfig(settings)
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			for _, msg := range typeErr.Errors {
+				// Line numbers count from the re-encoded section, not from the file.
+				problems = append(problems, fmt.Sprintf("%s: %s", checkID, linePrefix.ReplaceAllString(msg, "")))
+			}
+			continue
+		}
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", checkID, err))
+			continue
+		}
+		cfg[checkID] = value
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return nil, fmt.Errorf("invalid config %s:\n  %s", path, strings.Join(problems, "\n  "))
 	}
 	return cfg, nil
-}
-
-func settingValue(node yaml.Node) (string, bool) {
-	if node.Kind == yaml.ScalarNode {
-		return node.Value, true
-	}
-	if node.Kind != yaml.SequenceNode {
-		return "", false
-	}
-	items := make([]string, 0, len(node.Content))
-	for _, item := range node.Content {
-		if item.Kind != yaml.ScalarNode {
-			return "", false
-		}
-		items = append(items, item.Value)
-	}
-	return strings.Join(items, ","), true
 }

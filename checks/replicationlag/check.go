@@ -6,8 +6,6 @@ import (
 	_ "embed"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 
 	"github.com/emancu/pgdoctor/check"
 	"github.com/emancu/pgdoctor/db"
@@ -20,9 +18,6 @@ var querySQL string
 var readme string
 
 const (
-	physicalLagWarnKey = "physical_lag_warn_seconds"
-	physicalLagFailKey = "physical_lag_fail_seconds"
-
 	// Logical replication thresholds (CDC/Debezium, selective replication).
 	//
 	// Absolute liveness tier: replay_lag time tracks Debezium's ack cadence, not
@@ -49,16 +44,64 @@ type ReplicationLagQueries interface {
 	ReplicationLag(context.Context) ([]db.ReplicationLagRow, error)
 }
 
-type lagThresholds struct {
-	warn, fail float64 // seconds
+type Config struct {
+	PhysicalLagWarnSeconds   float64                  `yaml:"physical_lag_warn_seconds"`
+	PhysicalLagFailSeconds   float64                  `yaml:"physical_lag_fail_seconds"`
+	PhysicalLagByApplication map[string]LagThresholds `yaml:"physical_lag_by_application"`
 }
 
-var defaultPhysicalLag = lagThresholds{warn: 5, fail: 60}
+// LagThresholds overrides the global pair for one replica. A zero field keeps
+// the global value.
+type LagThresholds struct {
+	WarnSeconds float64 `yaml:"warn_seconds"`
+	FailSeconds float64 `yaml:"fail_seconds"`
+}
+
+func DefaultConfig() Config {
+	return Config{PhysicalLagWarnSeconds: 5, PhysicalLagFailSeconds: 60}
+}
+
+func (c Config) Validate() error {
+	if err := validatePair(c.PhysicalLagWarnSeconds, c.PhysicalLagFailSeconds); err != nil {
+		return err
+	}
+	for name := range c.PhysicalLagByApplication {
+		if err := validatePair(c.physicalLag(name)); err != nil {
+			return fmt.Errorf("physical_lag_by_application.%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validatePair(warn, fail float64) error {
+	if !positive(warn) || !positive(fail) {
+		return fmt.Errorf("thresholds must be positive numbers")
+	}
+	if warn >= fail {
+		return fmt.Errorf("warn %v must be lower than fail %v", warn, fail)
+	}
+	return nil
+}
+
+func positive(n float64) bool {
+	return n > 0 && !math.IsInf(n, 1)
+}
+
+func (c Config) physicalLag(applicationName string) (warn, fail float64) {
+	warn, fail = c.PhysicalLagWarnSeconds, c.PhysicalLagFailSeconds
+	t := c.PhysicalLagByApplication[applicationName]
+	if t.WarnSeconds != 0 {
+		warn = t.WarnSeconds
+	}
+	if t.FailSeconds != 0 {
+		fail = t.FailSeconds
+	}
+	return warn, fail
+}
 
 type checker struct {
-	queries     ReplicationLagQueries
-	physicalLag lagThresholds
-	replicaLag  map[string]lagThresholds
+	queries ReplicationLagQueries
+	cfg     Config
 }
 
 func Metadata() check.Metadata {
@@ -72,59 +115,8 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries ReplicationLagQueries, cfg ...check.Config) check.Checker {
-	c := &checker{
-		queries:     queries,
-		physicalLag: defaultPhysicalLag,
-		replicaLag:  map[string]lagThresholds{},
-	}
-	if len(cfg) > 0 && cfg[0] != nil {
-		if myCfg, ok := cfg[0][Metadata().CheckID]; ok {
-			c.physicalLag = parseLag(myCfg, "", defaultPhysicalLag)
-			for k := range myCfg {
-				name, ok := strings.CutPrefix(k, physicalLagWarnKey+".")
-				if !ok {
-					name, ok = strings.CutPrefix(k, physicalLagFailKey+".")
-				}
-				if ok && name != "" {
-					c.replicaLag[name] = parseLag(myCfg, "."+name, c.physicalLag)
-				}
-			}
-		}
-	}
-	return c
-}
-
-func parseLag(myCfg map[string]string, suffix string, base lagThresholds) lagThresholds {
-	t := base
-	if n, ok := parseSeconds(myCfg[physicalLagWarnKey+suffix]); ok {
-		t.warn = n
-	}
-	if n, ok := parseSeconds(myCfg[physicalLagFailKey+suffix]); ok {
-		t.fail = n
-	}
-	if t.warn >= t.fail {
-		return base
-	}
-	return t
-}
-
-func parseSeconds(v string) (float64, bool) {
-	n, err := strconv.ParseFloat(v, 64)
-	return n, err == nil && n > 0 && !math.IsInf(n, 1)
-}
-
-func ValidateSetting(key, value string) error {
-	switch {
-	case key == physicalLagWarnKey, key == physicalLagFailKey,
-		strings.HasPrefix(key, physicalLagWarnKey+".") && key != physicalLagWarnKey+".",
-		strings.HasPrefix(key, physicalLagFailKey+".") && key != physicalLagFailKey+".":
-		if _, ok := parseSeconds(value); !ok {
-			return fmt.Errorf("%s: %q is not a positive number", key, value)
-		}
-		return nil
-	}
-	return fmt.Errorf("unknown key %q", key)
+func New(queries ReplicationLagQueries, cfg Config) check.Checker {
+	return &checker{queries: queries, cfg: cfg}
 }
 
 func (c *checker) Metadata() check.Metadata {
@@ -176,16 +168,13 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 }
 
 func (c *checker) physicalLagSeverity(row db.ReplicationLagRow) check.Severity {
-	t, ok := c.replicaLag[row.ApplicationName.String]
-	if !ok {
-		t = c.physicalLag
-	}
+	warn, fail := c.cfg.physicalLag(row.ApplicationName.String)
 	// COALESCE in query ensures these are always valid
 	lagSeconds := row.ReplayLagSeconds.Float64
 	switch {
-	case lagSeconds >= t.fail:
+	case lagSeconds >= fail:
 		return check.SeverityFail
-	case lagSeconds >= t.warn:
+	case lagSeconds >= warn:
 		return check.SeverityWarn
 	default:
 		return check.SeverityPass

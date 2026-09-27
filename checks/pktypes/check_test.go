@@ -3,6 +3,7 @@ package pktypes
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/emancu/pgdoctor/check"
@@ -176,7 +177,7 @@ func TestPKTypes(t *testing.T) {
 			t.Parallel()
 
 			queryer := &mockQueryer{rows: tt.data}
-			checker := New(queryer)
+			checker := New(queryer, DefaultConfig())
 
 			report, err := checker.Check(context.Background())
 
@@ -232,7 +233,7 @@ func TestPKTypes_UnreadableSequences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			report, err := New(&mockQueryer{rows: tt.data}).Check(context.Background())
+			report, err := New(&mockQueryer{rows: tt.data}, DefaultConfig()).Check(context.Background())
 
 			require.NoError(t, err)
 			checktest.AssertSeverityInvariant(t, report)
@@ -254,26 +255,19 @@ func TestPKTypes_Config(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		settings map[string]string
+		cfg      Config
 		severity check.Severity
 		rowCount int
 	}{
-		{name: "defaults ignore sequence-health keys", settings: nil, severity: check.SeverityWarn, rowCount: 1},
-		{name: "override", settings: map[string]string{"usage_warn_percent": "30", "usage_fail_percent": "75"}, severity: check.SeverityFail, rowCount: 2},
-		{name: "warn not below fail keeps defaults", settings: map[string]string{"usage_warn_percent": "80", "usage_fail_percent": "70"}, severity: check.SeverityWarn, rowCount: 1},
-		{name: "warn above default fail keeps defaults", settings: map[string]string{"usage_warn_percent": "95"}, severity: check.SeverityWarn, rowCount: 1},
-		{name: "invalid value keeps default", settings: map[string]string{"usage_warn_percent": "abc"}, severity: check.SeverityWarn, rowCount: 1},
+		{name: "defaults", cfg: DefaultConfig(), severity: check.SeverityWarn, rowCount: 1},
+		{name: "override", cfg: Config{UsageWarnPercent: 30, UsageFailPercent: 75}, severity: check.SeverityFail, rowCount: 2},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := check.Config{
-				"pk-types":        tt.settings,
-				"sequence-health": {"usage_warn_percent": "10", "usage_fail_percent": "20"},
-			}
-			report, err := New(&mockQueryer{rows: rows}, cfg).Check(context.Background())
+			report, err := New(&mockQueryer{rows: rows}, tt.cfg).Check(context.Background())
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.severity, report.Severity)
@@ -283,30 +277,32 @@ func TestPKTypes_Config(t *testing.T) {
 	}
 }
 
-func TestValidateSetting(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		key, value string
+		name       string
+		warn, fail float64
 		wantErr    bool
 	}{
-		{"usage_warn_percent", "50", false},
-		{"usage_fail_percent", "100", false},
-		{"usage_warn_percent", "49.5", false},
-		{"usage_warn_percent", "0", true},
-		{"usage_fail_percent", "101", true},
-		{"usage_warn_percent", "-5", true},
-		{"usage_warn_percent", "NaN", true},
-		{"usage_fail_percent", "Inf", true},
-		{"usage_fail_percent", "ninety", true},
-		{"usage_percent", "50", true},
+		{"defaults", 50, 90, false},
+		{"fail at 100", 50, 100, false},
+		{"fractional warn", 49.5, 90, false},
+		{"zero warn", 0, 90, true},
+		{"fail above 100", 50, 101, true},
+		{"negative warn", -5, 90, true},
+		{"NaN warn", math.NaN(), 90, true},
+		{"infinite fail", 50, math.Inf(1), true},
+		{"warn equal to fail", 70, 70, true},
+		{"warn above fail", 80, 70, true},
+		{"warn above default fail", 95, 90, true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := ValidateSetting(tt.key, tt.value)
+			err := Config{UsageWarnPercent: tt.warn, UsageFailPercent: tt.fail}.Validate()
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -321,7 +317,7 @@ func TestPKTypes_QueryError(t *testing.T) {
 
 	expectedErr := fmt.Errorf("database connection error")
 	queryer := &mockQueryer{err: expectedErr}
-	checker := New(queryer)
+	checker := New(queryer, DefaultConfig())
 
 	_, err := checker.Check(context.Background())
 
@@ -333,7 +329,7 @@ func TestPKTypes_Metadata(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{rows: []db.InvalidPrimaryKeyTypesRow{}}
-	checker := New(queryer)
+	checker := New(queryer, DefaultConfig())
 	metadata := checker.Metadata()
 
 	require.Equal(t, "pk-types", metadata.CheckID)
@@ -354,7 +350,7 @@ func TestPKTypes_TableFormatting(t *testing.T) {
 	}
 
 	queryer := &mockQueryer{rows: rows}
-	checker := New(queryer)
+	checker := New(queryer, DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 
@@ -386,7 +382,7 @@ func TestPKTypes_UsageDisplay(t *testing.T) {
 
 	row := makePKRowWithUsage("public.test", "id", "int4", 1_000_000, 1_500_000, 2_147_483_647, 0.57)
 	queryer := &mockQueryer{rows: []db.InvalidPrimaryKeyTypesRow{row}}
-	checker := New(queryer)
+	checker := New(queryer, DefaultConfig())
 
 	report, err := checker.Check(context.Background())
 

@@ -42,7 +42,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries IndexBloatQueries, _ ...check.Config) check.Checker {
+func New(queries IndexBloatQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}

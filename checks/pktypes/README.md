@@ -60,7 +60,7 @@ Tables with int4/int2 primary keys are reported once capacity usage reaches 50% 
 | `usage_warn_percent` | Capacity usage at which a table is reported | `50` |
 | `usage_fail_percent` | Capacity usage at which a table is FAIL | `90` |
 
-Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. If the pair is not in this order, the check uses the defaults. These keys do not change `sequence-health`.
+Each value must be a number greater than 0 and at most 100, and `usage_warn_percent` must be less than `usage_fail_percent`. Other values are an error. These keys do not change `sequence-health`.
 
 ```yaml
 pk-types:

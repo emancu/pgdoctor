@@ -354,24 +354,21 @@ Configuration lives in each service's source code (ORM settings). Consult your O
 |-----|-------------|---------|
 | `long_idle_warn_count` | Number of connections idle over 1 hour above which `long-idle` is a WARN | `100` |
 
-Set it above the idle floor that your pools keep on purpose. In a `--config` file, a value that is not a positive integer is an error.
+Set it above the idle floor that your pools keep on purpose. A value that is not a positive integer is an error.
 
 ```yaml
 connection-health:
   long_idle_warn_count: 300
 ```
 
-As a library, pass the same key in `check.Config`:
+As a library, pass a `connectionhealth.Config` in `check.Config`:
 
 ```go
-cfg := check.Config{
-    "connection-health": {
-        "long_idle_warn_count": "300",
-    },
-}
+cfg := connectionhealth.DefaultConfig()
+cfg.LongIdleWarnCount = 300
 pgdoctor.Run(ctx, conn, pgdoctor.Options{
     Checks: pgdoctor.AllChecks(),
-    Config: cfg,
+    Config: check.Config{"connection-health": cfg},
 })
 ```
 

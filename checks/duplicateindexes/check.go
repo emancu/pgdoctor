@@ -39,7 +39,7 @@ func Metadata() check.Metadata {
 	}
 }
 
-func New(queries DuplicateIndexesQueries, _ ...check.Config) check.Checker {
+func New(queries DuplicateIndexesQueries) check.Checker {
 	return &checker{
 		queries: queries,
 	}
