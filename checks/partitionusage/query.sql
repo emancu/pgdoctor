@@ -114,7 +114,12 @@ WITH candidates AS (
       SELECT extract(EPOCH FROM (now() - i.stats_reset))::bigint
       FROM pg_stat_statements_info AS i
     ) AS stats_age_seconds
-  FROM pg_stat_statements
+    -- How long this entry's counters have been accumulating. stats_since arrives
+    -- with pg_stat_statements 1.11, and a major upgrade leaves the extension at
+    -- its old version, so the column is read through to_jsonb: ->> yields NULL
+    -- when it does not exist, where naming it would fail the query.
+    , extract(EPOCH FROM (now() - (to_jsonb(s) ->> 'stats_since')::timestamptz))::bigint AS stats_since_seconds
+  FROM pg_stat_statements AS s
   WHERE
     dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
     AND toplevel
@@ -139,6 +144,7 @@ SELECT
   , mean_exec_time
   , rows_returned
   , stats_age_seconds
+  , stats_since_seconds
 FROM (
   SELECT
     query_id
@@ -148,6 +154,7 @@ FROM (
     , mean_exec_time
     , rows_returned
     , stats_age_seconds
+    , stats_since_seconds
   FROM candidates
   ORDER BY total_exec_time DESC
   LIMIT 500
@@ -163,6 +170,7 @@ SELECT
   , mean_exec_time
   , rows_returned
   , stats_age_seconds
+  , stats_since_seconds
 FROM (
   SELECT
     query_id
@@ -172,41 +180,10 @@ FROM (
     , mean_exec_time
     , rows_returned
     , stats_age_seconds
+    , stats_since_seconds
   FROM candidates
   ORDER BY calls DESC
   LIMIT 500
 ) AS by_calls
 
 ORDER BY total_exec_time DESC;
-
--- name: HasStatsSince :one
--- stats_since arrives with pg_stat_statements 1.11, not with a server version:
--- a major upgrade leaves the extension at its old version until ALTER
--- EXTENSION ... UPDATE, so the column itself is the test. extversion would
--- need a numeric comparison, since '1.9' > '1.11' as text.
-SELECT EXISTS (
-  SELECT 1
-  FROM pg_catalog.pg_attribute AS a
-  WHERE
-    a.attrelid = to_regclass('pg_stat_statements')
-    AND a.attname = 'stats_since'
-    AND NOT a.attisdropped
-);
-
--- name: StatementStatsWindows :many
--- How long each statement's counters have been accumulating. Before
--- pg_stat_statements 1.11 there is no stats_since, and the only window is the
--- last reset of the whole view, which overstates the window of every statement
--- first seen since. QueryStatsFromStatStatements returns one row per entry
--- without the user, so this takes a queryid's oldest entry, which can only
--- understate a newer entry's daily cost. pg_stat_statements(false) skips the
--- query-text file, which nothing here reads.
-SELECT
-  queryid::bigint AS query_id
-  , extract(EPOCH FROM (now() - MIN(stats_since)))::bigint AS window_seconds
-FROM pg_stat_statements(false)
-WHERE
-  dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
-  AND toplevel
-  AND queryid = ANY(@query_ids::bigint [])
-GROUP BY queryid;

@@ -34,16 +34,6 @@ type mockQueryer struct {
 	statsErr      error
 	extensionErr  error
 	hiddenErr     error
-
-	statsSince      bool // pg_stat_statements 1.11 or later
-	statsSinceErr   error
-	windows         []db.StatementStatsWindowsRow
-	windowsErr      error
-	windowsQueryIDs []int64 // what the check asked StatementStatsWindows for
-}
-
-func (m *mockQueryer) HasStatsSince(context.Context) (bool, error) {
-	return m.statsSince, m.statsSinceErr
 }
 
 func (m *mockQueryer) HiddenQueryTextCount(context.Context) (pgtype.Int8, error) {
@@ -76,14 +66,6 @@ func (m *mockQueryer) QueryStatsFromStatStatements(context.Context) ([]db.QueryS
 		return nil, m.statsErr
 	}
 	return m.queryStats, nil
-}
-
-func (m *mockQueryer) StatementStatsWindows(_ context.Context, queryIDs []int64) ([]db.StatementStatsWindowsRow, error) {
-	m.windowsQueryIDs = queryIDs
-	if m.windowsErr != nil {
-		return nil, m.windowsErr
-	}
-	return m.windows, nil
 }
 
 // Helper to create a PartitionedTablesWithKeysRow.
@@ -1473,12 +1455,12 @@ func makeQueryStatsOverDays(query string, calls int64, totalExecTime float64, da
 	return stats
 }
 
-// windowOverDays is a stats_since window of the given number of days for the
-// statement makeQueryStats creates.
-func windowOverDays(days int64) []db.StatementStatsWindowsRow {
-	return []db.StatementStatsWindowsRow{
-		{QueryID: pgtype.Int8{Int64: 12345, Valid: true}, WindowSeconds: pgtype.Int8{Int64: days * secondsPerDay, Valid: true}},
-	}
+// withStatsSince gives a statement its own stats_since, the given number of
+// seconds ago, as pg_stat_statements 1.11 and later record.
+func withStatsSince(stats db.QueryStatsFromStatStatementsRow, seconds int64) db.QueryStatsFromStatStatementsRow {
+	stats.StatsSinceSeconds = pgtype.Int8{Int64: seconds, Valid: true}
+
+	return stats
 }
 
 func Test_PartitionUsage_DailyTimeDecidesFail(t *testing.T) {
@@ -1515,10 +1497,8 @@ func Test_PartitionUsage_DailyTimeDecidesFail(t *testing.T) {
 					makePartitionedTable("public", "orders", "created_at", 12),
 				},
 				queryStats: []db.QueryStatsFromStatStatementsRow{
-					makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, tt.days),
+					withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, tt.days), tt.days*secondsPerDay),
 				},
-				statsSince: true,
-				windows:    windowOverDays(tt.days),
 			}
 
 			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
@@ -1539,15 +1519,12 @@ func Test_PartitionUsage_PerStatementWindowWithStatsSince(t *testing.T) {
 			makePartitionedTable("public", "orders", "created_at", 12),
 		},
 		queryStats: []db.QueryStatsFromStatStatementsRow{
-			makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 365),
+			withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 365), 2*secondsPerDay),
 		},
-		statsSince: true,
-		windows:    windowOverDays(2),
 	}
 
 	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []int64{12345}, queryer.windowsQueryIDs)
 	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 	require.Contains(t, keyFinding(t, report).Details, "33.3m/day")
 }
@@ -1565,13 +1542,10 @@ func Test_PartitionUsage_ResetWindowWithoutStatsSince(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{
 			makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 365),
 		},
-		// The column is missing, so reading it would fail.
-		windowsErr: fmt.Errorf(`column "stats_since" does not exist`),
 	}
 
 	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
-	require.Nil(t, queryer.windowsQueryIDs)
 	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 	require.Contains(t, keyFinding(t, report).Details, "≥11.0s/day")
 
@@ -1580,28 +1554,23 @@ func Test_PartitionUsage_ResetWindowWithoutStatsSince(t *testing.T) {
 	require.Equal(t, "≥11.0s", joinFinding.Table.Rows[0].Cells[5])
 }
 
-// A statement missing from the windows, such as an entry evicted between the
-// two queries, falls back to the last reset, which makes the table's daily
-// time a lower bound.
+// One statement on the last reset's window makes the table's daily time a
+// lower bound, however exact the others are.
 func Test_PartitionUsage_StatementWithoutWindow(t *testing.T) {
 	t.Parallel()
 
-	withWindow := makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 30)
+	withWindow := withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 30), 30*secondsPerDay)
 	withoutWindow := makeQueryStatsOverDays("SELECT * FROM orders WHERE status = $1", 200, 100000, 30)
-	withoutWindow.QueryID = pgtype.Int8{Int64: 67890, Valid: true}
 
 	queryer := &mockQueryer{
 		tables: []db.PartitionedTablesWithKeysRow{
 			makePartitionedTable("public", "orders", "created_at", 12),
 		},
 		queryStats: []db.QueryStatsFromStatStatementsRow{withWindow, withoutWindow},
-		statsSince: true,
-		windows:    windowOverDays(30),
 	}
 
 	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []int64{12345, 67890}, queryer.windowsQueryIDs)
 	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
 	require.Contains(t, keyFinding(t, report).Details, "≥2.3m/day")
 }
@@ -1616,11 +1585,7 @@ func Test_PartitionUsage_WindowShorterThanADayCountsAsADay(t *testing.T) {
 			makePartitionedTable("public", "orders", "created_at", 12),
 		},
 		queryStats: []db.QueryStatsFromStatStatementsRow{
-			makeQueryStats("SELECT * FROM orders WHERE customer_id = $1", 1500, 60000),
-		},
-		statsSince: true,
-		windows: []db.StatementStatsWindowsRow{
-			{QueryID: pgtype.Int8{Int64: 12345, Valid: true}, WindowSeconds: pgtype.Int8{Int64: 600, Valid: true}},
+			withStatsSince(makeQueryStats("SELECT * FROM orders WHERE customer_id = $1", 1500, 60000), 600),
 		},
 	}
 
@@ -1628,35 +1593,6 @@ func Test_PartitionUsage_WindowShorterThanADayCountsAsADay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, check.SeverityWarn, keyFinding(t, report).Severity)
 	require.Contains(t, keyFinding(t, report).Details, "1.0m/day")
-}
-
-func Test_PartitionUsage_WindowsQueryErrors(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		queryer *mockQueryer
-	}{
-		{name: "stats_since probe", queryer: &mockQueryer{statsSinceErr: fmt.Errorf("database connection error")}},
-		{name: "windows", queryer: &mockQueryer{statsSince: true, windowsErr: fmt.Errorf("database connection error")}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			tt.queryer.tables = []db.PartitionedTablesWithKeysRow{
-				makePartitionedTable("public", "orders", "created_at", 12),
-			}
-			tt.queryer.queryStats = []db.QueryStatsFromStatStatementsRow{
-				makeQueryStats("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000),
-			}
-
-			_, err := partitionusage.New(tt.queryer, partitionusage.DefaultConfig()).Check(context.Background())
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "windows")
-		})
-	}
 }
 
 func Test_PartitionUsage_JoinDailyTimeDecidesFail(t *testing.T) {
@@ -1667,10 +1603,8 @@ func Test_PartitionUsage_JoinDailyTimeDecidesFail(t *testing.T) {
 			makePartitionedTable("public", "orders", "created_at", 12),
 		},
 		queryStats: []db.QueryStatsFromStatStatementsRow{
-			makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30),
+			withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30), 30*secondsPerDay),
 		},
-		statsSince: true,
-		windows:    windowOverDays(30),
 	}
 
 	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
@@ -1706,10 +1640,8 @@ func Test_PartitionUsage_Config(t *testing.T) {
 					makePartitionedTable("public", "orders", "created_at", 12),
 				},
 				queryStats: []db.QueryStatsFromStatStatementsRow{
-					makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30),
+					withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30), 30*secondsPerDay),
 				},
-				statsSince: true,
-				windows:    windowOverDays(30),
 			}
 
 			report, err := partitionusage.New(queryer, tt.cfg).Check(context.Background())
