@@ -84,10 +84,7 @@ const (
 	totalExecTimeWarnMs = float64(300_000)  // 5 minutes
 	totalExecTimeFailMs = float64(3600_000) // 1 hour
 
-	// minRateWindowSeconds keeps a statement seen for minutes from turning a
-	// short burst into a daily rate.
-	minRateWindowSeconds = secondsPerDay
-	secondsPerDay        = int64(24 * 60 * 60)
+	secondsPerDay = int64(24 * 60 * 60)
 
 	// Sequential scan thresholds.
 	minSeqScansWarn   = int64(1000)
@@ -184,7 +181,8 @@ func (c *checker) Check(ctx context.Context) (*check.Report, error) {
 // when the window is the last reset of the whole view, because the entry has
 // no stats_since before pg_stat_statements 1.11: that overstates the window of
 // a statement first seen since, or of an entry evicted or reset on its own
-// since.
+// since. A window shorter than a day counts as a day, so a statement seen for
+// minutes does not turn a short burst into a daily rate.
 func perDayMs(q db.QueryStatsFromStatStatementsRow) (ms float64, known, lowerBound bool) {
 	window := q.StatsSinceSeconds
 	if !window.Valid {
@@ -195,7 +193,7 @@ func perDayMs(q db.QueryStatsFromStatStatementsRow) (ms float64, known, lowerBou
 		return 0, false, false
 	}
 
-	return q.TotalExecTime.Float64 * float64(secondsPerDay) / float64(max(window.Int64, minRateWindowSeconds)), true, lowerBound
+	return q.TotalExecTime.Float64 * float64(secondsPerDay) / float64(max(window.Int64, secondsPerDay)), true, lowerBound
 }
 
 // dailyTime is a table's execution time per day on unprunable statements. It
