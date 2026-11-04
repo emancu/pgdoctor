@@ -5,6 +5,7 @@ Detects queries on partitioned tables that don't use partition keys in their WHE
 ## Requirements
 
 - **pg_stat_statements >= 1.9** (PostgreSQL 14+) for query pattern analysis; older versions lack `pg_stat_statements_info` and the `toplevel` column
+- **pg_stat_statements >= 1.11** (PostgreSQL 17+) for the daily execution time to decide the critical tier; see [partition-key-unused](#partition-key-unused)
 - PostgreSQL 15+
 
 Without `pg_stat_statements`, query pattern analysis cannot run. The sequential scan analysis still runs, as it uses `pg_stat_user_tables` statistics.
@@ -46,7 +47,13 @@ SELECT query FROM pg_stat_statements WHERE queryid = <Query ID>;
 
 **Thresholds** apply to a table's whole unprunable workload, not to individual statements, and every row of a table carries that table's severity:
 - Warning: >100 calls without partition key, OR total execution time >5 minutes
-- Critical: >1000 calls without partition key, OR total execution time >1 hour
+- Critical: >1000 calls without partition key, OR total execution time >1 hour, AND at least 5 minutes of execution time a day (see [Configuration](#configuration))
+
+The call and total-time counts are cumulative, so on their own they keep a table critical for statements that cost seconds a day. The daily time is each statement's total divided by how long its counters have been accumulating, summed per table and shown after the table's totals. Any window shorter than a day counts as a day, so a burst from a statement seen for minutes is not read as a daily rate.
+
+With pg_stat_statements 1.11 or later, the window is the statement's own `stats_since`. A major upgrade leaves the extension at its old version, so an upgraded server needs `ALTER EXTENSION pg_stat_statements UPDATE` to get it. Before 1.11, the only window is the last reset of the whole view, which is too long for a statement first seen since then, or an entry evicted or reset on its own since. The daily time is then only a lower bound, shown with `≥`, and the cumulative thresholds decide alone.
+
+The daily time is an average over the window, so a statement that stops running keeps its table critical until the average falls below the limit. With 2 hours of total time, that is 24 days at the default 5 minutes a day. A `pg_stat_statements` reset clears it sooner.
 
 ### high-seq-scan-ratio
 
@@ -66,7 +73,7 @@ Identifies JOINs on partitioned tables that don't include the partition key in t
 
 **Thresholds:**
 - Warning: >100 calls with JOIN missing partition key, OR total execution time >5 minutes
-- Critical: >1000 calls with JOIN missing partition key, OR total execution time >1 hour
+- Critical: >1000 calls with JOIN missing partition key, OR total execution time >1 hour, AND the same daily execution time as `partition-key-unused`, worked out the same way and shown in the Time/Day column
 
 **Example:**
 ```sql
@@ -81,6 +88,29 @@ JOIN orders o ON o.customer_id = c.id;
 SELECT * FROM customers c
 JOIN orders o ON o.customer_id = c.id
 WHERE o.created_at > '2024-01-01';
+```
+
+## Configuration
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `exec_time_fail_minutes_per_day` | Execution time a day, in minutes, that a table's unprunable statements need before `partition-key-unused` or `join-missing-partition-key` can FAIL it | `5` |
+
+A negative or infinite value is an error. `0` turns the daily rule off, so the call and total-time thresholds decide alone.
+
+```yaml
+partition-usage:
+  exec_time_fail_minutes_per_day: 15
+```
+
+As a library, pass a `partitionusage.Config` in `check.Config`:
+
+```go
+cfg := partitionusage.Config{ExecTimeFailMinutesPerDay: 15}
+pgdoctor.Run(ctx, conn, pgdoctor.Options{
+    Checks: pgdoctor.AllChecks(),
+    Config: check.Config{"partition-usage": cfg},
+})
 ```
 
 ## Limitations

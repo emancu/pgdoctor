@@ -176,10 +176,26 @@ func AllChecks() []check.Package {
 		{
 			Metadata: partitionusage.Metadata,
 			New: func(conn db.DBTX, cfg check.Config) (check.Checker, error) {
+				c := partitionusage.DefaultConfig()
 				if v, ok := cfg[partitionusage.Metadata().CheckID]; ok {
-					return nil, fmt.Errorf("invalid config: got %T, the check accepts no settings", v)
+					if c, ok = v.(partitionusage.Config); !ok {
+						return nil, fmt.Errorf("invalid config: got %T, want partitionusage.Config", v)
+					}
 				}
-				return partitionusage.New(db.New(conn)), nil
+				if err := c.Validate(); err != nil {
+					return nil, fmt.Errorf("invalid config: %w", err)
+				}
+				return partitionusage.New(db.New(conn), c), nil
+			},
+			DecodeConfig: func(data []byte) (any, error) {
+				c := partitionusage.DefaultConfig()
+				if err := decodeConfig(data, &c); err != nil {
+					return nil, err
+				}
+				if err := c.Validate(); err != nil {
+					return nil, err
+				}
+				return c, nil
 			},
 		},
 		{

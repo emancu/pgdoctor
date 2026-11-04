@@ -114,7 +114,12 @@ WITH candidates AS (
       SELECT extract(EPOCH FROM (now() - i.stats_reset))::bigint
       FROM pg_stat_statements_info AS i
     ) AS stats_age_seconds
-  FROM pg_stat_statements
+    -- How long this entry's counters have been accumulating. stats_since arrives
+    -- with pg_stat_statements 1.11, and a major upgrade leaves the extension at
+    -- its old version, so the column is read through to_jsonb: ->> yields NULL
+    -- when it does not exist, where naming it would fail the query.
+    , extract(EPOCH FROM (now() - (to_jsonb(s) ->> 'stats_since')::timestamptz))::bigint AS stats_since_seconds
+  FROM pg_stat_statements AS s
   WHERE
     dbid = (SELECT d.oid FROM pg_database AS d WHERE d.datname = current_database())
     AND toplevel
@@ -139,6 +144,7 @@ SELECT
   , mean_exec_time
   , rows_returned
   , stats_age_seconds
+  , stats_since_seconds
 FROM (
   SELECT
     query_id
@@ -148,6 +154,7 @@ FROM (
     , mean_exec_time
     , rows_returned
     , stats_age_seconds
+    , stats_since_seconds
   FROM candidates
   ORDER BY total_exec_time DESC
   LIMIT 500
@@ -163,6 +170,7 @@ SELECT
   , mean_exec_time
   , rows_returned
   , stats_age_seconds
+  , stats_since_seconds
 FROM (
   SELECT
     query_id
@@ -172,6 +180,7 @@ FROM (
     , mean_exec_time
     , rows_returned
     , stats_age_seconds
+    , stats_since_seconds
   FROM candidates
   ORDER BY calls DESC
   LIMIT 500

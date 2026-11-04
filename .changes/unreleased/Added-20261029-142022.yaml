@@ -1,0 +1,6 @@
+kind: Added
+body: '`exec_time_fail_minutes_per_day` sets the daily execution time at which `partition-key-unused` and `join-missing-partition-key` can FAIL a table; `0` turns the daily rule off'
+time: 2026-10-29T14:20:22.913141+01:00
+custom:
+    Component: partition-usage
+    PR: "209"

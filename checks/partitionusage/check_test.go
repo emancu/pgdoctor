@@ -3,6 +3,7 @@ package partitionusage_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -151,7 +152,7 @@ func Test_PartitionUsage_NoPartitionedTables(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -169,7 +170,7 @@ func Test_PartitionUsage_NoQueryStats(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -190,7 +191,7 @@ func Test_PartitionUsage_AllQueriesUsePartitionKey(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -217,7 +218,7 @@ func Test_PartitionUsage_QuotedPartitionKeyRecognized(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -241,7 +242,7 @@ func Test_PartitionUsage_PartitionLeafQueryIgnored(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -298,7 +299,7 @@ func Test_PartitionUsage_TableMatchingBoundaries(t *testing.T) {
 				},
 			}
 
-			checker := partitionusage.New(queryer)
+			checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
@@ -410,7 +411,7 @@ func Test_PartitionUsage_StrategyAwarePruning(t *testing.T) {
 				},
 			}
 
-			report, err := partitionusage.New(queryer).Check(context.Background())
+			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 
 			if tc.shouldBeOK {
@@ -449,7 +450,7 @@ func Test_PartitionUsage_UpdateWithoutFrom(t *testing.T) {
 				},
 			}
 
-			report, err := partitionusage.New(queryer).Check(context.Background())
+			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 
 			if tc.shouldBeOK {
@@ -475,7 +476,7 @@ func Test_PartitionUsage_TargetTableInSubquery_NotFlagged(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
@@ -509,7 +510,7 @@ func Test_PartitionUsage_MixedQuotingSchemaScoping(t *testing.T) {
 				},
 			}
 
-			report, err := partitionusage.New(queryer).Check(context.Background())
+			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 
 			if tc.shouldBeOK {
@@ -539,7 +540,7 @@ func Test_PartitionUsage_KeyConstrainedInJoinCondition_NotFlagged(t *testing.T) 
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
@@ -563,7 +564,7 @@ func Test_PartitionUsage_KeyConstrainedOnlyInSubquery_StillFlagged(t *testing.T)
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
@@ -582,7 +583,7 @@ func Test_PartitionUsage_CrossSchemaQueryNotAttributed(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, check.SeverityPass, keyFinding(t, report).Severity)
@@ -600,7 +601,7 @@ func Test_PartitionUsage_OwnSchemaQualifiedQueryAttributed(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
@@ -621,7 +622,7 @@ func Test_PartitionUsage_HiddenQueryText_Warns(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	var restricted *check.Finding
@@ -649,7 +650,7 @@ func Test_PartitionUsage_NoHiddenQueryText_NoFinding(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	for _, result := range report.Results {
@@ -670,7 +671,7 @@ func Test_PartitionUsage_QueryMissingPartitionKey_Warning(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -691,7 +692,7 @@ func Test_PartitionUsage_QueryMissingPartitionKey_Fail(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -711,7 +712,7 @@ func Test_PartitionUsage_QueryBelowThreshold_Ignored(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -731,7 +732,7 @@ func Test_PartitionUsage_QueryNotReferencingTable_Ignored(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -751,7 +752,7 @@ func Test_PartitionUsage_ExpressionBasedKey_Skipped(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -777,7 +778,7 @@ func Test_PartitionUsage_MultipleTables(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -792,7 +793,7 @@ func Test_PartitionUsage_TablesQueryError(t *testing.T) {
 		tablesErr: fmt.Errorf("database connection error"),
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	_, err := checker.Check(context.Background())
 
 	require.Error(t, err)
@@ -810,7 +811,7 @@ func Test_PartitionUsage_ExtensionNotInstalled(t *testing.T) {
 		hasExtension: &hasExtFalse,
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 
 	require.NoError(t, err)
@@ -841,7 +842,7 @@ func Test_PartitionUsage_ProblemQueriesListed(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	examples := keyFinding(t, report)
@@ -876,7 +877,7 @@ func Test_PartitionUsage_NoProblemQueries_NoTable(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	finding := keyFinding(t, report)
@@ -903,7 +904,7 @@ func Test_PartitionUsage_ExampleQueryTextIsClipped(t *testing.T) {
 		},
 	}
 
-	report, err := partitionusage.New(queryer).Check(context.Background())
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 	require.NoError(t, err)
 
 	cell := keyFinding(t, report).Table.Rows[0].Cells[4]
@@ -917,7 +918,7 @@ func Test_PartitionUsage_Metadata(t *testing.T) {
 	t.Parallel()
 
 	queryer := &mockQueryer{}
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	metadata := checker.Metadata()
 
 	require.Equal(t, "partition-usage", metadata.CheckID)
@@ -950,7 +951,7 @@ func Test_PartitionUsage_TableOutput(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1009,7 +1010,7 @@ func Test_PartitionUsage_StatsWindowFromServerAge(t *testing.T) {
 				queryStats: []db.QueryStatsFromStatStatementsRow{stats},
 			}
 
-			report, err := partitionusage.New(queryer).Check(context.Background())
+			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
 			require.NoError(t, err)
 			require.Contains(t, keyFinding(t, report).Details, tt.want)
 		})
@@ -1155,7 +1156,7 @@ func Test_PartitionUsage_PartitionKeyVariations(t *testing.T) {
 				},
 			}
 
-			checker := partitionusage.New(queryer)
+			checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 			report, err := checker.Check(context.Background())
 			require.NoError(t, err)
 
@@ -1180,7 +1181,7 @@ func Test_PartitionUsage_HighSeqScanRatio_Warning(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1207,7 +1208,7 @@ func Test_PartitionUsage_HighSeqScanRatio_Fail(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1233,7 +1234,7 @@ func Test_PartitionUsage_LowSeqScans_ReportsPass(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1251,7 +1252,7 @@ func Test_PartitionUsage_HealthySeqIdxRatio_ReportsPass(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1269,7 +1270,7 @@ func Test_PartitionUsage_ZeroIdxScans_Fail(t *testing.T) {
 		queryStats: []db.QueryStatsFromStatStatementsRow{},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1300,7 +1301,7 @@ func Test_PartitionUsage_JoinMissingPartitionKey_Warning(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1329,7 +1330,7 @@ func Test_PartitionUsage_JoinWithPartitionKey_ReportsPass(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1349,7 +1350,7 @@ func Test_PartitionUsage_NonJoinQuery_JoinSubcheckPasses(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1370,7 +1371,7 @@ func Test_PartitionUsage_JoinOrderByPartitionKey_StillFlagged(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1399,7 +1400,7 @@ func Test_PartitionUsage_JoinKeySubstring_StillFlagged(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1427,7 +1428,7 @@ func Test_PartitionUsage_JoinMissingPartitionKey_Fail(t *testing.T) {
 		},
 	}
 
-	checker := partitionusage.New(queryer)
+	checker := partitionusage.New(queryer, partitionusage.DefaultConfig())
 	report, err := checker.Check(context.Background())
 	require.NoError(t, err)
 
@@ -1441,6 +1442,244 @@ func Test_PartitionUsage_JoinMissingPartitionKey_Fail(t *testing.T) {
 
 	require.NotNil(t, joinFinding)
 	require.Equal(t, check.SeverityFail, joinFinding.Severity)
+}
+
+const secondsPerDay = int64(24 * 60 * 60)
+
+// makeQueryStatsOverDays creates statement stats whose view was last reset the
+// given number of days ago.
+func makeQueryStatsOverDays(query string, calls int64, totalExecTime float64, days int64) db.QueryStatsFromStatStatementsRow {
+	stats := makeQueryStats(query, calls, totalExecTime)
+	stats.StatsAgeSeconds = pgtype.Int8{Int64: days * secondsPerDay, Valid: true}
+
+	return stats
+}
+
+// withStatsSince gives a statement its own stats_since, the given number of
+// seconds ago, as pg_stat_statements 1.11 and later record.
+func withStatsSince(stats db.QueryStatsFromStatStatementsRow, seconds int64) db.QueryStatsFromStatStatementsRow {
+	stats.StatsSinceSeconds = pgtype.Int8{Int64: seconds, Valid: true}
+
+	return stats
+}
+
+func Test_PartitionUsage_DailyTimeDecidesFail(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		days    int64
+		want    check.Severity
+		details string
+	}{
+		{
+			// 5,000 calls cross the cumulative threshold, but 4,000s over 30
+			// days is 2.2 minutes a day.
+			name:    "below five minutes a day warns",
+			days:    30,
+			want:    check.SeverityWarn,
+			details: "1.1h, 2.2m/day",
+		},
+		{
+			name:    "five minutes a day or more fails",
+			days:    1,
+			want:    check.SeverityFail,
+			details: "1.1h, 1.1h/day",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable("public", "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, tt.days), tt.days*secondsPerDay),
+				},
+			}
+
+			report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tt.want, keyFinding(t, report).Severity)
+			require.Contains(t, keyFinding(t, report).Details, tt.details)
+		})
+	}
+}
+
+// With stats_since each statement has its own window: a statement first seen
+// two days ago has two days of counters, however long ago the view was reset.
+func Test_PartitionUsage_PerStatementWindowWithStatsSince(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 365), 2*secondsPerDay),
+		},
+	}
+
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "33.3m/day")
+}
+
+// Without stats_since the window is the last reset of the whole view, so the
+// daily time is only a lower bound: it is shown, but cannot turn a FAIL into a
+// WARN.
+func Test_PartitionUsage_ResetWindowWithoutStatsSince(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 365),
+		},
+	}
+
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "≥11.0s/day")
+
+	joinFinding := findingByID(t, report, findingIDJoinMissingPartKey)
+	require.Equal(t, check.SeverityFail, joinFinding.Severity)
+	require.Equal(t, "≥11.0s", joinFinding.Table.Rows[0].Cells[5])
+}
+
+// One statement on the last reset's window makes the table's daily time a
+// lower bound, however exact the others are.
+func Test_PartitionUsage_StatementWithoutWindow(t *testing.T) {
+	t.Parallel()
+
+	withWindow := withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders WHERE customer_id = $1", 5000, 4000000, 30), 30*secondsPerDay)
+	withoutWindow := makeQueryStatsOverDays("SELECT * FROM orders WHERE status = $1", 200, 100000, 30)
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{withWindow, withoutWindow},
+	}
+
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, check.SeverityFail, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "≥2.3m/day")
+}
+
+func Test_PartitionUsage_WindowShorterThanADayCountsAsADay(t *testing.T) {
+	t.Parallel()
+
+	// 60s in the ten minutes since the statement was first seen would be 2.4
+	// hours a day.
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			withStatsSince(makeQueryStats("SELECT * FROM orders WHERE customer_id = $1", 1500, 60000), 600),
+		},
+	}
+
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, check.SeverityWarn, keyFinding(t, report).Severity)
+	require.Contains(t, keyFinding(t, report).Details, "1.0m/day")
+}
+
+func Test_PartitionUsage_JoinDailyTimeDecidesFail(t *testing.T) {
+	t.Parallel()
+
+	queryer := &mockQueryer{
+		tables: []db.PartitionedTablesWithKeysRow{
+			makePartitionedTable("public", "orders", "created_at", 12),
+		},
+		queryStats: []db.QueryStatsFromStatStatementsRow{
+			withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30), 30*secondsPerDay),
+		},
+	}
+
+	report, err := partitionusage.New(queryer, partitionusage.DefaultConfig()).Check(context.Background())
+	require.NoError(t, err)
+
+	joinFinding := findingByID(t, report, findingIDJoinMissingPartKey)
+	require.Equal(t, check.SeverityWarn, joinFinding.Severity)
+	require.Equal(t, "Time/Day", joinFinding.Table.Headers[5])
+	require.Equal(t, "2.2m", joinFinding.Table.Rows[0].Cells[5])
+}
+
+func Test_PartitionUsage_Config(t *testing.T) {
+	t.Parallel()
+
+	// 5,000 calls and 4,000s over 30 days cross the cumulative thresholds at
+	// 2.2 minutes a day.
+	tests := []struct {
+		name string
+		cfg  partitionusage.Config
+		want check.Severity
+	}{
+		{name: "defaults", cfg: partitionusage.DefaultConfig(), want: check.SeverityWarn},
+		{name: "lower daily time fails", cfg: partitionusage.Config{ExecTimeFailMinutesPerDay: 2}, want: check.SeverityFail},
+		{name: "zero leaves the cumulative thresholds alone", cfg: partitionusage.Config{}, want: check.SeverityFail},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			queryer := &mockQueryer{
+				tables: []db.PartitionedTablesWithKeysRow{
+					makePartitionedTable("public", "orders", "created_at", 12),
+				},
+				queryStats: []db.QueryStatsFromStatStatementsRow{
+					withStatsSince(makeQueryStatsOverDays("SELECT * FROM orders o JOIN order_items oi ON oi.order_id = o.id", 5000, 4000000, 30), 30*secondsPerDay),
+				},
+			}
+
+			report, err := partitionusage.New(queryer, tt.cfg).Check(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tt.want, keyFinding(t, report).Severity)
+			require.Equal(t, tt.want, findingByID(t, report, findingIDJoinMissingPartKey).Severity)
+		})
+	}
+}
+
+func Test_PartitionUsage_ConfigValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		minutes float64
+		wantErr bool
+	}{
+		{name: "defaults", minutes: 5},
+		{name: "zero", minutes: 0},
+		{name: "fractional", minutes: 2.5},
+		{name: "negative", minutes: -1, wantErr: true},
+		{name: "NaN", minutes: math.NaN(), wantErr: true},
+		{name: "infinite", minutes: math.Inf(1), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := partitionusage.Config{ExecTimeFailMinutesPerDay: tt.minutes}.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 // Without query statistics there is nothing to measure coverage against.
