@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-05
+
+### Breaking changes
+
+- **partition-usage**: a table fails only when its unprunable statements also take `exec_time_fail_minutes_per_day` (default 5 minutes) of execution time a day, worked out per statement from `stats_since` with pg_stat_statements 1.11 or later; below that it warns. Before 1.11 the daily time is only a lower bound, shown with `≥`, and the call and total-time thresholds decide alone as before. The daily time follows the totals of each table in `partition-key-unused` and fills a new Time/Day column in `join-missing-partition-key`. `partitionusage.New` takes a `partitionusage.Config` ([#209](https://github.com/emancu/pgdoctor/pull/209)).
+
+### Added
+
+- **partition-usage**: `exec_time_fail_minutes_per_day` sets the daily execution time at which `partition-key-unused` and `join-missing-partition-key` can FAIL a table; `0` turns the daily rule off ([#209](https://github.com/emancu/pgdoctor/pull/209)).
+
 ## [0.7.0] - 2026-09-27
 
 ### Added
